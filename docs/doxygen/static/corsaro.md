@@ -1,6 +1,8 @@
 Overview {#index}
 ========
 
+@note This is the internal CAIDA version of the Corsaro documentation. It may
+contain features and plugins that are not released.
 @note Both Corsaro and this documentation are still under active development and
 features will likely change between versions.  
 @note Please contact corsaro-info@caida.org with any questions and/or suggestions.

@@ -35,7 +35,7 @@ my $type = $ARGV[0];
 my $location = $ARGV[1];
 
 my $caida_host = "cider.caida.org";
-my $caida_dir = "/home/alistair/private_html/corsaro";
+my $caida_dir = "/home/alistair/private_html/corsaro-caida";
 
 print STDERR "ensuring docs are built...\n";
 my $target;
