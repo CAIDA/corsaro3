@@ -179,6 +179,9 @@ typedef enum corsaro_plugin_id
   /** libipmeta lookup plugin */
   CORSARO_PLUGIN_ID_IPMETA           = 3,
 
+  /** P0F Passive OS Fingerprint plugin */
+  CORSARO_PLUGIN_ID_P0F              = 5,
+
   /** FilterGeo plugin */
   CORSARO_PLUGIN_ID_FILTERGEO        = 6,
 
@@ -191,11 +194,17 @@ typedef enum corsaro_plugin_id
   /** RS DoS plugin */
   CORSARO_PLUGIN_ID_DOS              = 30,
 
+  /** Confickerscan plugin */
+  CORSARO_PLUGIN_ID_CONFICKERSCAN    = 40,
+
   /** Smee plugin */
   CORSARO_PLUGIN_ID_SMEE             = 80,
 
+  /** Reporting plugin */
+  CORSARO_PLUGIN_ID_REPORT           = 90,
+
   /** Maximum plugin ID assigned */
-  CORSARO_PLUGIN_ID_MAX              = CORSARO_PLUGIN_ID_SMEE
+  CORSARO_PLUGIN_ID_MAX              = CORSARO_PLUGIN_ID_REPORT
 } corsaro_plugin_id_t;
 
 /** An corsaro packet processing plugin */

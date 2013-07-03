@@ -62,6 +62,14 @@
 #include "corsaro_ipmeta.h"
 #endif
 
+#ifdef WITH_PLUGIN_P0F
+#include "corsaro_p0f.h"
+#endif
+
+#ifdef WITH_PLUGIN_REPORT
+#include "corsaro_report.h"
+#endif
+
 #ifdef WITH_PLUGIN_FILTERGEO
 #include "corsaro_filtergeo.h"
 #endif

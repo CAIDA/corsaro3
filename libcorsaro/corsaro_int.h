@@ -194,6 +194,7 @@ struct corsaro_plugin_data
  * Currently, this is used to filter packets based on criteria determined
  * by an earlier plugin
  */
+#define CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN 32
 struct corsaro_packet_state
 {
   /** Features of the packet that have been identified by earlier plugins */
@@ -209,6 +210,21 @@ struct corsaro_packet_state
   /** Record that corresponds to the default ipmeta provider */
   ipmeta_record_t *ipmeta_record_default;
 #endif
+
+  /* p0f plugin attributes */
+#ifdef WITH_PLUGIN_P0F
+  /** The Operating System of the source IP as identified by p0f
+   * OS class ID (-1 = not found)       
+   */
+  int32_t os_class_id;  
+  /** The Operating System of the source IP as identified by p0f
+   * OS name ID (-1 = not found)        
+   */
+  int32_t os_name_id;
+  /** First chars of OS flavor           */
+  char os_flavor [CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN];
+#endif
+
 };
 
 /** The possible packet state flags */
@@ -219,6 +235,9 @@ enum
 
     /** Plugins which write output should ignore this packet */
     CORSARO_PACKET_STATE_IGNORE              = 0x02,
+
+    /** Indicates the P0F plugin has run */
+    CORSARO_PACKET_STATE_FLAG_P0F            = 0x08,
   };
 
 /** A lightweight wrapper around a libtrace packet */

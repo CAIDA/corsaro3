@@ -30,6 +30,8 @@ AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
 	-I$(top_srcdir)/common/libanon \
 	-I$(top_srcdir)/libcorsaro
 
+# -I$(top_srcdir)/libcorsaro/plugins/libsmee
+
 noinst_LTLIBRARIES = libcorsaroplugins.la
 
 include_HEADERS = 
@@ -48,13 +50,24 @@ PLUGIN_SRC+=corsaro_dos.c corsaro_dos.h
 include_HEADERS+=corsaro_dos.h
 endif
 if WITH_PLUGIN_SMEE
+#SUBDIRS += libsmee
 PLUGIN_SRC+=corsaro_smee.c corsaro_smee.h
+#PLUGIN_LIBS += $(top_builddir)/libcorsaro/plugins/libsmee/libsmee.la
 endif
 if WITH_PLUGIN_ANON
 PLUGIN_SRC+=corsaro_anon.c corsaro_anon.h
 endif
 if WITH_PLUGIN_IPMETA
 PLUGIN_SRC+=corsaro_ipmeta.c corsaro_ipmeta.h
+endif
+if WITH_PLUGIN_CONFICKERSCAN
+PLUGIN_SRC+=corsaro_confickerscan.c corsaro_confickerscan.h 
+endif
+if WITH_PLUGIN_P0F
+PLUGIN_SRC+=corsaro_p0f.c corsaro_p0f.h 
+endif
+if WITH_PLUGIN_REPORT
+PLUGIN_SRC+=corsaro_report.c corsaro_report.h 
 endif
 if WITH_PLUGIN_FILTERGEO
 PLUGIN_SRC+=corsaro_filtergeo.c corsaro_filtergeo.h 

@@ -2,7 +2,7 @@
 # corsaro
 # 
 # Alistair King, CAIDA, UC San Diego
-# corsaro-info@caida.org
+# alistair@caida.org
 # 
 # Copyright (C) 2012 The Regents of the University of California.
 # 
@@ -22,42 +22,13 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-SUBDIRS = libpatricia libcsv
+AM_CPPFLAGS = 
 
-AM_CPPFLAGS = -I$(top_srcdir) \
-	-I$(top_srcdir)/common/libpatricia \
-	-I$(top_srcdir)/common/libcsv
+noinst_LTLIBRARIES = libp0f.la
 
-noinst_LTLIBRARIES = libcorsarocommon.la
-
-CONDITIONAL_LIBS=
-
-if WITH_LIBP0F
-SUBDIRS += libp0f
-CONDITIONAL_LIBS += $(top_builddir)/common/libp0f/libp0f.la
-AM_CPPFLAGS += -I$(top_srcdir)/common/libp0f
-endif
-
-if WITH_LIBANON
-SUBDIRS += libanon
-CONDITIONAL_LIBS += $(top_builddir)/common/libanon/libanon.la
-AM_CPPFLAGS += -I$(top_srcdir)/common/libanon
-endif
-
-libcorsarocommon_la_SOURCES = \
-	utils.c \
-	utils.h \
-	ip_utils.c \
-	ip_utils.h \
-	parse_cmd.c \
-	parse_cmd.h \
-	khash.h \
-	ksort.h
-
-libcorsarocommon_la_LIBADD = $(top_builddir)/common/libpatricia/libpatricia.la \
-			$(top_builddir)/common/libcsv/libcsv.la \
-			$(CONDITIONAL_LIBS)
-
+libp0f_la_SOURCES = \
+	readfp.h readfp.c fp_tcp.h fp_tcp.c types.h debug.h alloc-inl.h p0f_config.h process.c process.h fp_http.h fp_http.c fp_mtu.h fp_mtu.c hash.h tcp.h p0f.h p0f.c api.h api.c languages.h
+ 
 ACLOCAL_AMFLAGS = -I m4
 
 CLEANFILES = *~

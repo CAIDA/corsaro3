@@ -206,6 +206,9 @@ AC_MSG_RESULT([$with_slash_eight])
 ED_WITH_PLUGIN([corsaro_anon],[anon],[ANON],[no])
 ED_WITH_PLUGIN([corsaro_ipmeta],[ipmeta],[IPMETA],[no])
 
+## EXPERIMENTAL PLUGINS - DO NOT DISTRIBUTE
+ED_WITH_PLUGIN([corsaro_p0f],[p0f],[P0F],[no])
+
 # filter plugins. these do not write output, they indicate which packets 
 # should [not] be written out
 ED_WITH_PLUGIN([corsaro_filtergeo],[filtergeo],[FILTERGEO],[no])
@@ -221,6 +224,12 @@ ED_WITH_PLUGIN([corsaro_flowtuple],[flowtuple],[SIXT],[yes])
 # optional plugins
 ED_WITH_PLUGIN([corsaro_dos],[dos],[DOS],[no])
 ED_WITH_PLUGIN([corsaro_smee],[smee],[SMEE],[no])
+
+# plugins contributed by karyn
+ED_WITH_PLUGIN([corsaro_confickerscan],[confickerscan],[CONFICKERSCAN],[no])
+
+# reporting plugin
+ED_WITH_PLUGIN([corsaro_report],[report],[REPORT],[no])
 
 # this MUST go after all the ED_WITH_PLUGIN macro calls
 AC_DEFINE_UNQUOTED([ED_PLUGIN_INIT_ALL_ENABLED], $ED_PLUGIN_INIT_ALL_ENABLED,
@@ -259,8 +268,23 @@ fi
 # unfortunately we have to generate all of these Makefiles because of make dist
 # they will not however be compiled into the binary unless they are used
 
+# libp0f is only used by p0f (of course)
+AM_CONDITIONAL([WITH_LIBP0F], [test x$with_plugin_p0f == xyes])
+#if test "x$with_plugin_p0f" == xyes; then
+#	  AC_CONFIG_FILES([common/libp0f/Makefile])
+#fi
+
 # libanon is only used by anon (for now)
 AM_CONDITIONAL([WITH_LIBANON], [test x$with_plugin_anon == xyes])
+#if test "x$with_plugin_anon" == xyes; then
+#	  AC_CONFIG_FILES([common/libanon/Makefile])
+#fi
+
+# the confickerscan plugin needs p0f also
+if test "x$with_plugin_confickerscan" == xyes && 
+   test "x$with_plugin_p0f" != xyes; then
+   AC_MSG_ERROR([corsaro_confickerscan plugin requires corsaro_p0f plugin])
+fi
 
 ################################################################################
 # END PLUGIN CONFIGURATION                                                     #
@@ -277,6 +301,7 @@ AC_HEADER_ASSERT
 AC_CONFIG_FILES([Makefile libcorsaro/Makefile libcorsaro/plugins/Makefile
 			  tools/Makefile common/Makefile
 			  common/libanon/Makefile
+			  common/libp0f/Makefile
 			  common/libpatricia/Makefile
 			  common/libcsv/Makefile
 			  docs/Makefile 
