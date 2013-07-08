@@ -24,7 +24,7 @@
 
 AC_PREREQ([2.68])
 
-AC_INIT([corsaro], [2.0.0], [corsaro-info@caida.org])
+AC_INIT([corsaro-caida], [2.0.0], [corsaro-info@caida.org])
 
 # Corsaro versions...
 # this may need some re-thinking
