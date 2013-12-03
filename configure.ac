@@ -265,6 +265,13 @@ if test "x$with_plugin_smee" == xyes; then
 		      ])
 fi
 
+# the report plugin requires libtimeseries
+if test "x$with_plugin_report" == xyes; then
+   AC_CHECK_LIB([timeseries], [timeseries_init], , [
+			      AC_MSG_ERROR([libtimeseries is required])
+   ])
+fi
+
 # unfortunately we have to generate all of these Makefiles because of make dist
 # they will not however be compiled into the binary unless they are used
 
