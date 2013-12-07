@@ -68,6 +68,19 @@
 /** The length of the buffer used to construct key names */
 #define KEY_BUFFER_LEN 1024
 
+/* to count the number of unique src ips per country */
+KHASH_INIT(32xx, khint32_t, char, 0, kh_int_hash_func2, kh_int_hash_equal)
+
+/** Structure which holds state about sub-metrics for each metric */
+typedef struct metric_package {
+  uint32_t id_offset;
+  khash_t(32xx) *uniq_src_ip;
+  khash_t(32xx) *uniq_dst_ip;
+  uint64_t pkt_cnt;
+  uint64_t ip_len;
+} metric_package_t;
+
+
 /* ---------- TURN THINGS ON AND OFF ---------- */
 
 #define WITH_MAXMIND_STATS
@@ -100,6 +113,9 @@ const char *metric_type_names[] = {
 #ifdef WITH_MAXMIND_STATS
 
 #define METRIC_PATH_MAXMIND_COUNTRY    METRIC_PREFIX".geo.maxmind"
+
+/** The max number of values in a 16 bit number (two 8-bit ascii characters) */
+#define METRIC_MAXMIND_ASCII_MAX 65536
 
 #endif
 
@@ -134,6 +150,9 @@ const char *metric_type_names[] = {
 
 KSORT_INIT(pfx2as_ip_cnt_desc, corsaro_geo_record_t*, pfx2as_ip_cnt_lt);
 
+KHASH_INIT(u32metric, uint32_t, metric_package_t *, 1,
+	   kh_int_hash_func2, kh_int_hash_equal)
+
 #endif
 
 /* ---------- PROTOCOL METRIC SETTINGS ---------- */
@@ -150,24 +169,20 @@ KSORT_INIT(pfx2as_ip_cnt_desc, corsaro_geo_record_t*, pfx2as_ip_cnt_lt);
 
 /* these need to be METRIC_DIRECTION_MAX apart */
 enum {
-  METRIC_PROTOCOL_SKIP  = -1,
-  METRIC_PROTOCOL_TCP   = 0,
-  METRIC_PROTOCOL_UDP   = 2,
+  METRIC_PORT_PROTOCOL_SKIP  = -1,
+  METRIC_PORT_PROTOCOL_TCP   = 0,
+  METRIC_PORT_PROTOCOL_UDP   = 1,
   /*  METRIC_PROTOCOL_OTHER = 4,*/
 
-  METRIC_PROTOCOL_MAX = METRIC_PROTOCOL_UDP,
+  METRIC_PORT_PROTOCOL_MAX = METRIC_PORT_PROTOCOL_UDP,
 };
 
 enum {
-  METRIC_DIRECTION_SRC = 0,
-  METRIC_DIRECTION_DST = 1,
+  METRIC_PORT_DIRECTION_SRC = 0,
+  METRIC_PORT_DIRECTION_DST = 1,
 
-  METRIC_DIRECTION_MAX = METRIC_DIRECTION_DST,
+  METRIC_PORT_DIRECTION_MAX = METRIC_PORT_DIRECTION_DST,
 };
-
-/* number of hashes is the last protocol index, plus the number of directions
-   for *that* protocol */
-#define METRIC_PORT_HASH_CNT (METRIC_PROTOCOL_MAX+(METRIC_DIRECTION_MAX+1))
 
 #define METRIC_PORT_VAL_MAX 6000
 /* 65536 is the actual max, but we just want the first 6000 */
@@ -201,26 +216,18 @@ static corsaro_plugin_t corsaro_report_plugin = {
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
 
-/* to count the number of unique src ips per country */
-KHASH_SET_INIT_INT(32xx)
-
-typedef struct corsaro_report_metrics {
-  uint32_t id_offset;
-  khash_t(32xx) *uniq_src_ip;
-  khash_t(32xx) *uniq_dst_ip;
-  uint64_t pkt_cnt;
-  uint64_t ip_len;
-} corsaro_report_metrics_t;
-
-KHASH_INIT(u32metric, uint32_t, corsaro_report_metrics_t *, 1,
-	   kh_int_hash_func, kh_int_hash_equal)
-
 /** Holds the state for an instance of this plugin */
 struct corsaro_report_state_t {
 
 #ifdef WITH_MAXMIND_STATS
-  /** Hash of countries that point to metrics */
-  khash_t(u32metric) *country_hash;
+  /** Array of countries (converted to integers) that point to metrics.
+   *
+   * Even though it uses more memory, we create an array that can hold 2^16
+   * countries -- this allows us to directly index a country based on the
+   * conversion of the ascii characters in each ISO 3166 2 character code.
+   */
+  metric_package_t *country_metrics[METRIC_MAXMIND_ASCII_MAX];
+
   /** Pointer to the Maxmind Geo Provider */
   corsaro_geo_provider_t *maxmind_provider;
 #endif
@@ -234,21 +241,20 @@ struct corsaro_report_state_t {
       reporting (based on smallest the top METRIC_PFX2AS_VAL_MAX ASes) */
   int pfx2as_min_ip_cnt;
   /** Hash of asns that point to metrics */
-  khash_t(u32metric) *asn_hash;
+  khash_t(u32metric) *pfx2as_metrics;
   /** Pointer to the PFX2AS Geo Provider */
   corsaro_geo_provider_t *pfx2as_provider;
 #endif
 
 #ifdef WITH_PROTOCOL_STATS
-  /** Hash of protocols that point to metrics */
-  khash_t(u32metric) *protocol_hash;
+  /** Array of protocols that each contain a metric */
+  metric_package_t *protocol_metrics[METRIC_PROTOCOL_VAL_MAX];
 #endif
 
 #ifdef WITH_PORT_STATS
-  /** Hash of (tcp|udp) (src|dst) ports that point to metrics
-   * Indexes are at [METRIC_PROTOCOL_TCP+METRIC_DIRECTION_SRC], etc
-   */
-  khash_t(u32metric) *port_hash[METRIC_PORT_HASH_CNT];
+  /** Array of port metrics */
+  metric_package_t *port_metrics[METRIC_PORT_PROTOCOL_MAX+1]	\
+  [METRIC_PORT_DIRECTION_MAX+1][METRIC_PORT_VAL_MAX];
 #endif
 
   /** libtimeseries state */
@@ -277,133 +283,110 @@ struct corsaro_report_state_t {
 
 #if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
   defined(WITH_PROTOCOL_STATS) || defined(WITH_PORT_STATS)
-static int u32metric_hash_new_record(khash_t(u32metric) *hash,
-				     uint32_t id_offset,
-				     uint32_t key)
+static metric_package_t *metric_package_new(struct corsaro_report_state_t *state,
+					    const char *metric_prefix,
+					    uint32_t id_offset)
 {
-  corsaro_report_metrics_t *new_metrics = NULL;
-  khiter_t khiter;
-  int khret;
+  metric_package_t *mp = NULL;
+  int i;
+  char key_buffer[KEY_BUFFER_LEN];
 
-  /* check if this key is in the hash already */
-  if((khiter = kh_get(u32metric, hash, key)) == kh_end(hash))
+  /* allocate memory for the metric package */
+  if((mp = malloc(sizeof(metric_package_t))) == NULL)
     {
-      /* create a new country struct */
-      if((new_metrics = malloc(sizeof(corsaro_report_metrics_t))) == NULL)
-	{
-	  /* could not malloc the memory. this is bad */
-	  return -1;
+      /* could not malloc the memory. this is bad */
+      return NULL;
+    }
+
+  /* create a key in the key package for each sub-metric in the metric
+     package */
+  for(i=0; i<METRIC_TYPE_CNT; i++)
+    {
+      /* generate a key for this metric and insert it in the key package */
+	  snprintf(key_buffer, KEY_BUFFER_LEN,
+		   "%s.%s", metric_prefix, metric_type_names[i]);
+
+	  timeseries_kp_add_key(state->kp, key_buffer);
 	}
 
-      /* the id of this metric in the key package */
-      new_metrics->id_offset = id_offset;
+  /* the id of this metric in the key package */
+  mp->id_offset = id_offset;
 
-      /* create a new src ip map */
-      new_metrics->uniq_src_ip = kh_init(32xx);
-      /* create a new dst ip map */
-      new_metrics->uniq_dst_ip = kh_init(32xx);
+  /* create a new src ip map */
+  mp->uniq_src_ip = kh_init(32xx);
+  /* create a new dst ip map */
+  mp->uniq_dst_ip = kh_init(32xx);
 
-      /* zero the packet count (better than a memset 0 on all of it?) */
-      new_metrics->pkt_cnt = 0;
-      /* and the byte count */
-      new_metrics->ip_len = 0;
+  /* zero the packet count (better than a memset 0 on all of it?) */
+  mp->pkt_cnt = 0;
+  /* and the byte count */
+  mp->ip_len = 0;
 
-      /* add it to the hash */
-      khiter = kh_put(u32metric, hash, key, &khret);
-      kh_value(hash, khiter) = new_metrics;
-    }
-  return 0;
+  return mp;
 }
 
-static int u32metric_hash_add_record(khash_t(u32metric) *hash,
-				     uint32_t key,
-				     uint32_t src_ip, uint32_t dst_ip,
-				     uint16_t ip_len,
-				     uint64_t pkt_cnt)
+static void metric_package_destroy(metric_package_t *mp)
 {
-  corsaro_report_metrics_t *new_metrics = NULL;
-  khiter_t khiter;
+  assert(mp != NULL);
+
+  /* free the src ip map */
+  kh_destroy(32xx, mp->uniq_src_ip);
+
+  /* free the dst ip map */
+  kh_destroy(32xx, mp->uniq_dst_ip);
+
+  /* finally, free the metric package */
+  free(mp);
+
+  return;
+}
+
+static void metric_package_update(metric_package_t *mp,
+				  uint32_t src_ip,
+				  uint32_t dst_ip,
+				  uint16_t ip_len,
+				  uint64_t pkt_cnt)
+{
   int khret;
+  assert(mp != NULL);
 
-  /* all records must already be in the hash */
-  khiter = kh_get(u32metric, hash, key);
-  assert(khiter != kh_end(hash));
-
-  new_metrics = kh_value(hash, khiter);
-
-  /* now simply add the src ip to the map */
-  kh_put(32xx, new_metrics->uniq_src_ip, src_ip, &khret);
+  /* simply add the src ip to the map */
+  kh_put(32xx, mp->uniq_src_ip, src_ip, &khret);
   /* and add the dst ip */
-  kh_put(32xx, new_metrics->uniq_dst_ip, dst_ip, &khret);
+  kh_put(32xx, mp->uniq_dst_ip, dst_ip, &khret);
   /* and increment the packet count */
-  new_metrics->pkt_cnt+=pkt_cnt;
+  mp->pkt_cnt+=pkt_cnt;
   /* and increment the byte counter */
-  new_metrics->ip_len+=(ip_len*pkt_cnt);
+  mp->ip_len+=(ip_len*pkt_cnt);
 
-  return 0;
+  return;
 }
 
-static void u32metric_hash_destroy(khash_t(u32metric) *hash)
+static void metric_package_dump(struct corsaro_report_state_t *state,
+				metric_package_t *mp)
 {
-  khiter_t i;
+  timeseries_kp_set(state->kp,
+		    mp->id_offset+METRIC_TYPE_UNIQ_SRC_IP,
+		    (uint64_t)kh_size(mp->uniq_src_ip));
 
-  /* we need to free all the ip maps */
-  for(i = kh_begin(hash); i != kh_end(hash); ++i)
-    {
-      if(kh_exist(hash, i))
-	{
-	  /* free the src ip map */
-	  kh_destroy(32xx,
-		     (kh_val(hash, i))->uniq_src_ip);
+  timeseries_kp_set(state->kp,
+		    mp->id_offset+METRIC_TYPE_UNIQ_DST_IP,
+		    (uint64_t)kh_size(mp->uniq_dst_ip));
 
-	  /* free the dst ip map */
-	  kh_destroy(32xx,
-		     (kh_val(hash, i))->uniq_dst_ip);
+  timeseries_kp_set(state->kp,
+		    mp->id_offset+METRIC_TYPE_PKT_CNT,
+		    mp->pkt_cnt);
 
-	  /* finally, free the metric struct */
-	  free(kh_val(hash, i));
-	}
-    }
+  timeseries_kp_set(state->kp,
+		    mp->id_offset+METRIC_TYPE_IP_LEN,
+		    mp->ip_len);
 
-  kh_destroy(u32metric, hash);
-}
-
-static void u32metric_hash_dump(struct corsaro_report_state_t *state,
-				khash_t(u32metric) *hash)
-{
-  corsaro_report_metrics_t *metrics = NULL;
-  khiter_t i;
-
-  for(i = kh_begin(hash); i != kh_end(hash); ++i)
-    {
-      if(kh_exist(hash, i))
-	{
-	  metrics = kh_value(hash, i);
-
-	  timeseries_kp_set(state->kp,
-			    metrics->id_offset+METRIC_TYPE_UNIQ_SRC_IP,
-			    (uint64_t)kh_size(metrics->uniq_src_ip));
-
-	  timeseries_kp_set(state->kp,
-			    metrics->id_offset+METRIC_TYPE_UNIQ_DST_IP,
-			    (uint64_t)kh_size(metrics->uniq_dst_ip));
-
-	  timeseries_kp_set(state->kp,
-			    metrics->id_offset+METRIC_TYPE_PKT_CNT,
-			    metrics->pkt_cnt);
-
-	  timeseries_kp_set(state->kp,
-			    metrics->id_offset+METRIC_TYPE_IP_LEN,
-			    metrics->ip_len);
-
-	  /* empty the maps for this country */
-	  kh_clear(32xx, metrics->uniq_src_ip);
-	  kh_clear(32xx, metrics->uniq_dst_ip);
-	  /* reset the counters */
-	  metrics->pkt_cnt = 0;
-	  metrics->ip_len = 0;
-	}
-    }
+  /* empty the maps for this country */
+  kh_clear(32xx, mp->uniq_src_ip);
+  kh_clear(32xx, mp->uniq_dst_ip);
+  /* reset the counters */
+  mp->pkt_cnt = 0;
+  mp->ip_len = 0;
 }
 #endif
 
@@ -420,7 +403,11 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 #endif
 
 #ifdef WITH_MAXMIND_STATS
-  uint32_t cc = 0x2D2D2D2D; /* "----" */
+  uint32_t cc = 0x2D2D; /* "--" */
+#endif
+
+#ifdef WITH_PFX2AS_STATS
+  khiter_t khiter;
 #endif
 
 #if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS)
@@ -439,22 +426,12 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	{
 	  cc = (record->country_code[0]<<8) | record->country_code[1];
 	}
-      if(record->continent_code > 0)
-	{
-	  cc &= 0x0000FFFF;
-	  cc |= (record->continent_code & 0x0000FFFF) << 16;
-	}
     }
 
-  /* now store the 'hashed' country code */
-  if(u32metric_hash_add_record(plugin_state->country_hash,
-			       cc,
-			       src_ip, dst_ip,
-			       ip_len, pkt_cnt) != 0)
-    {
-      corsaro_log(__func__, corsaro, "failed to update country hash");
-      return -1;
-    }
+  /* update the appropriate country metric package */
+  assert(plugin_state->country_metrics[cc] != NULL);
+  metric_package_update(plugin_state->country_metrics[cc],
+			src_ip, dst_ip, ip_len, pkt_cnt);
 #endif
 
   /* ==================== PFX2AS ASNs ==================== */
@@ -476,29 +453,21 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
      && record->asn_cnt == 1
      && record->asn_ip_cnt >= plugin_state->pfx2as_min_ip_cnt)
     {
-      /* now store the 'hashed' asn */
-      if(u32metric_hash_add_record(plugin_state->asn_hash,
-				   record->asn[0],
-				   src_ip, dst_ip,
-				   ip_len, pkt_cnt) != 0)
-	{
-	  corsaro_log(__func__, corsaro, "failed to update asn hash");
-	  return -1;
-	}
+      khiter = kh_get(u32metric, plugin_state->pfx2as_metrics,
+		      record->asn[0]);
+
+      assert(khiter != kh_end(plugin_state->pfx2as_metrics));
+
+      metric_package_update(kh_val(plugin_state->pfx2as_metrics, khiter),
+			    src_ip, dst_ip, ip_len, pkt_cnt);
     }
 #endif
 
   /* ==================== PROTOCOL ==================== */
 #ifdef WITH_PROTOCOL_STATS
   /* just basic protocol stats */
-  if(u32metric_hash_add_record(plugin_state->protocol_hash,
-			       protocol,
-			       src_ip, dst_ip,
-			       ip_len, pkt_cnt) != 0)
-    {
-      corsaro_log(__func__, corsaro, "failed to update protocol hash");
-      return -1;
-    }
+  metric_package_update(plugin_state->protocol_metrics[protocol],
+			src_ip, dst_ip, ip_len, pkt_cnt);
 #endif
 
   /* ==================== PORTS ==================== */
@@ -506,38 +475,33 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 #ifdef WITH_PORT_STATS
   if(protocol == TRACE_IPPROTO_TCP)
     {
-      proto = METRIC_PROTOCOL_TCP;
+      proto = METRIC_PORT_PROTOCOL_TCP;
     }
   else if(protocol == TRACE_IPPROTO_UDP)
     {
-      proto = METRIC_PROTOCOL_UDP;
+      proto = METRIC_PORT_PROTOCOL_UDP;
     }
   else
     {
-      proto = METRIC_PROTOCOL_SKIP;
-      /*proto = METRIC_PROTOCOL_OTHER;*/
+      proto = METRIC_PORT_PROTOCOL_SKIP;
     }
 
-  if(proto != METRIC_PROTOCOL_SKIP)
+  if(proto != METRIC_PORT_PROTOCOL_SKIP)
     {
-      if(src_port < METRIC_PORT_VAL_MAX &&
-	 u32metric_hash_add_record(plugin_state->
-				   port_hash[proto+METRIC_DIRECTION_SRC],
-				   src_port, src_ip, dst_ip,
-				   ip_len, pkt_cnt) != 0)
+      if(src_port < METRIC_PORT_VAL_MAX)
 	{
-	  corsaro_log(__func__, corsaro, "failed to update src port hash");
-	  return -1;
+	  metric_package_update(plugin_state->
+				port_metrics
+				[proto][METRIC_PORT_DIRECTION_SRC][src_port],
+				src_ip, dst_ip, ip_len, pkt_cnt);
 	}
 
-      if(dst_port < METRIC_PORT_VAL_MAX &&
-	 u32metric_hash_add_record(plugin_state->
-				   port_hash[proto+METRIC_DIRECTION_DST],
-				   dst_port, src_ip, dst_ip,
-				   ip_len, pkt_cnt) != 0)
+      if(dst_port < METRIC_PORT_VAL_MAX)
 	{
-	  corsaro_log(__func__, corsaro, "failed to update src port hash");
-	  return -1;
+	  metric_package_update(plugin_state->
+				port_metrics
+				[proto][METRIC_PORT_DIRECTION_DST][dst_port],
+				src_ip, dst_ip, ip_len, pkt_cnt);
 	}
     }
 #endif
@@ -695,18 +659,38 @@ int corsaro_report_probe_magic(corsaro_in_t *corsaro, corsaro_file_in_t *file)
   return 0;
 }
 
+#define METRIC_PREFIX_INIT(target, prefix, format, instance)		\
+  do {									\
+    char key_buffer[KEY_BUFFER_LEN];					\
+    snprintf(key_buffer, KEY_BUFFER_LEN, "%s."format, prefix, instance); \
+    if((target = metric_package_new(state,				\
+				    key_buffer,				\
+				    key_id)) == NULL)			\
+      {									\
+	goto err;							\
+      }									\
+									\
+    key_id += METRIC_TYPE_CNT;						\
+  } while(0)
+
 int corsaro_report_init_output(corsaro_t *corsaro)
 {
   struct corsaro_report_state_t *state;
   corsaro_plugin_t *plugin = PLUGIN(corsaro);
 
-  /* the current key id */
+  /* the current key id (used by METRIC_PREFIX_INIT) */
   int key_id = 0;
-  char key_buffer[KEY_BUFFER_LEN];
 
 #if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
-  defined(WITH_PROTOCOL_STATS) || defined(WITH_PORT_STATS)
-  int i, j;
+  defined(WITH_PROTOCOL_STATS)
+  int i;
+#endif
+
+#ifdef WITH_PFX2AS_STATS
+  metric_package_t *tmp_mp;
+  khiter_t khiter;
+  int khret;
+  uint32_t tmp_asn;
 #endif
 
 #ifdef WITH_MAXMIND_STATS
@@ -714,11 +698,12 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   int country_cnt;
   const char **continents;
   int continent_cnt;
-  uint32_t cc;
+  uint16_t country_idx;
+  char cc_str[6] = "--.--";
 #endif
 
 #ifdef WITH_PORT_STATS
-  int k, l;
+  int proto, dir, port;
 #endif
 
   assert(plugin != NULL);
@@ -764,39 +749,32 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       /* no provider? this can't be what they want */
       corsaro_log(__func__, corsaro,
 		  "ERROR: Maxmind Geolocation Provider is required");
-      return -1;
+      goto err;
     }
 
-  state->country_hash = kh_init(u32metric);
+  /* just to be safe, we set all country metric pointers to NULL first */
+  for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
+    {
+      state->country_metrics[i] = NULL;
+    }
 
   /* we want to add an empty metric for all possible countries */
   country_cnt = corsaro_geo_get_maxmind_iso2_list(&countries);
   continent_cnt = corsaro_geo_get_maxmind_country_continent_list(&continents);
   assert(country_cnt == continent_cnt);
+
   for(i=0; i< country_cnt; i++)
     {
-      cc = (continents[i][0] << 24) | (continents[i][1] << 16) |
-	(countries[i][0]<<8) | countries[i][1];
+      /* what is the index of this country in the country_metrics array? */
+      country_idx = (countries[i][0] << 8) | countries[i][1];
 
-      for(j=0; j<METRIC_TYPE_CNT; j++)
-	{
-	  /* generate a key for this metric and insert it in the key package */
-	  snprintf(key_buffer, KEY_BUFFER_LEN,
-		   "%s.%s.%s.%s",
-		   METRIC_PATH_MAXMIND_COUNTRY,
-		   continents[i],
-		   countries[i],
-		   metric_type_names[j]);
+      /* quickly build a string which contains the continent and country code*/
+      memcpy(cc_str, continents[i], 2);
+      memcpy(&cc_str[3], countries[i], 2);
 
-	  timeseries_kp_add_key(state->kp, key_buffer);
-	}
-
-      /* create empty metrics for this country */
-      u32metric_hash_new_record(state->country_hash,
-				key_id,
-				cc);
-
-      key_id += METRIC_TYPE_CNT;
+      METRIC_PREFIX_INIT(state->country_metrics[country_idx],
+			 METRIC_PATH_MAXMIND_COUNTRY,
+			 "%s", cc_str);
     }
 
 #endif
@@ -812,7 +790,9 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       return -1;
     }
 
-  state->asn_hash = kh_init(u32metric);
+  /* initialize the metrics hash (i can't think of a way around having this be a
+     hash...) */
+  state->pfx2as_metrics = kh_init(u32metric);
 
   /* initialize the ASNs */
 
@@ -858,103 +838,49 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 	state->pfx2as_records[i]->asn_ip_cnt >= state->pfx2as_min_ip_cnt;
       i++)
     {
-      /*
-      corsaro_log(__func__, corsaro, "pos: %d\tasn: %d\tcnt: %d\tasn_cnt:%d",
-		  i, state->pfx2as_records[i]->asn[0],
-		  state->pfx2as_records[i]->asn_ip_cnt,
-		  state->pfx2as_records[i]->asn_cnt);
-      */
-
       /* we simply refuse to deal with those pesky group ASNs */
       assert(state->pfx2as_records[i]->asn_cnt == 1);
 
-      for(j=0; j<METRIC_TYPE_CNT; j++)
-	{
-	  /* generate a key for this metric and insert it in the key package */
-	  snprintf(key_buffer, KEY_BUFFER_LEN,
-		   "%s.%"PRIu32".%s",
-		   METRIC_PATH_PFX2AS,
-		   state->pfx2as_records[i]->asn[0],
-		   metric_type_names[j]);
+      tmp_asn = state->pfx2as_records[i]->asn[0];
 
-	  timeseries_kp_add_key(state->kp, key_buffer);
-	}
+      /* create a metric package for this asn */
+      METRIC_PREFIX_INIT(tmp_mp, METRIC_PATH_PFX2AS, "%"PRIu32, tmp_asn);
 
-      /* create empty metrics for this ASN */
-      u32metric_hash_new_record(state->asn_hash,
-				key_id,
-				state->pfx2as_records[i]->asn[0]);
+      /* now insert the mp into the hash */
+      assert(kh_get(u32metric, state->pfx2as_metrics, tmp_asn)
+	     == kh_end(state->pfx2as_metrics)
+	     );
 
-      key_id += METRIC_TYPE_CNT;
+      khiter = kh_put(u32metric, state->pfx2as_metrics, tmp_asn, &khret);
+      kh_value(state->pfx2as_metrics, khiter) = tmp_mp;
     }
 #endif
 
 #ifdef WITH_PROTOCOL_STATS
-  state->protocol_hash = kh_init(u32metric);
-
   /* initialize the protocols */
-  /* and an empty metric for each possible asn */
   for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
     {
-      for(j=0; j<METRIC_TYPE_CNT; j++)
-	{
-	  /* generate a key for this metric and insert it in the key package */
-	  snprintf(key_buffer, KEY_BUFFER_LEN,
-		   "%s.%"PRIu32".%s",
-		   METRIC_PATH_PROTOCOL,
-		   i,
-		   metric_type_names[j]);
-
-	  timeseries_kp_add_key(state->kp, key_buffer);
-	}
-
-      /* create empty metrics for this country */
-      u32metric_hash_new_record(state->protocol_hash,
-				key_id,
-				i);
-
-      key_id += METRIC_TYPE_CNT;
+      /* create an empty metric package for this protocol */
+      METRIC_PREFIX_INIT(state->protocol_metrics[i], METRIC_PATH_PROTOCOL,
+			 "%"PRIu32, i);
     }
 #endif
 
 #ifdef WITH_PORT_STATS
-  for(i=0; i<METRIC_PORT_HASH_CNT; i+=(METRIC_DIRECTION_MAX+1))
+  for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
     {
-        state->port_hash[i+METRIC_DIRECTION_SRC] = kh_init(u32metric);
-        state->port_hash[i+METRIC_DIRECTION_DST] = kh_init(u32metric);
-    }
-
-  /* and an empty metric for each possible port */
-  /* @todo consider re-working the nesting order of these loops */
-  for(i=0; i < METRIC_PORT_VAL_MAX; i++) /* PORT NUMBER */
-    {
-      for(j=0; j<METRIC_PORT_HASH_CNT; j+=(METRIC_DIRECTION_MAX+1)) /* PROTOCOL */
+      for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
 	{
-	  for(k=0; k<=METRIC_DIRECTION_MAX; k++) /* DIRECTION */
+	  for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
 	    {
-	      for(l=0; l<METRIC_TYPE_CNT; l++) /* suffix */
-		{
-		  /* generate a key for this metric and insert it in the key
-		     package */
-		  snprintf(key_buffer, KEY_BUFFER_LEN,
-			   "%s.%"PRIu32".%s",
-			   port_metric_paths[j+k],
-			   i,
-			   metric_type_names[l]);
-
-		  timeseries_kp_add_key(state->kp, key_buffer);
-		}
-
-	      u32metric_hash_new_record(state->port_hash[j+k],
-					key_id,
-					i);
-	      key_id += METRIC_TYPE_CNT;
+	      /* initialize a metric package for this proto/dir/port combo */
+	      METRIC_PREFIX_INIT(state->port_metrics[proto][dir][port],
+		  port_metric_paths[(proto*(METRIC_PORT_PROTOCOL_MAX+1))+dir],
+				 "%"PRIu32, port);
 	    }
 	}
     }
 #endif
-
-  /* set up the RRD stuff here? */
 
   return 0;
 
@@ -980,48 +906,75 @@ int corsaro_report_close_output(corsaro_t *corsaro)
   /* clean up and close RRD stuff */
   struct corsaro_report_state_t *state = STATE(corsaro);
 
-#ifdef WITH_PORT_STATS
+#if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
+  defined(WITH_PROTOCOL_STATS) || defined(WITH_PORT_STATS)
   int i;
+#endif
+
+#ifdef WITH_PFX2AS_STATS
+  khiter_t khiter;
+#endif
+
+#ifdef WITH_PORT_STATS
+  int proto, dir, port;
 #endif
 
   if(state != NULL)
     {
 #ifdef WITH_MAXMIND_STATS
-      if(state->country_hash != NULL)
+      for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
 	{
-	  u32metric_hash_destroy(state->country_hash);
-	  state->country_hash = NULL;
+	  if(state->country_metrics[i] != NULL)
+	    {
+	      metric_package_destroy(state->country_metrics[i]);
+	      state->country_metrics[i] = NULL;
+	    }
 	}
 #endif
 
 #ifdef WITH_PFX2AS_STATS
-      if(state->asn_hash != NULL)
+      if(state->pfx2as_metrics != NULL)
 	{
-	  u32metric_hash_destroy(state->asn_hash);
-	  state->asn_hash = NULL;
+	  for(khiter = kh_begin(state->pfx2as_metrics);
+	      khiter != kh_end(state->pfx2as_metrics);
+	      ++khiter)
+	    {
+	      if(kh_exist(state->pfx2as_metrics, khiter))
+		{
+		  metric_package_destroy(kh_val(state->pfx2as_metrics,
+						khiter));
+		}
+	    }
+	  kh_destroy(u32metric, state->pfx2as_metrics);
+	  state->pfx2as_metrics = NULL;
 	}
 #endif
 
 #ifdef WITH_PROTOCOL_STATS
-      if(state->protocol_hash != NULL)
+      for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
 	{
-	  u32metric_hash_destroy(state->protocol_hash);
-	  state->protocol_hash = NULL;
+	  if(state->protocol_metrics[i] != NULL)
+	    {
+	      metric_package_destroy(state->protocol_metrics[i]);
+	      state->protocol_metrics[i] = NULL;
+	    }
 	}
 #endif
 
 #ifdef WITH_PORT_STATS
-      for(i = 0; i < METRIC_PORT_HASH_CNT; i+=(METRIC_DIRECTION_MAX+1))
+      for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
 	{
-	  if(state->port_hash[i+METRIC_DIRECTION_SRC] != NULL)
+	  for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
 	    {
-	      u32metric_hash_destroy(state->port_hash[i+METRIC_DIRECTION_SRC]);
-	      state->port_hash[i+METRIC_DIRECTION_SRC] = NULL;
-	    }
-	  if(state->port_hash[i+METRIC_DIRECTION_DST] != NULL)
-	    {
-	      u32metric_hash_destroy(state->port_hash[i+METRIC_DIRECTION_DST]);
-	      state->port_hash[i+METRIC_DIRECTION_DST] = NULL;
+	      for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+		{
+		  if(state->port_metrics[proto][dir][port] != NULL)
+		    {
+		      metric_package_destroy(
+				     state->port_metrics[proto][dir][port]);
+		      state->port_metrics[proto][dir][port] = NULL;
+		    }
+		}
 	    }
 	}
 #endif
@@ -1085,26 +1038,60 @@ int corsaro_report_end_interval(corsaro_t *corsaro,
   int i;
 #endif
 
-#ifdef WITH_MAXMIND_STATS
-  /* dump the country hash */
-  u32metric_hash_dump(state, state->country_hash);
-#endif
-
 #ifdef WITH_PFX2AS_STATS
-  /* dump the asn hash */
-  u32metric_hash_dump(state, state->asn_hash);
-#endif
-
-#ifdef WITH_PROTOCOL_STATS
-  /* dump the protocol hash */
-  u32metric_hash_dump(state, state->protocol_hash);
+  khiter_t khiter;
 #endif
 
 #ifdef WITH_PORT_STATS
-  for(i = 0; i < METRIC_PORT_HASH_CNT;  i+=(METRIC_DIRECTION_MAX+1))
+  int proto, dir, port;
+#endif
+
+#ifdef WITH_MAXMIND_STATS
+  for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
     {
-      u32metric_hash_dump(state, state->port_hash[i+METRIC_DIRECTION_SRC]);
-      u32metric_hash_dump(state, state->port_hash[i+METRIC_DIRECTION_DST]);
+      /* NOTE: most of these will be NULL! */
+      if(state->country_metrics[i] != NULL)
+	{
+	  metric_package_dump(state, state->country_metrics[i]);
+	}
+    }
+#endif
+
+#ifdef WITH_PFX2AS_STATS
+  for(khiter = kh_begin(state->pfx2as_metrics);
+      khiter != kh_end(state->pfx2as_metrics);
+      ++khiter)
+    {
+      if(kh_exist(state->pfx2as_metrics, khiter))
+	{
+	  metric_package_dump(state, kh_val(state->pfx2as_metrics,
+					khiter));
+	}
+    }
+#endif
+
+#ifdef WITH_PROTOCOL_STATS
+  /* dump the protocol metrics */
+  for(i = 0; i < METRIC_PROTOCOL_VAL_MAX; i++)
+    {
+      metric_package_dump(state, state->protocol_metrics[i]);
+    }
+#endif
+
+#ifdef WITH_PORT_STATS
+  for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
+    {
+      for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
+	{
+	  for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+	    {
+	      if(state->port_metrics[proto][dir][port] != NULL)
+		{
+		  metric_package_dump(state,
+				      state->port_metrics[proto][dir][port]);
+		}
+	    }
+	}
     }
 #endif
 
