@@ -233,10 +233,6 @@ struct corsaro_report_state_t {
 #endif
 
 #ifdef WITH_PFX2AS_STATS
-  /** Array of ASNs, sorted in descending order by number of IPs each AS owns */
-  corsaro_geo_record_t **pfx2as_records;
-  /** Number of records in the pfx2as_records array */
-  int pfx2as_records_cnt;
   /** The minimum number of IPs that an ASN can have before it is considered for
       reporting (based on smallest the top METRIC_PFX2AS_VAL_MAX ASes) */
   int pfx2as_min_ip_cnt;
@@ -687,6 +683,11 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 #endif
 
 #ifdef WITH_PFX2AS_STATS
+  /* Array of ASNs, sorted in descending order by number of IPs each AS owns */
+  corsaro_geo_record_t **pfx2as_records;
+  /* Number of records in the pfx2as_records array */
+  int pfx2as_records_cnt;
+
   metric_package_t *tmp_mp;
   khiter_t khiter;
   int khret;
@@ -797,9 +798,9 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   /* initialize the ASNs */
 
   /* first, get a list of the ASN records from the pfx2as provider */
-  if((state->pfx2as_records_cnt =
+  if((pfx2as_records_cnt =
       corsaro_geo_get_all_records(state->pfx2as_provider,
-				  &state->pfx2as_records)) <= 0)
+				  &pfx2as_records)) <= 0)
     {
       corsaro_log(__func__, corsaro,
 		  "ERROR: could not get array of pfx2as records");
@@ -810,38 +811,38 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   /* note that this is sorted so that the ASNs with >1 ASN are at the
      end */
   ks_introsort(pfx2as_ip_cnt_desc,
-	       state->pfx2as_records_cnt,
-	       state->pfx2as_records);
+	       pfx2as_records_cnt,
+	       pfx2as_records);
 
   /* find out how big the smallest AS is that we are going to track */
   /* but if we want to track more ASes than actually exist, just leave the
      smallest size at it's default of zero - that will track them all */
-  if(METRIC_PFX2AS_VAL_MAX < state->pfx2as_records_cnt)
+  if(METRIC_PFX2AS_VAL_MAX < pfx2as_records_cnt)
     {
       /* now, jump to index 2999 and ask it how many IPs are in that ASN */
-      assert(state->pfx2as_records[METRIC_PFX2AS_VAL_MAX-1] != NULL);
-      assert(state->pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt > 0);
+      assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1] != NULL);
+      assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt > 0);
       state->pfx2as_min_ip_cnt =
-	state->pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt;
+	pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt;
     }
 
   corsaro_log(__func__, corsaro,
 	      "there are %d ASNs, the ASN at index %d is %d and has %d IPs",
-	      state->pfx2as_records_cnt,
+	      pfx2as_records_cnt,
 	      METRIC_PFX2AS_VAL_MAX-1,
-	      state->pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn[0],
+	      pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn[0],
 	      state->pfx2as_min_ip_cnt);
 
   /* and an empty metric for each asn that we will track */
-  for(i=0;
-      i<state->pfx2as_records_cnt &&
-	state->pfx2as_records[i]->asn_ip_cnt >= state->pfx2as_min_ip_cnt;
+  for(i = 0;
+      i < pfx2as_records_cnt &&
+	pfx2as_records[i]->asn_ip_cnt >= state->pfx2as_min_ip_cnt;
       i++)
     {
       /* we simply refuse to deal with those pesky group ASNs */
-      assert(state->pfx2as_records[i]->asn_cnt == 1);
+      assert(pfx2as_records[i]->asn_cnt == 1);
 
-      tmp_asn = state->pfx2as_records[i]->asn[0];
+      tmp_asn = pfx2as_records[i]->asn[0];
 
       /* create a metric package for this asn */
       METRIC_PREFIX_INIT(tmp_mp, METRIC_PATH_PFX2AS, "%"PRIu32, tmp_asn);
@@ -854,6 +855,9 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       khiter = kh_put(u32metric, state->pfx2as_metrics, tmp_asn, &khret);
       kh_value(state->pfx2as_metrics, khiter) = tmp_mp;
     }
+
+  /* we're done initializing pfx2as metrics, free the pfx2as record array */
+  free(pfx2as_records);
 #endif
 
 #ifdef WITH_PROTOCOL_STATS
