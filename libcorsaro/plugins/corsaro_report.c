@@ -257,7 +257,7 @@ struct corsaro_report_state_t {
   timeseries_t *timeseries;
 
   /** The libtimeseries backend(s) we will write to */
-  timeseries_backend_t *enabled_backends[TIMESERIES_BACKEND_MAX];
+  timeseries_backend_t *enabled_backends[TIMESERIES_BACKEND_ID_LAST];
 
   /** The number of libtimeseries backends that are enabled */
   int enabled_backends_cnt;
@@ -520,9 +520,14 @@ static void usage(corsaro_t *corsaro)
   /* get the available backends from libtimeseries */
   backends = timeseries_get_all_backends(STATE(corsaro)->timeseries);
 
-  for(i = 0; i < TIMESERIES_BACKEND_MAX; i++)
+  for(i = 0; i < TIMESERIES_BACKEND_ID_LAST; i++)
     {
-      assert(backends[i] != NULL);
+      /* skip unavailable backends */
+      if(backends[i] == NULL)
+	{
+	  continue;
+	}
+
       assert(timeseries_get_backend_name(backends[i]));
       fprintf(stderr, "                      - %s\n",
 	      timeseries_get_backend_name(backends[i]));
@@ -538,7 +543,7 @@ static int parse_args(corsaro_t *corsaro)
   int opt;
 
   int i;
-  char *backends[TIMESERIES_BACKEND_MAX];
+  char *backends[TIMESERIES_BACKEND_ID_LAST];
   int backends_cnt = 0;
   char *backend_arg_ptr = NULL;
   timeseries_backend_t *backend = NULL;
