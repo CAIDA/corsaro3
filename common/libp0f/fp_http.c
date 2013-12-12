@@ -75,7 +75,7 @@ static s32 lookup_hdr(u8* name, u32 len, u8 create) {
   u32  i = hbh_cnt[bucket];
 
   while (i--) {
-    if (!memcmp(hdr_names[*p], name, len) && 
+    if (!memcmp(hdr_names[*p], name, len) &&
         !hdr_names[*p][len]) return *p;
     p++;
   }
@@ -239,7 +239,7 @@ static void http_find_match(u8 to_srv, struct http_sig* ts, u8 dupe_det) {
 
       for (rs_hdr = 0; rs_hdr < rs->miss_cnt; rs_hdr++) {
 
-        for (ts_hdr = 0; ts_hdr < ts->miss_cnt; ts_hdr++) 
+        for (ts_hdr = 0; ts_hdr < ts->miss_cnt; ts_hdr++)
           if (rs->miss[rs_hdr] == ts->miss[ts_hdr]) break;
 
         /* One of the reference headers doesn't appear in current sig! */
@@ -345,7 +345,7 @@ void http_register_sig(u8 to_srv, u8 generic, s32 sig_class, u32 sig_name,
 
     if (*val == '=') {
 
-      if (val[1] != '[') 
+      if (val[1] != '[')
         FATAL("Missing '[' after '=' in line %u.", line_no);
 
       val += 2;
@@ -457,7 +457,7 @@ void http_parse_ua(u8* val, u32 line_no) {
 
     if (*val == '=') {
 
-      if (val[1] != '[') 
+      if (val[1] != '[')
         FATAL("Missing '[' after '=' in line %u.", line_no);
 
       val += 2;
@@ -478,7 +478,7 @@ void http_parse_ua(u8* val, u32 line_no) {
                         sizeof(struct ua_map_record));
 
     ua_map[ua_map_cnt].id = id;
-   
+
     if (!name) ua_map[ua_map_cnt].name = fp_os_names[id];
       else ua_map[ua_map_cnt].name = name;
 
@@ -514,7 +514,7 @@ static u8* dump_sig(u8 to_srv, struct http_sig* hsig) {
     snprintf((char*)ret + rlen, _len + 1, _par); \
     rlen += _len; \
   } while (0)
-    
+
   RETF("%u:", hsig->http_ver);
 
   for (i = 0; i < hsig->hdr_cnt; i++) {
@@ -601,7 +601,7 @@ static u8* dump_sig(u8 to_srv, struct http_sig* hsig) {
 
   while (list->name) {
 
-    for (i = 0; i < hsig->hdr_cnt; i++) 
+    for (i = 0; i < hsig->hdr_cnt; i++)
       if (hsig->hdr[i].id == list->id) break;
 
     if (i == hsig->hdr_cnt) {
@@ -819,7 +819,7 @@ header_check:
     s64 recv_diff = ((s64)f->http_tmp.recv_date) - ref->recv_date;
     s64 hdr_diff  = ((s64)f->http_tmp.date) - ref->date;
 
-    if (hdr_diff < -HTTP_MAX_DATE_DIFF || 
+    if (hdr_diff < -HTTP_MAX_DATE_DIFF ||
         hdr_diff > recv_diff + HTTP_MAX_DATE_DIFF) {
 
       DEBUG_P0F("[#] HTTP 'Date' distance too high (%lld in %lld sec).\n",
@@ -873,7 +873,7 @@ static void fingerprint_http(u8 to_srv, struct packet_flow* f) {
     }
 
     if (!languages[lh][pos]) add_observation_field("lang", NULL);
-      else add_observation_field("lang", 
+      else add_observation_field("lang",
            (lang = (u8*)languages[lh][pos + 1]));
 
   } else add_observation_field("lang", (u8*)"none");
@@ -961,7 +961,7 @@ static void fingerprint_http(u8 to_srv, struct packet_flow* f) {
         if (f->http_tmp.dishonest) f->client->bad_sw = 2;
 
       }
- 
+
     }
 
   }
@@ -1061,7 +1061,7 @@ static u8 parse_pairs(u8 to_srv, struct packet_flow* f, u8 can_get_more) {
     }
 
     /* Try to extract header name. */
-      
+
     nlen = 0;
 
     while ((isalnum(pay[off]) || pay[off] == '-' || pay[off] == '_') &&
@@ -1139,7 +1139,7 @@ static u8 parse_pairs(u8 to_srv, struct packet_flow* f, u8 can_get_more) {
     /* If party is using \r\n terminators, go back one char. */
 
     if (pay[off - 1] == '\r') vlen--;
- 
+
     /* Header value starts at vstart, and has vlen bytes (may be zero). Record
        this in the signature. */
 
@@ -1197,7 +1197,7 @@ static u8 parse_pairs(u8 to_srv, struct packet_flow* f, u8 can_get_more) {
     /* Moving on... */
 
     f->http_tmp.hdr_cnt++;
-    f->http_pos = off + 1; 
+    f->http_pos = off + 1;
 
   }
 
@@ -1265,7 +1265,7 @@ u8 process_http(u8 to_srv, struct packet_flow* f) {
         }
 
         off++;
-  
+
       }
 
       /* Newline too far or too close? */
@@ -1357,7 +1357,7 @@ u8 process_http(u8 to_srv, struct packet_flow* f) {
         }
 
         off++;
-  
+
       }
 
       /* Newline too far or too close? */

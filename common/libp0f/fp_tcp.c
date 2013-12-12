@@ -193,12 +193,12 @@ static void tcp_find_match(u8 to_srv, struct tcp_sig* ts, u8 dupe_det,
       switch (refs->win_type) {
 
         case WIN_TYPE_NORMAL:
-      
+
           if (refs->win != ts->win) continue;
           break;
 
         case WIN_TYPE_MOD:
-      
+
           if (ts->win % refs->win) continue;
           break;
 
@@ -269,7 +269,7 @@ static void tcp_find_match(u8 to_srv, struct tcp_sig* ts, u8 dupe_det,
   ts->matched = fmatch;
 
   if (fmatch) ts->fuzzy = 1;
-  
+
 }
 
 
@@ -447,7 +447,7 @@ void tcp_register_sig(u8 to_srv, u8 generic, s32 sig_class, u32 sig_name,
 
   /* Option layout */
 
-  memset(opt_layout, 0, sizeof(opt_layout));  
+  memset(opt_layout, 0, sizeof(opt_layout));
 
   while (*val != ':') {
 
@@ -911,7 +911,7 @@ static void score_nat(u8 to_srv, struct tcp_sig* sig, struct packet_flow* f) {
   u16 reason = 0;
   s32 ttl_diff;
 
-  if (to_srv) { 
+  if (to_srv) {
 
     hd = f->client;
     ref = hd->last_syn;
@@ -952,7 +952,7 @@ static void score_nat(u8 to_srv, struct tcp_sig* sig, struct packet_flow* f) {
   if (!sig->matched || !ref->matched) {
 
     /* One or both of the signatures are unknown. Let's see if they differ.
-       The scoring here isn't too strong, because we don't know if the 
+       The scoring here isn't too strong, because we don't know if the
        unrecognized signature isn't originating from userland tools. */
 
     if ((sig->quirks ^ ref->quirks) & ~(QUIRK_ECN|QUIRK_DF|QUIRK_NZ_ID|
@@ -1100,7 +1100,7 @@ static void score_nat(u8 to_srv, struct tcp_sig* sig, struct packet_flow* f) {
      on TS alone, because some systems may be just randomizing that. */
 
   if (score && sig->ts1 && ref->ts1) {
- 
+
     u64 ms_diff = sig->recv_ms - ref->recv_ms;
 
     /* Require a timestamp within the last day; if the apparent TS progression
@@ -1122,7 +1122,7 @@ static void score_nat(u8 to_srv, struct tcp_sig* sig, struct packet_flow* f) {
 
       } else {
 
-        DEBUG_P0F("[#] Timestamp consistent across signatures (%d in %llu ms), " 
+        DEBUG_P0F("[#] Timestamp consistent across signatures (%d in %llu ms), "
               "reducing score.\n", ts_diff, ms_diff);
         score /= 2;
 
@@ -1176,7 +1176,7 @@ struct tcp_sig* fingerprint_tcp(u8 to_srv, struct packet_data* pk,
       pk->mss == SPECIAL_MSS) f->sendsyn = 1;
 
 
-  if (to_srv) 
+  if (to_srv)
     start_observation(f->sendsyn ? "sendsyn probe" : "syn", 4, 1, f);
   else
     start_observation(f->sendsyn ? "sendsyn response" : "syn+ack", 4, 0, f);
@@ -1205,7 +1205,7 @@ struct tcp_sig* fingerprint_tcp(u8 to_srv, struct packet_data* pk,
 
     if (to_srv) f->client->distance = sig->dist;
     else f->server->distance = sig->dist;
-    
+
     OBSERVF("dist", "%u", sig->dist);
 
   }
@@ -1282,7 +1282,7 @@ void check_ts_tcp(u8 to_srv, struct packet_data* pk, struct packet_flow* f) {
 
      ms_diff = get_unix_time_ms() - f->server->last_synack->recv_ms;
      ts_diff = pk->ts1 - f->server->last_synack->ts1;
-  
+
   }
 
   /* Wait at least 25 ms, and not more than 10 minutes, for at least 5
@@ -1292,7 +1292,7 @@ void check_ts_tcp(u8 to_srv, struct packet_data* pk, struct packet_flow* f) {
 
   if (ms_diff < MIN_TWAIT || ms_diff > MAX_TWAIT) return;
 
-  if (ts_diff < 5 || (ms_diff < TSTAMP_GRACE && (~ts_diff) / 1000 < 
+  if (ts_diff < 5 || (ms_diff < TSTAMP_GRACE && (~ts_diff) / 1000 <
       MAX_TSCALE / TSTAMP_GRACE)) return;
 
   if (ts_diff > ~ts_diff) ffreq = ~ts_diff * -1000.0 / ms_diff;

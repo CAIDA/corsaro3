@@ -123,7 +123,7 @@ static void config_parse_label(u8* val) {
     return;
 
   }
- 
+
   if (*val == 'g') generic = 1;
   else if (*val == 's') generic = 0;
   else FATAL("Malformed class entry in line %u.", line_no);
@@ -313,14 +313,14 @@ static void config_parse_line(u8* line) {
 
   if (!strcmp((char*)line, "classes")) {
 
-    if (state != CF_NEED_SECT) 
+    if (state != CF_NEED_SECT)
       FATAL("misplaced 'classes' in line %u.", line_no);
 
     config_parse_classes(val);
 
   } else if (!strcmp((char*)line, "ua_os")) {
 
-    if (state != CF_NEED_LABEL || mod_to_srv != 1 || mod_type != CF_MOD_HTTP) 
+    if (state != CF_NEED_LABEL || mod_to_srv != 1 || mod_type != CF_MOD_HTTP)
       FATAL("misplaced 'us_os' in line %u.", line_no);
 
     http_parse_ua(val, line_no);
@@ -393,7 +393,7 @@ void read_config(u8* fname) {
 
   if (fstat(f, &st)) PFATAL("fstat() on '%s' failed.", fname);
 
-  if (!st.st_size) { 
+  if (!st.st_size) {
     close(f);
     goto end_fp_read;
   }
@@ -438,11 +438,11 @@ void read_config(u8* fname) {
 
   ck_free(data);
 
-end_fp_read:  
+end_fp_read:
 
   if (!sig_cnt)
     SAYF("[!] No signatures found in '%s'.\n", fname);
-  else 
+  else
     SAYF("[+] Loaded %u signature%s from '%s'.\n", sig_cnt,
          sig_cnt == 1 ? "" : "s", fname);
 

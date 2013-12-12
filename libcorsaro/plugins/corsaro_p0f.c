@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * alistair@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -136,20 +136,20 @@ int corsaro_p0f_close_input(corsaro_in_t *corsaro)
 }
 
 int corsaro_p0f_close_output(corsaro_t *corsaro)
-{ 
+{
   return 0;
 }
 
-off_t corsaro_p0f_read_record(struct corsaro_in *corsaro, 
-			  corsaro_in_record_type_t *record_type, 
+off_t corsaro_p0f_read_record(struct corsaro_in *corsaro,
+			  corsaro_in_record_type_t *record_type,
 			  corsaro_in_record_t *record)
 {
   /* This plugin wrote no data... */
   return -1;
 }
 
-off_t corsaro_p0f_read_global_data_record(struct corsaro_in *corsaro, 
-			      enum corsaro_in_record_type *record_type, 
+off_t corsaro_p0f_read_global_data_record(struct corsaro_in *corsaro,
+			      enum corsaro_in_record_type *record_type,
 			      struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
@@ -168,7 +168,7 @@ int corsaro_p0f_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_end)
   return 0;
 }
 
-int corsaro_p0f_process_packet(corsaro_t *corsaro, 
+int corsaro_p0f_process_packet(corsaro_t *corsaro,
 			     corsaro_packet_t *packet)
 {
   libtrace_packet_t *ltpacket = LT_PKT(packet);
@@ -179,7 +179,7 @@ int corsaro_p0f_process_packet(corsaro_t *corsaro,
   struct pcap_pkthdr hdr;
   /* ok, so this is technically non-portable, but there is a bug in GCC.
      see http://gcc.gnu.org/bugzilla/show_bug.cgi?id=53119 */
-  memset(&hdr, 0, sizeof(struct pcap_pkthdr)); 
+  memset(&hdr, 0, sizeof(struct pcap_pkthdr));
   struct packet_data pk;
   memset(&pk, 0, sizeof(struct packet_data));
 
@@ -194,7 +194,7 @@ int corsaro_p0f_process_packet(corsaro_t *corsaro,
       /* not an ip packet */
       return 0;
     }
-  
+
   if(ip_hdr->ip_p != TRACE_IPPROTO_TCP)
     {
       /* not a tcp packet */
@@ -212,13 +212,13 @@ int corsaro_p0f_process_packet(corsaro_t *corsaro,
 
   /* the syn and syn-ack packets are the ones with the signatures we are
    * interested in */
-  if (pk.tcp_type == TCP_SYN) 
+  if (pk.tcp_type == TCP_SYN)
     {
       sig=fingerprint_tcp_simple(1, &pk);
     }
   else if (pk.tcp_type == (TCP_SYN|TCP_ACK))
     {
-      sig=fingerprint_tcp_simple(0, &pk); 
+      sig=fingerprint_tcp_simple(0, &pk);
     }
   else
     {
@@ -232,7 +232,7 @@ int corsaro_p0f_process_packet(corsaro_t *corsaro,
       packet->state.os_name_id  = m->name_id;
       if (m->flavor != NULL)
 	{
-	  strncpy (packet->state.os_flavor, (char*)m->flavor, 
+	  strncpy (packet->state.os_flavor, (char*)m->flavor,
 		   CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN);
 	  packet->
 	    state.os_flavor[CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN -1] = '\0';
@@ -241,10 +241,10 @@ int corsaro_p0f_process_packet(corsaro_t *corsaro,
       packet->state.flags |= CORSARO_PACKET_STATE_FLAG_P0F;
 
 #ifdef CORSARO_P0F_DEBUG
-      corsaro_log(__func__, corsaro, "FLAGS:%x   ip %s is %d %s %s", 
-		  packet->state.flags, inet_ntoa(ip_hdr->ip_src), 
-		  packet->state.os_class_id, 
-		  fp_os_names[packet->state.os_name_id], 
+      corsaro_log(__func__, corsaro, "FLAGS:%x   ip %s is %d %s %s",
+		  packet->state.flags, inet_ntoa(ip_hdr->ip_src),
+		  packet->state.os_class_id,
+		  fp_os_names[packet->state.os_name_id],
 		  packet->state.os_flavor);
 #endif
 

@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * alistair@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -96,7 +96,7 @@ struct corsaro_confickerscan_state_t {
   corsaro_file_t *outfile;
   /** hash of flows - so we can count easily **/
   khash_t(confickerscan_hash) *st_hash;
-  /** aggregation of flows  **/ 
+  /** aggregation of flows  **/
   khash_t(confickerscan_intermediate_aggregate_hash) *intermediate_aggregate;
   khash_t(confickerscan_aggregate_hash) *aggregate;
   khash_t(confickerscan_how_many_ips_hash) *hmips;
@@ -136,24 +136,24 @@ int corsaro_confickerscan_init_output(corsaro_t *corsaro)
   struct corsaro_confickerscan_state_t *state;
   corsaro_plugin_t *plugin = PLUGIN(corsaro);
   assert(plugin != NULL);
- 
+
   if((state = malloc_zero(sizeof(struct corsaro_confickerscan_state_t))) == NULL)
     {
-      corsaro_log(__func__, corsaro, 
+      corsaro_log(__func__, corsaro,
 		"could not malloc corsaro_confickerscan_state_t");
       goto err;
     }
   corsaro_plugin_register_state(corsaro->plugin_manager, plugin, state);
 
   /* open the output file */
-  if((state->outfile = corsaro_io_prepare_file_full(corsaro, 
+  if((state->outfile = corsaro_io_prepare_file_full(corsaro,
 						  plugin->name,
 						  CORSARO_FILE_MODE_ASCII,
 						  corsaro->compress,
 						  corsaro->compress_level,
 						  0)) == NULL)
     {
-      corsaro_log(__func__, corsaro, "could not open %s output file", 
+      corsaro_log(__func__, corsaro, "could not open %s output file",
 		plugin->name);
       goto err;
     }
@@ -207,15 +207,15 @@ off_t corsaro_confickerscan_fprint(corsaro_t *corsaro, corsaro_file_t *file,
   assert(corsaro != NULL);
   assert(file != NULL);
   corsaro_confickerscan_hash_value_t * v = kh_value(STATE(corsaro)->st_hash, khiter);
-  
-  return corsaro_file_printf(corsaro, file, 
+
+  return corsaro_file_printf(corsaro, file,
 			     "|%"PRIu32"|%d.%d.%d.%d|%d.%d.%d.%d|%"PRIu16"|%"PRIu16"|%"PRIu16"|%"PRIu16"\n",
-			     v->first_timestamp.tv_sec, 
+			     v->first_timestamp.tv_sec,
 			     (v->src_ip) &0xff , (v->src_ip >> 8 ) &0xff, (v->src_ip >> 16) &0xff , (v->src_ip >> 24) & 0xff ,
 			     (v->dst_ip) &0xff , (v->dst_ip >> 8 ) &0xff, (v->dst_ip >> 16) &0xff , (v->dst_ip >> 24) & 0xff ,
 			     v->src_port,
 			     v->dst_port,
-			     v->as, 
+			     v->as,
 			     v->num_packets);
 
 }
@@ -228,15 +228,15 @@ off_t corsaro_confickerscan_intermediate_aggregate_fprint(corsaro_t *corsaro, co
   assert(corsaro != NULL);
   assert(file != NULL);
   corsaro_confickerscan_hash_value_t * v = kh_value(STATE(corsaro)->st_hash, khiter);
-  
-  return corsaro_file_printf(corsaro, file, 
+
+  return corsaro_file_printf(corsaro, file,
 			     "|%"PRIu32"|%d.%d.%d.%d|%d.%d.%d.%d|%"PRIu16"|%"PRIu16"|%"PRIu16"|%"PRIu16"\n",
-			     v->first_timestamp.tv_sec, 
+			     v->first_timestamp.tv_sec,
 			     (v->src_ip) &0xff , (v->src_ip >> 8 ) &0xff, (v->src_ip >> 16) &0xff , (v->src_ip >> 24) & 0xff ,
 			     (v->dst_ip) &0xff , (v->dst_ip >> 8 ) &0xff, (v->dst_ip >> 16) &0xff , (v->dst_ip >> 24) & 0xff ,
 			     v->src_port,
 			     v->dst_port,
-			     v->as, 
+			     v->as,
 			     v->num_packets);
 
 }
@@ -254,10 +254,10 @@ off_t corsaro_confickerscan_aggregate_fprint(corsaro_t *corsaro, corsaro_file_t 
 
   khash_t(ip_hash) * h_dst = hmv->seen_dst_ips;
 
-  return corsaro_file_printf(corsaro, file, 
+  return corsaro_file_printf(corsaro, file,
 			     "|%d|%"PRIu32"|%f|%"PRIu32"|%"PRIu32"|%f|%"PRIu32"|%"PRIu32"|%"PRIu32"|%"PRIu32"|%"PRIu32"|%"PRIu32"|%"PRIu32"|\n",
-			     ts, 
-			     v->as, 
+			     ts,
+			     v->as,
 			     v->avg_packets_per_flow_per_src_ip,
 			     v->total_packets,
 			     v->num_flows,
@@ -304,16 +304,16 @@ int corsaro_confickerscan_aggregate_seen_ips(corsaro_t * corsaro, corsaro_confic
 	corsaro_log_file(__func__, NULL, "hash error (adding intermediate_how_many_ips hash)");
 	return -1;
       }
-		
+
     /* create a new value */
     if((kh_value(STATE(corsaro)->hmips, khiter) = malloc(sizeof(corsaro_confickerscan_how_many_ips_hash_value_t))) == NULL)
       {
 	corsaro_log_file(__func__, NULL, "malloc failed");
 	return -1;
       }
-		
+
     /* fill it */
-    kh_value(STATE(corsaro)->hmips, khiter)->seen_dst_ips=kh_init(ip_hash);   
+    kh_value(STATE(corsaro)->hmips, khiter)->seen_dst_ips=kh_init(ip_hash);
     khash_t(ip_hash) * h_dst = kh_value(STATE(corsaro)->hmips, khiter)->seen_dst_ips;
     khiter_ip=kh_put(ip_hash, h_dst, v->dst_ip, &khret);
     if (!khret || khiter_ip==kh_end(h_dst))
@@ -362,14 +362,14 @@ int corsaro_confickerscan_intermediate_aggregate_flows(corsaro_t * corsaro, cors
 	corsaro_log_file(__func__, NULL, "hash error (adding intermediate_aggregate hash)");
 	return -1;
       }
-		
+
     /* create a new value */
     if((kh_value(STATE(corsaro)->intermediate_aggregate, khiter) = malloc(sizeof(corsaro_confickerscan_intermediate_aggregate_hash_value_t))) == NULL)
       {
 	corsaro_log_file(__func__, NULL, "malloc failed");
 	return -1;
       }
-		
+
     /* fill it */
     kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->as=ak.as;
     kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->src_ip=ak.src_ip;
@@ -378,7 +378,7 @@ int corsaro_confickerscan_intermediate_aggregate_flows(corsaro_t * corsaro, cors
     for (int i=0; i<5; i++)
       kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->num_packets_distribution[i] = ((v->num_packets==i-1) || (i==4 && v->num_packets > 4));
 
-    kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->seen_dst_ips=kh_init(ip_hash);   
+    kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->seen_dst_ips=kh_init(ip_hash);
     khash_t(ip_hash) * h_dst = kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->seen_dst_ips;
     khiter_ip=kh_put(ip_hash, h_dst, v->dst_ip, &khret);
     if (!khret || khiter_ip==kh_end(h_dst))
@@ -389,7 +389,7 @@ int corsaro_confickerscan_intermediate_aggregate_flows(corsaro_t * corsaro, cors
 
 #ifdef CORSARO_CONFICKERSCAN_DEBUG
     corsaro_log(__func__, NULL, "new: as:%d ip:%x flows:%d packets:%d num_dst_ips:%d",     kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->as,      kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->src_ip,       kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->num_flows,     kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->total_packets,   kh_size(h_dst));
-#endif	    	    
+#endif
   } else {
 
     kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->num_flows+=1;
@@ -398,12 +398,12 @@ int corsaro_confickerscan_intermediate_aggregate_flows(corsaro_t * corsaro, cors
       kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->num_packets_distribution[v->num_packets-1]+=1;
     else
       kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->num_packets_distribution[4]+=1;
-    
+
     khash_t(ip_hash) * h_dst = kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->seen_dst_ips;
     khiter_ip=kh_put(ip_hash, h_dst, v->dst_ip, &khret);
 #ifdef CORSARO_CONFICKERSCAN_DEBUG
     corsaro_log(__func__, NULL, "old: as:%d ip:%x flows:%d packets:%d num_dst_ips:%d",     kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->as,      kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->src_ip,       kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->num_flows,     kh_value(STATE(corsaro)->intermediate_aggregate, khiter)->total_packets,   kh_size(h_dst));
-#endif	    	    
+#endif
   }
 
   /* Aggregate How Many IPs seen for the AS */
@@ -428,7 +428,7 @@ int corsaro_confickerscan_aggregate_flows(corsaro_t * corsaro, corsaro_conficker
 #ifdef CORSARO_CONFICKERSCAN_DEBUG
   khash_t(ip_hash) * hi_dst_debug = v->seen_dst_ips;
   corsaro_log(__func__, NULL, "aggregate: as:%d ip:%x flows:%d packets:%d num_dst_ips:%d",     v->as,      v->src_ip,       v->num_flows,     v->total_packets,   kh_size(hi_dst_debug));
-#endif	    	      
+#endif
 
   ak.as=v->as;
 
@@ -451,14 +451,14 @@ int corsaro_confickerscan_aggregate_flows(corsaro_t * corsaro, corsaro_conficker
 	corsaro_log_file(__func__, NULL, "hash error (adding aggregate hash)");
 	return -1;
       }
-		
+
     /* create a new value */
     if((kh_value(STATE(corsaro)->aggregate, khiter) = malloc(sizeof(corsaro_confickerscan_aggregate_hash_value_t))) == NULL)
       {
 	corsaro_log_file(__func__, NULL, "malloc failed");
 	return -1;
       }
-		
+
     /* fill it */
     kh_value(STATE(corsaro)->aggregate, khiter)->as=ak.as;
     kh_value(STATE(corsaro)->aggregate, khiter)->avg_packets_per_flow_per_src_ip=((float)v->total_packets)/v->num_flows;
@@ -469,7 +469,7 @@ int corsaro_confickerscan_aggregate_flows(corsaro_t * corsaro, corsaro_conficker
       kh_value(STATE(corsaro)->aggregate, khiter)->num_packets_distribution[i]=v->num_packets_distribution[i];
 #ifdef CORSARO_CONFICKERSCAN_DEBUG
     corsaro_log(__func__, NULL, "new: as:%d ppf:%f src_ips:%d ",     kh_value(STATE(corsaro)->aggregate, khiter)->as,     kh_value(STATE(corsaro)->aggregate, khiter)->avg_packets_per_flow_per_src_ip,   kh_value(STATE(corsaro)->aggregate, khiter)->num_src_ips);
-#endif	    
+#endif
   } else {
 
     kh_value(STATE(corsaro)->aggregate, khiter)->avg_packets_per_flow_per_src_ip=((((float)v->total_packets)/v->num_flows)+kh_value(STATE(corsaro)->aggregate, khiter)->num_src_ips*kh_value(STATE(corsaro)->aggregate, khiter)->avg_packets_per_flow_per_src_ip)/(kh_value(STATE(corsaro)->aggregate, khiter)->num_src_ips+1);
@@ -480,7 +480,7 @@ int corsaro_confickerscan_aggregate_flows(corsaro_t * corsaro, corsaro_conficker
       kh_value(STATE(corsaro)->aggregate, khiter)->num_packets_distribution[i]+=v->num_packets_distribution[i];
 #ifdef CORSARO_CONFICKERSCAN_DEBUG
     corsaro_log(__func__, NULL, "old: as:%d ppf:%f src_ips:%d",     kh_value(STATE(corsaro)->aggregate, khiter)->as,     kh_value(STATE(corsaro)->aggregate, khiter)->avg_packets_per_flow_per_src_ip,   kh_value(STATE(corsaro)->aggregate, khiter)->num_src_ips);
-#endif	    
+#endif
   }
 }
 
@@ -494,7 +494,7 @@ int corsaro_confickerscan_close_output(corsaro_t *corsaro)
   corsaro_confickerscan_how_many_ips_hash_value_t * hmv;
 
 
-  corsaro_io_write_interval_start(corsaro, STATE(corsaro)->outfile, 
+  corsaro_io_write_interval_start(corsaro, STATE(corsaro)->outfile,
 				  &corsaro->interval_start);
   if(state != NULL)
     {
@@ -507,7 +507,7 @@ int corsaro_confickerscan_close_output(corsaro_t *corsaro)
 		{
 		  float elapsed_sec = (state->max_ts.tv_sec-kh_value(state->st_hash,k)->last_timestamp.tv_sec);
 		  elapsed_sec += ((float)(state->max_ts.tv_usec-kh_value(state->st_hash,k)->last_timestamp.tv_usec))/1000000;
-		  
+
 		  if (elapsed_sec > CORSARO_CONFICKERSCAN_FLOW_TIMEOUT) {
 		    /* is old: aggregate and free */
 #ifdef CORSARO_CONFICKERSCAN_DEBUG
@@ -520,9 +520,9 @@ int corsaro_confickerscan_close_output(corsaro_t *corsaro)
 		  }
 		}
 	    }
-	  
-	  
-	  
+
+
+
 	  for (aik = kh_begin(state->intermediate_aggregate); aik != kh_end(state->intermediate_aggregate); ++aik)
 	    {
 	      if (kh_exist(state->intermediate_aggregate, aik))
@@ -580,8 +580,8 @@ int corsaro_confickerscan_close_output(corsaro_t *corsaro)
 	}
       corsaro_plugin_free_state(corsaro->plugin_manager, PLUGIN(corsaro));
     }
-  
-  
+
+
   /* free hashes */
   kh_free(confickerscan_hash, state->st_hash, &corsaro_confickerscan_free);
   kh_destroy(confickerscan_hash, state->st_hash);
@@ -596,7 +596,7 @@ int corsaro_confickerscan_close_output(corsaro_t *corsaro)
   kh_destroy(confickerscan_aggregate_hash, state->aggregate);
   state->aggregate=NULL;
 
-  
+
   kh_free(confickerscan_how_many_ips_hash, state->hmips, &corsaro_confickerscan_how_many_ips_free);
   kh_destroy(confickerscan_how_many_ips_hash, state->hmips);
   state->hmips=NULL;
@@ -605,8 +605,8 @@ int corsaro_confickerscan_close_output(corsaro_t *corsaro)
   return 0;
 }
 
-off_t corsaro_confickerscan_read_record(struct corsaro_in *corsaro, 
-			  corsaro_in_record_type_t *record_type, 
+off_t corsaro_confickerscan_read_record(struct corsaro_in *corsaro,
+			  corsaro_in_record_type_t *record_type,
 			  corsaro_in_record_t *record)
 {
   /* This plugin can't read it's data back. just use libtrace */
@@ -615,8 +615,8 @@ off_t corsaro_confickerscan_read_record(struct corsaro_in *corsaro,
   return -1;
 }
 
-off_t corsaro_confickerscan_read_global_data_record(struct corsaro_in *corsaro, 
-			      enum corsaro_in_record_type *record_type, 
+off_t corsaro_confickerscan_read_global_data_record(struct corsaro_in *corsaro,
+			      enum corsaro_in_record_type *record_type,
 			      struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
@@ -640,7 +640,7 @@ int corsaro_confickerscan_end_interval(corsaro_t *corsaro, corsaro_interval_t *i
   corsaro_confickerscan_aggregate_hash_value_t * av;
   corsaro_confickerscan_how_many_ips_hash_value_t * hmv;
 
-  corsaro_io_write_interval_start(corsaro, STATE(corsaro)->outfile, 
+  corsaro_io_write_interval_start(corsaro, STATE(corsaro)->outfile,
 				  &corsaro->interval_start);
 
   /* aggregate things that are old/we would expire if printed */
@@ -699,7 +699,7 @@ int corsaro_confickerscan_end_interval(corsaro_t *corsaro, corsaro_interval_t *i
 	  kh_del(confickerscan_aggregate_hash, state->aggregate, ak);
 	}
     }
-  
+
 
 
   /* Clear the aggregation of number of IPs*/
@@ -719,7 +719,7 @@ int corsaro_confickerscan_end_interval(corsaro_t *corsaro, corsaro_interval_t *i
 	}
     }
 
-  
+
   corsaro_io_write_interval_end(corsaro, STATE(corsaro)->outfile, int_end);
 
   return 0;
@@ -734,7 +734,7 @@ int corsaro_confickerscan_add_inc(kh_confickerscan_hash_t *h, corsaro_confickers
   corsaro_confickerscan_hash_value_t *new_value = NULL;
 
   assert(h != NULL);
-  
+
   /* check if this is in the hash already */
   if((khiter = kh_get(confickerscan_hash, h, k)) == kh_end(h))
     {
@@ -785,7 +785,7 @@ int corsaro_confickerscan_add_inc(kh_confickerscan_hash_t *h, corsaro_confickers
 	if (! kh_value(h,khiter)->as)
 	  {
 	    kh_value(h,khiter)->as=v->as;
-	  } 
+	  }
 	kh_value(h,khiter)->num_packets+=1;
 	kh_value(h,khiter)->last_timestamp=v->last_timestamp;
 #ifdef CORSARO_CONFICKERSCAN_DEBUG
@@ -797,7 +797,7 @@ int corsaro_confickerscan_add_inc(kh_confickerscan_hash_t *h, corsaro_confickers
 }
 
 
-int corsaro_confickerscan_process_packet(corsaro_t *corsaro, 
+int corsaro_confickerscan_process_packet(corsaro_t *corsaro,
 			     corsaro_packet_t *packet)
 {
 
@@ -815,7 +815,7 @@ int corsaro_confickerscan_process_packet(corsaro_t *corsaro,
   /* is this a confickerscan packet?*/
 
 
-  if (((packet->state.flags & (CORSARO_PACKET_STATE_FLAG_ASNUM)) == 0) || 
+  if (((packet->state.flags & (CORSARO_PACKET_STATE_FLAG_ASNUM)) == 0) ||
     ((packet->state.flags & (CORSARO_PACKET_STATE_FLAG_P0F)) == 0))
     {
       /* AS Number not set */

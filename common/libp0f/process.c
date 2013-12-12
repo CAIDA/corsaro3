@@ -136,7 +136,7 @@ static void find_offset(const u8* data, s32 total_len) {
         break;
 
       }
-      
+
     }
 
     /* Okay, let's try IPv4 then. The same approach, except the shortest packet
@@ -193,9 +193,9 @@ u8* addr_to_str(u8* data, u8 ip_ver) {
   } else {
 
     sprintf(tmp, "%x:%x:%x:%x:%x:%x:%x:%x",
-            (data[0] << 8) | data[1], (data[2] << 8) | data[3], 
-            (data[4] << 8) | data[5], (data[6] << 8) | data[7], 
-            (data[8] << 8) | data[9], (data[10] << 8) | data[11], 
+            (data[0] << 8) | data[1], (data[2] << 8) | data[3],
+            (data[4] << 8) | data[5], (data[6] << 8) | data[7],
+            (data[8] << 8) | data[9], (data[10] << 8) | data[11],
             (data[12] << 8) | data[13], (data[14] << 8) | data[15]);
 
   }
@@ -242,7 +242,7 @@ void parse_packet_helper(struct packet_data *pk, const struct pcap_pkthdr *hdr, 
     /* Account for link-level headers. */
 
     if (link_off < 0) find_offset(data, packet_len);
-    
+
     if (link_off > 0) {
 
       data += link_off;
@@ -266,7 +266,7 @@ void parse_packet_helper(struct packet_data *pk, const struct pcap_pkthdr *hdr, 
     /************************
      * IPv4 header parsing. *
      ************************/
-    
+
     const struct ipv4_hdr* ip4 = (struct ipv4_hdr*)data;
 
     u32 hdr_len = (ip4->ver_hlen & 0x0F) * 4;
@@ -346,7 +346,7 @@ void parse_packet_helper(struct packet_data *pk, const struct pcap_pkthdr *hdr, 
     if (ip4->tos_ecn & (IP_TOS_CE | IP_TOS_ECT)) pk->quirks |= QUIRK_ECN;
 
     /* Tag some of the corner cases associated with implementation quirks. */
-    
+
     if (flags_off & IP4_MBZ) pk->quirks |= QUIRK_NZ_MBZ;
 
     if (flags_off & IP4_DF) {
@@ -364,13 +364,13 @@ void parse_packet_helper(struct packet_data *pk, const struct pcap_pkthdr *hdr, 
 
     tcp = (struct tcp_hdr*)(data + hdr_len);
     packet_len -= hdr_len;
-    
+
   } else if ((*data >> 4) == IP_VER6) {
 
     /************************
      * IPv6 header parsing. *
      ************************/
-    
+
     const struct ipv6_hdr* ip6 = (struct ipv6_hdr*)data;
     u32 ver_tos = ntohl(RD32(ip6->ver_tos));
     u32 tot_len = ntohs(RD16(ip6->pay_len)) + sizeof(struct ipv6_hdr);
@@ -486,7 +486,7 @@ void parse_packet_helper(struct packet_data *pk, const struct pcap_pkthdr *hdr, 
 
   /* Take note of miscellanous features and quirks. */
 
-  if ((tcp->flags & (TCP_ECE | TCP_CWR)) || 
+  if ((tcp->flags & (TCP_ECE | TCP_CWR)) ||
       (tcp->doff_rsvd & TCP_NS_RES)) pk->quirks |= QUIRK_ECN;
 
   if (!pk->seq) pk->quirks |= QUIRK_ZERO_SEQ;
@@ -573,7 +573,7 @@ void parse_packet_helper(struct packet_data *pk, const struct pcap_pkthdr *hdr, 
            them are non-zero. */
 
         pk->opt_eol_pad = opt_end - data;
-        
+
         while (data < opt_end && !*data++);
 
         if (data != opt_end) {
@@ -588,7 +588,7 @@ void parse_packet_helper(struct packet_data *pk, const struct pcap_pkthdr *hdr, 
         /* NOP is a single-byte option that does nothing. */
 
         break;
-  
+
       case TCPOPT_MAXSEG:
 
         /* MSS is a four-byte option with specified size. */
@@ -737,7 +737,7 @@ abort_options:
     pk->quirks |= QUIRK_OPT_BAD;
 
   }
- 
+
 
 }
 
@@ -801,7 +801,7 @@ struct host_data* lookup_host(u8* addr, u8 ip_ver) {
 
 static void destroy_host(struct host_data* h) {
 
-  u32 bucket; 
+  u32 bucket;
 
   bucket = get_host_bucket(CP(h)->addr, h->ip_ver);
 
@@ -813,7 +813,7 @@ static void destroy_host(struct host_data* h) {
   /* Remove it from the bucketed linked list. */
 
   if (CP(h->next)) h->next->prev = h->prev;
-  
+
   if (CP(h->prev)) h->prev->next = h->next;
   else host_b[bucket] = h->next;
 
@@ -823,7 +823,7 @@ static void destroy_host(struct host_data* h) {
   else newest_host = h->older;
 
   if (CP(h->older)) h->older->newer = h->newer;
-  else host_by_age = h->newer; 
+  else host_by_age = h->newer;
 
   /* Free memory. */
 
@@ -858,7 +858,7 @@ static void nuke_hosts(void) {
   }
 
 }
-  
+
 
 
 /* Create a minimal host data. */
@@ -885,7 +885,7 @@ static struct host_data* create_host(u8* addr, u8 ip_ver) {
   host_b[bucket] = nh;
 
   /* Insert into the by-age linked list. */
- 
+
   if (CP(newest_host)) {
 
     newest_host->newer = nh;
@@ -931,7 +931,7 @@ static void touch_host(struct host_data* h) {
     h->newer->older = h->older;
 
     if (CP(h->older)) h->older->newer = h->newer;
-    else host_by_age = h->newer; 
+    else host_by_age = h->newer;
 
     /* Re-insert in front. */
 
@@ -972,7 +972,7 @@ static void destroy_flow(struct packet_flow* f) {
   /* Remove it from the bucketed linked list. */
 
   if (CP(f->next)) f->next->prev = f->prev;
-  
+
   if (CP(f->prev)) f->prev->next = f->next;
   else { CP(flow_b[f->bucket]); flow_b[f->bucket] = f->next; }
 
@@ -982,7 +982,7 @@ static void destroy_flow(struct packet_flow* f) {
   else { CP(newest_flow); newest_flow = f->older; }
 
   if (CP(f->older)) f->older->newer = f->newer;
-  else flow_by_age = f->newer; 
+  else flow_by_age = f->newer;
 
   /* Free memory, etc. */
 
@@ -995,7 +995,7 @@ static void destroy_flow(struct packet_flow* f) {
   ck_free(f->response);
   ck_free(f);
 
-  flow_cnt--;  
+  flow_cnt--;
 
 }
 
@@ -1061,7 +1061,7 @@ static struct packet_flow* create_flow_from_syn(struct packet_data* pk) {
   flow_b[bucket] = nf;
 
   /* Insert into the by-age linked list */
- 
+
   if (CP(newest_flow)) {
     newest_flow->newer = nf;
     nf->older = newest_flow;
@@ -1169,7 +1169,7 @@ static void flow_dispatch(struct packet_data* pk) {
   DEBUG_P0F("%s/%u (type 0x%02x, pay_len = %u)\n",
         addr_to_str(pk->dst, pk->ip_ver), pk->dport, pk->tcp_type,
         pk->pay_len);
-    
+
   f = lookup_flow(pk, &to_srv);
 
   switch (pk->tcp_type) {
@@ -1191,7 +1191,7 @@ static void flow_dispatch(struct packet_data* pk) {
       tsig = fingerprint_tcp(1, pk, f);
 
       /* We don't want to do any further processing on generic non-OS
-         signatures (e.g. NMap). The easiest way to guarantee that is to 
+         signatures (e.g. NMap). The easiest way to guarantee that is to
          kill the flow. */
 
       if (!tsig && !f->sendsyn) {
@@ -1208,7 +1208,7 @@ static void flow_dispatch(struct packet_data* pk) {
 
         /* This can't be done in fingerprint_tcp because check_ts_tcp()
            depends on having original SYN / SYN+ACK data. */
- 
+
         ck_free(f->client->last_syn);
         f->client->last_syn = tsig;
 
@@ -1320,7 +1320,7 @@ static void flow_dispatch(struct packet_data* pk) {
 
           if (f->next_cli_seq - pk->pay_len != pk->seq)
             DEBUG_P0F("[#] Expected client seq 0x%08x, got 0x%08x.\n", f->next_cli_seq, pk->seq);
- 
+
           return;
         }
 
@@ -1349,7 +1349,7 @@ static void flow_dispatch(struct packet_data* pk) {
           if (f->next_srv_seq - pk->pay_len != pk->seq)
             DEBUG_P0F("[#] Expected server seq 0x%08x, got 0x%08x.\n",
                   f->next_cli_seq, pk->seq);
- 
+
           return;
 
         }
@@ -1461,7 +1461,7 @@ void add_nat_score(u8 to_srv, struct packet_flow* f, u16 reason, u8 score) {
 
 #define REAF(_par...) do { \
     rptr += sprintf((char*)rptr, _par); \
-  } while (0) 
+  } while (0)
 
   if (reason & NAT_APP_SIG)  REAF(" app_vs_os");
   if (reason & NAT_OS_SIG)   REAF(" os_diff");
