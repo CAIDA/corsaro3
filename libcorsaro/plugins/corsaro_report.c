@@ -566,13 +566,6 @@ static int parse_args(corsaro_t *corsaro)
 	}
     }
 
-  /* report doesn't take any extra arguments */
-  if(optind != plugin->argc)
-    {
-      usage(corsaro);
-      return -1;
-    }
-
   /* at least one backend must have been specified */
   if(backends_cnt == 0)
     {
