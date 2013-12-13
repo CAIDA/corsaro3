@@ -33,6 +33,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <libipmeta.h>
 #include <libtimeseries.h>
 #include <libtrace.h>
 
@@ -40,7 +41,7 @@
 #include "ksort.h"
 #include "utils.h"
 
-#include "corsaro_geo.h"
+#include "corsaro_ipmeta.h"
 #include "corsaro_io.h"
 #include "corsaro_log.h"
 #include "corsaro_plugin.h"
@@ -148,7 +149,7 @@ const char *metric_type_names[] = {
 									) \
 									)
 
-KSORT_INIT(pfx2as_ip_cnt_desc, corsaro_geo_record_t*, pfx2as_ip_cnt_lt);
+KSORT_INIT(pfx2as_ip_cnt_desc, ipmeta_record_t*, pfx2as_ip_cnt_lt);
 
 KHASH_INIT(u32metric, uint32_t, metric_package_t *, 1,
 	   kh_int_hash_func2, kh_int_hash_equal)
@@ -227,9 +228,6 @@ struct corsaro_report_state_t {
    * conversion of the ascii characters in each ISO 3166 2 character code.
    */
   metric_package_t *country_metrics[METRIC_MAXMIND_ASCII_MAX];
-
-  /** Pointer to the Maxmind Geo Provider */
-  corsaro_geo_provider_t *maxmind_provider;
 #endif
 
 #ifdef WITH_PFX2AS_STATS
@@ -238,8 +236,6 @@ struct corsaro_report_state_t {
   int pfx2as_min_ip_cnt;
   /** Hash of asns that point to metrics */
   khash_t(u32metric) *pfx2as_metrics;
-  /** Pointer to the PFX2AS Geo Provider */
-  corsaro_geo_provider_t *pfx2as_provider;
 #endif
 
 #ifdef WITH_PROTOCOL_STATS
@@ -407,15 +403,14 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 #endif
 
 #if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS)
-  corsaro_geo_record_t *record;
+  ipmeta_record_t *record;
 #endif
 
   /* ==================== COUNTRY CODES ==================== */
 #ifdef WITH_MAXMIND_STATS
-  assert(plugin_state->maxmind_provider != NULL);
-
-  /* we will only look at the first record for this packet */
-  if((record = corsaro_geo_next_record(plugin_state->maxmind_provider, NULL))
+  /* get the cached maxmind record for this packet */
+  if((record =
+      corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_MAXMIND))
      != NULL)
     {
       if(record->country_code != NULL)
@@ -434,7 +429,6 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 #ifdef WITH_PFX2AS_STATS
   assert(plugin_state->pfx2as_provider != NULL);
 
-  /* we will only look at the first record for this packet */
   /* note we are deliberately discarding ASN records that have more than one ASN
      because we consider them an artifact of the measurement */
   /* we are also discarding any AS that is smaller than the smallest AS in our
@@ -444,7 +438,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
      multiple ASes of size plugin_state->pfx2as_min_ip_cnt */
   /* also note that we are NOT recording stats for packets that we cannot
      compute ans ASN for */
-  if((record = corsaro_geo_next_record(plugin_state->pfx2as_provider, NULL))
+  if((record = corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_PFX2AS))
      != NULL
      && record->asn_cnt == 1
      && record->asn_ip_cnt >= plugin_state->pfx2as_min_ip_cnt)
@@ -689,7 +683,7 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 
 #ifdef WITH_PFX2AS_STATS
   /* Array of ASNs, sorted in descending order by number of IPs each AS owns */
-  corsaro_geo_record_t **pfx2as_records;
+  ipmeta_record_t **pfx2as_records;
   /* Number of records in the pfx2as_records array */
   int pfx2as_records_cnt;
 
@@ -748,16 +742,6 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 
   /* initialize the providers */
 #ifdef WITH_MAXMIND_STATS
-  /* first, ask for the maxmind provider */
-  if((state->maxmind_provider = corsaro_geo_get_by_id(corsaro,
-				       CORSARO_GEO_PROVIDER_MAXMIND)) == NULL)
-    {
-      /* no provider? this can't be what they want */
-      corsaro_log(__func__, corsaro,
-		  "ERROR: Maxmind Geolocation Provider is required");
-      goto err;
-    }
-
   /* just to be safe, we set all country metric pointers to NULL first */
   for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
     {
@@ -765,8 +749,9 @@ int corsaro_report_init_output(corsaro_t *corsaro)
     }
 
   /* we want to add an empty metric for all possible countries */
-  country_cnt = corsaro_geo_get_maxmind_iso2_list(&countries);
-  continent_cnt = corsaro_geo_get_maxmind_country_continent_list(&continents);
+  country_cnt = ipmeta_provider_maxmind_get_iso2_list(&countries);
+  continent_cnt =
+    ipmeta_provider_maxmind_get_country_continent_list(&continents);
   assert(country_cnt == continent_cnt);
 
   for(i=0; i< country_cnt; i++)
@@ -786,15 +771,8 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 #endif
 
 #ifdef WITH_PFX2AS_STATS
-  /* now, ask for the pfx2as provider */
-  if((state->pfx2as_provider = corsaro_geo_get_by_id(corsaro,
-				       CORSARO_GEO_PROVIDER_PFX2AS)) == NULL)
-    {
-      /* no provider? this can't be what they want */
-      corsaro_log(__func__, corsaro,
-		  "ERROR: PFX2AS Provider is required");
-      return -1;
-    }
+  /** @todo add some code to corsaro_ipmeta that allows a plugin to check that a
+      given provider is initialized */
 
   /* initialize the metrics hash (i can't think of a way around having this be a
      hash...) */
@@ -804,8 +782,10 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 
   /* first, get a list of the ASN records from the pfx2as provider */
   if((pfx2as_records_cnt =
-      corsaro_geo_get_all_records(state->pfx2as_provider,
-				  &pfx2as_records)) <= 0)
+      ipmeta_provider_get_all_records(
+				      corsaro_ipmeta_get_provider(corsaro,
+						      IPMETA_PROVIDER_PFX2AS),
+				      &pfx2as_records)) <= 0)
     {
       corsaro_log(__func__, corsaro,
 		  "ERROR: could not get array of pfx2as records");
