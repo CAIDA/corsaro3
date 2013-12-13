@@ -604,6 +604,8 @@ static int parse_args(corsaro_t *corsaro)
       if(timeseries_enable_backend(state->timeseries, backend,
 				   backend_arg_ptr) != 0)
 	{
+	  fprintf(stderr, "ERROR: Failed to initialized backend (%s)",
+		  backends[i]);
 	  usage(corsaro);
 	  goto err;
 	}
