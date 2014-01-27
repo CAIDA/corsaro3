@@ -485,13 +485,10 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
       corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_NETACQ_EDGE))
      != NULL)
     {
-      if(record->region_code != 0)
-	{
-	  rc = record->region_code;
-	  assert(plugin_state->netacq_region_metrics[rc] != NULL);
-	  metric_package_update(plugin_state->netacq_region_metrics[rc],
-				src_ip, dst_ip, ip_len, pkt_cnt);
-	}
+      rc = record->region_code;
+      assert(plugin_state->netacq_region_metrics[rc] != NULL);
+      metric_package_update(plugin_state->netacq_region_metrics[rc],
+			    src_ip, dst_ip, ip_len, pkt_cnt);
     }
 #endif
 
