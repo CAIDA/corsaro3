@@ -85,6 +85,7 @@ typedef struct metric_package {
 /* ---------- TURN THINGS ON AND OFF ---------- */
 
 #define WITH_MAXMIND_STATS
+#define WITH_NETACQ_EDGE_STATS
 #define WITH_PFX2AS_STATS
 #define WITH_PROTOCOL_STATS
 #define WITH_PORT_STATS
@@ -116,7 +117,25 @@ const char *metric_type_names[] = {
 #define METRIC_PATH_MAXMIND_COUNTRY    METRIC_PREFIX".geo.maxmind"
 
 /** The max number of values in a 16 bit number (two 8-bit ascii characters) */
-#define METRIC_MAXMIND_ASCII_MAX 65536
+#define METRIC_MAXMIND_ASCII_MAX UINT16_MAX
+
+#endif
+
+/* ---------- NETACQ EDGE METRIC SETTINGS ---------- */
+#ifdef WITH_NETACQ_EDGE_STATS
+
+#define METRIC_PATH_NETACQ_EDGE_COUNTRY     \
+  METRIC_PREFIX".geo.netacuity.edge.country"
+
+/** The max number of values in a 16 bit number (two 8-bit ascii characters) */
+#define METRIC_NETACQ_EDGE_COUNTRY_MAX UINT16_MAX
+
+#define METRIC_PATH_NETACQ_EDGE_REGION     \
+  METRIC_PREFIX".geo.netacuity.edge.region"
+
+/** The max region code value (currently the actual max is 30,404, but this
+ * could easily go higher. be careful) */
+#define METRIC_NETACQ_EDGE_REGION_MAX UINT16_MAX
 
 #endif
 
@@ -227,7 +246,23 @@ struct corsaro_report_state_t {
    * countries -- this allows us to directly index a country based on the
    * conversion of the ascii characters in each ISO 3166 2 character code.
    */
-  metric_package_t *country_metrics[METRIC_MAXMIND_ASCII_MAX];
+  metric_package_t *maxmind_country_metrics[METRIC_MAXMIND_ASCII_MAX];
+#endif
+
+#ifdef WITH_NETACQ_EDGE_STATS
+  /** Array of country codes (specific to netacq) that point to metrics.
+   *
+   * Even though it uses more memory, we create an array that can hold 2^16
+   * countries -- this allows us to directly index a country based on the
+   * conversion of the ascii characters in each ISO 3166 2 character code.
+   */
+  metric_package_t *netacq_country_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
+
+  /** Array of region codes (specific to netacq) that point to metrics.
+   *
+   * Note that many of these will be NULL
+   */
+  metric_package_t *netacq_region_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
 #endif
 
 #ifdef WITH_PFX2AS_STATS
@@ -382,6 +417,24 @@ static void metric_package_dump(struct corsaro_report_state_t *state,
 }
 #endif
 
+static inline uint16_t lookup_convert_cc(corsaro_packet_state_t *state,
+					 ipmeta_provider_id_t provider_id)
+{
+  ipmeta_record_t *record;
+
+  if((record =
+      corsaro_ipmeta_get_record(state, provider_id))
+     != NULL)
+    {
+      if(record->country_code != NULL)
+	{
+	  return (record->country_code[0]<<8) | record->country_code[1];
+	}
+    }
+
+  return 0x2D2D; /* "--" */
+}
+
 static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 			   uint32_t src_ip, uint32_t dst_ip,
 			   uint16_t src_port, uint16_t dst_port,
@@ -394,41 +447,56 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
   int proto;
 #endif
 
-#ifdef WITH_MAXMIND_STATS
-  uint32_t cc = 0x2D2D; /* "--" */
+#if defined WITH_MAXMIND_STATS || defined WITH_NETACQ_EDGE_STATS
+  uint16_t cc;
+#endif
+
+#ifdef WITH_NETACQ_EDGE_STATS
+  uint16_t rc;
 #endif
 
 #ifdef WITH_PFX2AS_STATS
   khiter_t khiter;
-#endif
-
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS)
   ipmeta_record_t *record;
 #endif
 
-  /* ==================== COUNTRY CODES ==================== */
+  /* ==================== GEOGRAPHIC ==================== */
 #ifdef WITH_MAXMIND_STATS
-  /* get the cached maxmind record for this packet */
-  if((record =
-      corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_MAXMIND))
-     != NULL)
-    {
-      if(record->country_code != NULL)
-	{
-	  cc = (record->country_code[0]<<8) | record->country_code[1];
-	}
-    }
+  /* maxmind country code */
+  cc = lookup_convert_cc(state, IPMETA_PROVIDER_MAXMIND);
 
   /* update the appropriate country metric package */
-  assert(plugin_state->country_metrics[cc] != NULL);
-  metric_package_update(plugin_state->country_metrics[cc],
+  assert(plugin_state->maxmind_country_metrics[cc] != NULL);
+  metric_package_update(plugin_state->maxmind_country_metrics[cc],
 			src_ip, dst_ip, ip_len, pkt_cnt);
+#endif
+
+#ifdef WITH_NETACQ_EDGE_STATS
+  /* netacq edge country code */
+  cc = lookup_convert_cc(state, IPMETA_PROVIDER_NETACQ_EDGE);
+
+  /* update the appropriate country metric package */
+  assert(plugin_state->netacq_country_metrics[cc] != NULL);
+  metric_package_update(plugin_state->netacq_country_metrics[cc],
+			src_ip, dst_ip, ip_len, pkt_cnt);
+
+  /* netacq edge region code */
+  if((record =
+      corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_NETACQ_EDGE))
+     != NULL)
+    {
+      if(record->region_code != 0)
+	{
+	  rc = record->region_code;
+	  assert(plugin_state->netacq_region_metrics[rc] != NULL);
+	  metric_package_update(plugin_state->netacq_region_metrics[rc],
+				src_ip, dst_ip, ip_len, pkt_cnt);
+	}
+    }
 #endif
 
   /* ==================== PFX2AS ASNs ==================== */
 #ifdef WITH_PFX2AS_STATS
-  assert(plugin_state->pfx2as_provider != NULL);
-
   /* note we are deliberately discarding ASN records that have more than one ASN
      because we consider them an artifact of the measurement */
   /* we are also discarding any AS that is smaller than the smallest AS in our
@@ -671,8 +739,8 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   /* the current key id (used by METRIC_PREFIX_INIT) */
   int key_id = 0;
 
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
-  defined(WITH_PROTOCOL_STATS)
+#if defined(WITH_MAXMIND_STATS) || defined(WITH_NETACQ_EDGE_STATS) \
+  || defined(WITH_PFX2AS_STATS) || defined(WITH_PROTOCOL_STATS)
   int i;
 #endif
 
@@ -688,13 +756,21 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   uint32_t tmp_asn;
 #endif
 
-#ifdef WITH_MAXMIND_STATS
+#if defined(WITH_MAXMIND_STATS) || defined(WITH_NETACQ_EDGE_STATS)
   const char **countries;
   int country_cnt;
   const char **continents;
   int continent_cnt;
   uint16_t country_idx;
   char cc_str[6] = "--.--";
+#endif
+
+#ifdef WITH_NETACQ_EDGE_STATS
+  ipmeta_provider_t *provider;
+  ipmeta_provider_netacq_edge_country_t **netacq_countries;
+  int netacq_countries_cnt;
+  ipmeta_provider_netacq_edge_region_t **regions;
+  int regions_cnt;
 #endif
 
 #ifdef WITH_PORT_STATS
@@ -737,12 +813,6 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 
   /* initialize the providers */
 #ifdef WITH_MAXMIND_STATS
-  /* just to be safe, we set all country metric pointers to NULL first */
-  for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
-    {
-      state->country_metrics[i] = NULL;
-    }
-
   /* we want to add an empty metric for all possible countries */
   country_cnt = ipmeta_provider_maxmind_get_iso2_list(&countries);
   continent_cnt =
@@ -751,18 +821,86 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 
   for(i=0; i< country_cnt; i++)
     {
-      /* what is the index of this country in the country_metrics array? */
+      /* what is the index of this country in the maxmind_country_metrics
+       * array? */
       country_idx = (countries[i][0] << 8) | countries[i][1];
 
       /* quickly build a string which contains the continent and country code*/
       memcpy(cc_str, continents[i], 2);
       memcpy(&cc_str[3], countries[i], 2);
 
-      METRIC_PREFIX_INIT(state->country_metrics[country_idx],
+      METRIC_PREFIX_INIT(state->maxmind_country_metrics[country_idx],
 			 METRIC_PATH_MAXMIND_COUNTRY,
 			 "%s", cc_str);
     }
+#endif
 
+  /* netacq regions */
+#ifdef WITH_NETACQ_EDGE_STATS
+  /* get the netacq edge provider */
+  if((provider =
+      corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_NETACQ_EDGE))
+     == NULL || ipmeta_is_provider_enabled(provider) == 0)
+    {
+      corsaro_log(__func__, corsaro,
+		  "ERROR: Net Acuity Edge provider must be enabled");
+      return -1;
+    }
+
+  /* netacq countries */
+  netacq_countries_cnt =
+    ipmeta_provider_netacq_edge_get_countries(provider, &netacq_countries);
+
+  if(countries == NULL || netacq_countries_cnt == 0)
+    {
+      corsaro_log(__func__, corsaro,
+		  "ERROR: Net Acuity Edge provider must be used the -c option "
+		  "to load country information");
+      return -1;
+    }
+  for(i=0; i < netacq_countries_cnt; i++)
+    {
+      assert(netacq_countries[i] != NULL);
+
+      /* convert the ascii country code to a 16bit uint */
+      country_idx =
+	(netacq_countries[i]->iso2[0] << 8) | netacq_countries[i]->iso2[1];
+
+      /* build a string which contains the continent and country code*/
+      memcpy(cc_str, netacq_countries[i]->continent, 2);
+      memcpy(&cc_str[3], netacq_countries[i]->iso2, 2);
+
+      METRIC_PREFIX_INIT(state->netacq_country_metrics[country_idx],
+			 METRIC_PATH_NETACQ_EDGE_COUNTRY,
+			 "%s", cc_str);
+    }
+
+  /* net acq regions */
+  regions_cnt = ipmeta_provider_netacq_edge_get_regions(provider, &regions);
+  if(regions == NULL || regions_cnt == 0)
+    {
+      corsaro_log(__func__, corsaro,
+		  "ERROR: Net Acuity Edge provider must be used the -r option "
+		  "to load region information");
+      return -1;
+    }
+
+  for(i=0; i < regions_cnt; i++)
+    {
+      assert(regions[i] != NULL);
+      /* if netacq starts to allocate region codes > 2**16 we probably need to
+       * switch to using a hash here. Cannot use an assert because we disable
+       * those in production */
+      if(regions[i]->code > METRIC_NETACQ_EDGE_REGION_MAX)
+	{
+	  corsaro_log(__func__, corsaro,
+		      "ERROR: Net Acuity Edge region code > 2^16 found");
+	  return -1;
+	}
+      METRIC_PREFIX_INIT(state->netacq_region_metrics[regions[i]->code],
+			 METRIC_PATH_NETACQ_EDGE_REGION,
+			 "%"PRIu32, regions[i]->code);
+    }
 #endif
 
 #ifdef WITH_PFX2AS_STATS
@@ -908,10 +1046,29 @@ int corsaro_report_close_output(corsaro_t *corsaro)
 #ifdef WITH_MAXMIND_STATS
       for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
 	{
-	  if(state->country_metrics[i] != NULL)
+	  if(state->maxmind_country_metrics[i] != NULL)
 	    {
-	      metric_package_destroy(state->country_metrics[i]);
-	      state->country_metrics[i] = NULL;
+	      metric_package_destroy(state->maxmind_country_metrics[i]);
+	      state->maxmind_country_metrics[i] = NULL;
+	    }
+	}
+#endif
+
+#ifdef WITH_NETACQ_STATS
+      for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
+	{
+	  if(state->netacq_country_metrics[i] != NULL)
+	    {
+	      metric_package_destroy(state->netacq_country_metrics[i]);
+	      state->netacq_country_metrics[i] = NULL;
+	    }
+	}
+      for(i = 0; i < METRIC_NETACQ_EDGE_REGION_MAX; i++)
+	{
+	  if(state->netacq_region_metrics[i] != NULL)
+	    {
+	      metric_package_destroy(state->netacq_region_metrics[i]);
+	      state->netacq_region_metrics[i] = NULL;
 	    }
 	}
 #endif
@@ -1016,8 +1173,9 @@ int corsaro_report_start_interval(corsaro_t *corsaro,
 int corsaro_report_end_interval(corsaro_t *corsaro,
 				corsaro_interval_t *int_end)
 {
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
-  defined(WITH_PROTOCOL_STATS) || defined(WITH_PORT_STATS)
+#if defined(WITH_MAXMIND_STATS) || defined(WITH_NETACQ_EDGE_STATS)	\
+  || defined(WITH_PFX2AS_STATS) || defined(WITH_PROTOCOL_STATS)		\
+  || defined(WITH_PORT_STATS)
   struct corsaro_report_state_t *state = STATE(corsaro);
   int i;
 #endif
@@ -1034,9 +1192,26 @@ int corsaro_report_end_interval(corsaro_t *corsaro,
   for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
     {
       /* NOTE: most of these will be NULL! */
-      if(state->country_metrics[i] != NULL)
+      if(state->maxmind_country_metrics[i] != NULL)
 	{
-	  metric_package_dump(state, state->country_metrics[i]);
+	  metric_package_dump(state, state->maxmind_country_metrics[i]);
+	}
+    }
+#endif
+
+#ifdef WITH_NETACQ_EDGE_STATS
+  for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
+    {
+      /* NOTE: most of these will be NULL! */
+      if(state->netacq_country_metrics[i] != NULL)
+	{
+	  metric_package_dump(state, state->netacq_country_metrics[i]);
+	}
+
+      /* NOTE: most of these will be NULL! */
+      if(state->netacq_region_metrics[i] != NULL)
+	{
+	  metric_package_dump(state, state->netacq_region_metrics[i]);
 	}
     }
 #endif
