@@ -867,8 +867,21 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 	(netacq_countries[i]->iso2[0] << 8) | netacq_countries[i]->iso2[1];
 
       /* build a string which contains the continent and country code*/
+      /* graphite dislikes metrics with *'s in them, replace with '-' */
+      cc_str[0] = (netacq_countries[i]->continent[0] == '*') ?
+	'-' : netacq_countries[i]->continent[0];
+      cc_str[1] = (netacq_countries[i]->continent[1] == '*') ?
+	'-' : netacq_countries[i]->continent[1];
+
+      cc_str[3] = (netacq_countries[i]->iso2[0] == '*') ?
+	'-' : netacq_countries[i]->iso2[0];
+      cc_str[4] = (netacq_countries[i]->iso2[1] == '*') ?
+	'-' : netacq_countries[i]->iso2[1];
+
+      /*
       memcpy(cc_str, netacq_countries[i]->continent, 2);
       memcpy(&cc_str[3], netacq_countries[i]->iso2, 2);
+      */
 
       METRIC_PREFIX_INIT(state->netacq_country_metrics[country_idx],
 			 METRIC_PATH_NETACQ_EDGE_COUNTRY,
