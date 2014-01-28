@@ -137,6 +137,14 @@ const char *metric_type_names[] = {
  * could easily go higher. be careful) */
 #define METRIC_NETACQ_EDGE_REGION_MAX UINT16_MAX
 
+/** a hash type to map ISO3 country codes to a continent.ISO2 string */
+KHASH_INIT(strstr, char*, char*, 1, kh_str_hash_func, kh_str_hash_equal)
+
+static inline void str_free(char *str)
+{
+  free(str);
+}
+
 #endif
 
 /* ---------- PFX2AS METRIC SETTINGS ---------- */
@@ -741,6 +749,11 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   int i;
 #endif
 
+#if defined(WITH_PFX2AS_STATS) || defined(WITH_NETACQ_EDGE_STATS)
+  khiter_t khiter;
+  int khret;
+#endif
+
 #ifdef WITH_PFX2AS_STATS
   /* Array of ASNs, sorted in descending order by number of IPs each AS owns */
   ipmeta_record_t **pfx2as_records;
@@ -748,18 +761,19 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   int pfx2as_records_cnt;
 
   metric_package_t *tmp_mp;
-  khiter_t khiter;
-  int khret;
   uint32_t tmp_asn;
 #endif
 
 #if defined(WITH_MAXMIND_STATS) || defined(WITH_NETACQ_EDGE_STATS)
+  char cc_str[6] = "--.--";
+  uint16_t country_idx;
+#endif
+
+#ifdef WITH_MAXMIND_STATS
   const char **countries;
   int country_cnt;
   const char **continents;
   int continent_cnt;
-  uint16_t country_idx;
-  char cc_str[6] = "--.--";
 #endif
 
 #ifdef WITH_NETACQ_EDGE_STATS
@@ -768,6 +782,13 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   int netacq_countries_cnt;
   ipmeta_provider_netacq_edge_region_t **regions;
   int regions_cnt;
+
+  char *cc_ptr;
+  char *cc_cpy;
+  khash_t(strstr) *country_hash = kh_init(strstr);
+  int j;
+
+  char rc_str[10];
 #endif
 
 #ifdef WITH_PORT_STATS
@@ -864,16 +885,28 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 	(netacq_countries[i]->iso2[0] << 8) | netacq_countries[i]->iso2[1];
 
       /* build a string which contains the continent and country code*/
-      /* graphite dislikes metrics with *'s in them, replace with '-' */
-      cc_str[0] = (netacq_countries[i]->continent[0] == '*') ?
-	'-' : netacq_countries[i]->continent[0];
-      cc_str[1] = (netacq_countries[i]->continent[1] == '*') ?
-	'-' : netacq_countries[i]->continent[1];
+      cc_ptr = cc_str;
+      cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->continent, 3);
+      *cc_ptr = '.';
+      cc_ptr++;
+      cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->iso2, 3);
 
-      cc_str[3] = (netacq_countries[i]->iso2[0] == '*') ?
-	'-' : netacq_countries[i]->iso2[0];
-      cc_str[4] = (netacq_countries[i]->iso2[1] == '*') ?
-	'-' : netacq_countries[i]->iso2[1];
+      /* graphite dislikes metrics with *'s in them, replace with '-' */
+      for(j=0; j<strnlen(cc_str, 5); j++)
+	{
+	  if(cc_str[j] == '*')
+	    {
+	      cc_str[j] = '-';
+	    }
+	}
+
+      if((cc_cpy = strndup(cc_str, 5)) == NULL)
+	{
+	  corsaro_log(__func__, corsaro, "could not allocate country string");
+	  return -1;
+	}
+      khiter = kh_put(strstr, country_hash, netacq_countries[i]->iso3, &khret);
+      kh_value(country_hash, khiter) = cc_cpy;
 
       /*
       memcpy(cc_str, netacq_countries[i]->continent, 2);
@@ -907,10 +940,33 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 		      "ERROR: Net Acuity Edge region code > 2^16 found");
 	  return -1;
 	}
+
+      /* get the continent/country code string */
+      khiter = kh_get(strstr, country_hash, regions[i]->country_iso);
+      assert(khiter != kh_end(country_hash));
+
+      cc_ptr = kh_value(country_hash, khiter);
+      cc_ptr = stpncpy(rc_str, cc_ptr, 6);
+      *cc_ptr = '.';
+      cc_ptr++;
+      strncpy(cc_ptr, regions[i]->region_iso, 4);
+
+      /* fix the *'s */
+      for(; *cc_ptr != '\0'; cc_ptr++)
+	{
+	  if(*cc_ptr == '*')
+	    {
+	      *cc_ptr = '-';
+	    }
+	}
+
       METRIC_PREFIX_INIT(state->netacq_region_metrics[regions[i]->code],
 			 METRIC_PATH_NETACQ_EDGE_REGION,
-			 "%"PRIu32, regions[i]->code);
+			 "%s", rc_str);
     }
+
+  kh_free_vals(strstr, country_hash, str_free);
+  kh_destroy(strstr, country_hash);
 #endif
 
 #ifdef WITH_PFX2AS_STATS
