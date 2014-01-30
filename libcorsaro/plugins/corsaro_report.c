@@ -1120,7 +1120,7 @@ int corsaro_report_close_output(corsaro_t *corsaro)
 	}
 #endif
 
-#ifdef WITH_NETACQ_STATS
+#ifdef WITH_NETACQ_EDGE_STATS
       for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
 	{
 	  if(state->netacq_country_metrics[i] != NULL)
