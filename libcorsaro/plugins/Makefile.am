@@ -64,6 +64,9 @@ if WITH_PLUGIN_CONFICKERSCAN
 PLUGIN_SRC+=corsaro_confickerscan.c corsaro_confickerscan.h 
 endif
 if WITH_PLUGIN_P0F
+SUBDIRS+=libp0f
+PLUGIN_LIBS += $(top_builddir)/libcorsaro/plugins/libp0f/libp0f.la
+AM_CPPFLAGS += -I$(top_srcdir)/libcorsaro/plugins/libp0f
 PLUGIN_SRC+=corsaro_p0f.c corsaro_p0f.h 
 endif
 if WITH_PLUGIN_REPORT

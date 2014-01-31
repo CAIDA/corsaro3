@@ -275,20 +275,8 @@ if test "x$with_plugin_report" == xyes; then
    ])
 fi
 
-# unfortunately we have to generate all of these Makefiles because of make dist
-# they will not however be compiled into the binary unless they are used
-
-# libp0f is only used by p0f (of course)
-AM_CONDITIONAL([WITH_LIBP0F], [test x$with_plugin_p0f == xyes])
-#if test "x$with_plugin_p0f" == xyes; then
-#	  AC_CONFIG_FILES([common/libp0f/Makefile])
-#fi
-
 # libanon is only used by anon (for now)
 AM_CONDITIONAL([WITH_LIBANON], [test x$with_plugin_anon == xyes])
-#if test "x$with_plugin_anon" == xyes; then
-#	  AC_CONFIG_FILES([common/libanon/Makefile])
-#fi
 
 # the confickerscan plugin needs p0f also
 if test "x$with_plugin_confickerscan" == xyes && 
@@ -309,12 +297,12 @@ AC_SUBST([CORSARO_MINOR_VERSION])
 AC_HEADER_ASSERT
 
 AC_CONFIG_FILES([Makefile libcorsaro/Makefile libcorsaro/plugins/Makefile
+			  libcorsaro/plugins/libp0f/Makefile
 			  tools/Makefile common/Makefile
 			  common/libanon/Makefile
-			  common/libp0f/Makefile
 			  common/libpatricia/Makefile
 			  common/libcsv/Makefile
-			  docs/Makefile 
+			  docs/Makefile
 			  docs/corsaro.doxygen
 			  docs/corsaro.caida.doxygen])
 AC_OUTPUT

@@ -32,12 +32,6 @@ noinst_LTLIBRARIES = libcorsarocommon.la
 
 CONDITIONAL_LIBS=
 
-if WITH_LIBP0F
-SUBDIRS += libp0f
-CONDITIONAL_LIBS += $(top_builddir)/common/libp0f/libp0f.la
-AM_CPPFLAGS += -I$(top_srcdir)/common/libp0f
-endif
-
 if WITH_LIBANON
 SUBDIRS += libanon
 CONDITIONAL_LIBS += $(top_builddir)/common/libanon/libanon.la
