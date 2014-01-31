@@ -27,7 +27,6 @@ SUBDIRS =
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
 	-I$(top_srcdir)/common/libpatricia \
 	-I$(top_srcdir)/common/libcsv \
-	-I$(top_srcdir)/common/libanon \
 	-I$(top_srcdir)/libcorsaro
 
 # -I$(top_srcdir)/libcorsaro/plugins/libsmee
@@ -55,6 +54,9 @@ PLUGIN_SRC+=corsaro_smee.c corsaro_smee.h
 #PLUGIN_LIBS += $(top_builddir)/libcorsaro/plugins/libsmee/libsmee.la
 endif
 if WITH_PLUGIN_ANON
+SUBDIRS += libanon
+PLUGIN_LIBS += $(top_builddir)/libcorsaro/plugins/libanon/libanon.la
+AM_CPPFLAGS += -I$(top_srcdir)/libcorsaro/plugins/libanon
 PLUGIN_SRC+=corsaro_anon.c corsaro_anon.h
 endif
 if WITH_PLUGIN_IPMETA

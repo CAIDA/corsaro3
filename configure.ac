@@ -275,14 +275,12 @@ if test "x$with_plugin_report" == xyes; then
    ])
 fi
 
-# libanon is only used by anon (for now)
-AM_CONDITIONAL([WITH_LIBANON], [test x$with_plugin_anon == xyes])
-
 # the confickerscan plugin needs p0f also
 if test "x$with_plugin_confickerscan" == xyes && 
    test "x$with_plugin_p0f" != xyes; then
    AC_MSG_ERROR([corsaro_confickerscan plugin requires corsaro_p0f plugin])
 fi
+
 
 ################################################################################
 # END PLUGIN CONFIGURATION                                                     #
@@ -298,8 +296,8 @@ AC_HEADER_ASSERT
 
 AC_CONFIG_FILES([Makefile libcorsaro/Makefile libcorsaro/plugins/Makefile
 			  libcorsaro/plugins/libp0f/Makefile
+			  libcorsaro/plugins/libanon/Makefile
 			  tools/Makefile common/Makefile
-			  common/libanon/Makefile
 			  common/libpatricia/Makefile
 			  common/libcsv/Makefile
 			  docs/Makefile
