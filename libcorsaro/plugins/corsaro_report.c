@@ -872,8 +872,8 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   if(countries == NULL || netacq_countries_cnt == 0)
     {
       corsaro_log(__func__, corsaro,
-		  "ERROR: Net Acuity Edge provider must be used the -c option "
-		  "to load country information");
+		  "ERROR: Net Acuity Edge provider must be used with the -c "
+		  "option to load country information");
       return -1;
     }
   for(i=0; i < netacq_countries_cnt; i++)
@@ -923,8 +923,8 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   if(regions == NULL || regions_cnt == 0)
     {
       corsaro_log(__func__, corsaro,
-		  "ERROR: Net Acuity Edge provider must be used the -r option "
-		  "to load region information");
+		  "ERROR: Net Acuity Edge provider must be used with the -r "
+		  "option to load region information");
       return -1;
     }
 
