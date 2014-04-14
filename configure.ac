@@ -59,8 +59,6 @@ AC_CONFIG_HEADERS([config.h])
 
 # Checks for programs.
 AC_PROG_LIBTOOL
-AC_PROG_CXX
-AM_PROG_LIBTOOL
 AC_PROG_CC_C99
 
 AC_SYS_LARGEFILE
@@ -122,7 +120,7 @@ AC_ARG_WITH(man,
 ])
 
 # Checks for typedefs, structures, and compiler characteristics.
-AC_C_INLINE
+#AC_C_INLINE # 2014-04-14 AK removes because it causes problems with clang3.4
 AC_TYPE_SIZE_T
 AC_TYPE_UINT16_T
 AC_TYPE_UINT32_T
@@ -213,6 +211,7 @@ ED_WITH_PLUGIN([corsaro_p0f],[p0f],[P0F],[no])
 # should [not] be written out
 ED_WITH_PLUGIN([corsaro_filtergeo],[filtergeo],[FILTERGEO],[no])
 ED_WITH_PLUGIN([corsaro_filterpfx],[filterpfx],[FILTERPFX],[no])
+ED_WITH_PLUGIN([corsaro_filterbpf],[filterbpf],[FILTERBPF],[no])
 
 #pass-through pcap plugin
 # the pcap plugin only makes sense in live mode, so disable it by default
