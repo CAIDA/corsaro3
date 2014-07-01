@@ -417,7 +417,7 @@ int corsaro_ipmeta_process_packet(corsaro_t *corsaro,
 
   /* no point carrying on if a previous plugin has already decided we should
      ignore this packet */
-  if((packet->state.flags & CORSARO_PACKET_STATE_IGNORE) != 0)
+  if((packet->state.flags & CORSARO_PACKET_STATE_FLAG_IGNORE) != 0)
     {
       return 0;
     }
@@ -440,10 +440,11 @@ int corsaro_ipmeta_process_flowtuple(corsaro_t *corsaro,
 {
   /* no point carrying on if a previous plugin has already decided we should
      ignore this tuple */
-  if((state->flags & CORSARO_PACKET_STATE_IGNORE) != 0)
+  if((state->flags & CORSARO_PACKET_STATE_FLAG_IGNORE) != 0)
     {
       return 0;
     }
+
   return process_generic(corsaro, state,
 			 corsaro_flowtuple_get_source_ip(flowtuple));
 }

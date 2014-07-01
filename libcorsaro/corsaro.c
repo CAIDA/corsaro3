@@ -36,6 +36,7 @@
 #include "corsaro_file.h"
 #include "corsaro_io.h"
 #include "corsaro_log.h"
+#include "corsaro_tag.h"
 #include "utils.h"
 
 #ifdef WITH_PLUGIN_SIXT
@@ -67,16 +68,46 @@ static corsaro_packet_t *corsaro_packet_alloc(corsaro_t *corsaro)
 /** Reset the state for a the given corsaro packet wrapper */
 static inline void corsaro_packet_state_reset(corsaro_packet_t *packet)
 {
+  int i;
   assert(packet != NULL);
 
-  /* This is dangerous to do field-by-field, new plugins may not be responsible
-     and reset their own fields. Therefore we will do this by force */
-  memset(&packet->state, 0, sizeof(corsaro_packet_state_t));
+  /* now that we have added the corsaro_tag framework we can no longer do the
+     brute-force reset of the packet state to 0, each field MUST be individually
+     cleared. if you add a field to corsaro_packet_state_t, you MUST reset it
+     here */
+
+  /* reset the general flags */
+  packet->state.flags = 0;
+
+  /* reset each matched tag */
+  for(i=0; i<packet->state.tag_matches_cnt; i++)
+    {
+      packet->state.tag_matches[i] = 0;
+    }
+  /* reset the number of matched tag */
+  packet->state.tag_matches_set_cnt = 0;
+
+#ifdef WITH_PLUGIN_IPMETA
+  /* reset the matched ipmeta records */
+  for(i=0; i<IPMETA_PROVIDER_MAX; i++)
+    {
+      packet->state.ipmeta_records[i] = NULL;
+    }
+  /* reset the default match */
+  packet->state.ipmeta_record_default = NULL;
+#endif
 }
 
 /** Free the given corsaro packet wrapper */
 static void corsaro_packet_free(corsaro_packet_t *packet)
 {
+  if(packet->state.tag_matches != NULL)
+    {
+      free(packet->state.tag_matches);
+      packet->state.tag_matches = NULL;
+      packet->state.tag_matches_cnt = 0;
+    }
+
   /* we will assume that somebody else is taking care of the libtrace packet */
   if(packet != NULL)
     {
@@ -106,6 +137,13 @@ static void corsaro_free(corsaro_t *corsaro)
 
       corsaro_plugin_manager_free(corsaro->plugin_manager);
       corsaro->plugin_manager = NULL;
+    }
+
+  /* free the tag manager */
+  if(corsaro->tag_manager != NULL)
+    {
+      corsaro_tag_manager_free(corsaro->tag_manager);
+      corsaro->tag_manager = NULL;
     }
 
   if(corsaro->uridata != NULL)
@@ -235,6 +273,13 @@ static corsaro_t *corsaro_init(char *template, corsaro_file_mode_t mode)
   if((e->plugin_manager = corsaro_plugin_manager_init(e->logfile)) == NULL)
     {
       corsaro_log(__func__, e, "could not initialize plugin manager");
+      goto err;
+    }
+
+  /* get the tag manager started */
+  if((e->tag_manager = corsaro_tag_manager_init(e)) == NULL)
+    {
+      corsaro_log(__func__, e, "could not initialize tag manager");
       goto err;
     }
 
