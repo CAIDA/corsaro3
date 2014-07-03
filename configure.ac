@@ -223,6 +223,7 @@ ED_WITH_PLUGIN([corsaro_flowtuple],[flowtuple],[SIXT],[yes])
 # optional plugins
 ED_WITH_PLUGIN([corsaro_dos],[dos],[DOS],[no])
 ED_WITH_PLUGIN([corsaro_smee],[smee],[SMEE],[no])
+ED_WITH_PLUGIN([corsaro_tagstats],[tagstats],[TAGSTATS],[no])
 
 # plugins contributed by karyn
 ED_WITH_PLUGIN([corsaro_confickerscan],[confickerscan],[CONFICKERSCAN],[no])

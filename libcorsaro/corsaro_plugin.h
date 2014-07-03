@@ -203,8 +203,11 @@ typedef enum corsaro_plugin_id
   /** Smee plugin */
   CORSARO_PLUGIN_ID_SMEE             = 80,
 
+  /** Tag stats plugin */
+  CORSARO_PLUGIN_ID_TAGSTATS         = 90,
+
   /** Reporting plugin */
-  CORSARO_PLUGIN_ID_REPORT           = 90,
+  CORSARO_PLUGIN_ID_REPORT           = 100,
 
   /** Maximum plugin ID assigned */
   CORSARO_PLUGIN_ID_MAX              = CORSARO_PLUGIN_ID_REPORT
