@@ -45,6 +45,7 @@
 #include "corsaro_io.h"
 #include "corsaro_log.h"
 #include "corsaro_plugin.h"
+#include "corsaro_tag.h"
 
 #ifdef WITH_PLUGIN_SIXT
 #include "corsaro_flowtuple.h"
@@ -60,8 +61,22 @@
  *
  */
 
+/*
+ * TODO
+ *
+ * meta metrics:
+ *  pkts per group/tag
+ *  srcs per group/tag
+ *
+ * test the metric trees (dump an hour into graphite and browse)
+ *
+ * test the values.
+ * how?
+ *
+ */
+
 /** The magic number for this plugin - "REPT" */
-#define CORSARO_ANON_MAGIC 0x52455054
+#define CORSARO_REPORT_MAGIC 0x52455054
 
 /** The name of this plugin */
 #define PLUGIN_NAME "report"
@@ -72,66 +87,148 @@
 /* to count the number of unique src ips per country */
 KHASH_INIT(32xx, khint32_t, char, 0, kh_int_hash_func2, kh_int_hash_equal)
 
-/** Structure which holds state about sub-metrics for each metric */
-typedef struct metric_package {
-  uint32_t id_offset;
-  khash_t(32xx) *uniq_src_ip;
-  khash_t(32xx) *uniq_dst_ip;
-  uint64_t pkt_cnt;
-  uint64_t ip_len;
-} metric_package_t;
-
-
-/* ---------- TURN THINGS ON AND OFF ---------- */
-
-#define WITH_MAXMIND_STATS
-#define WITH_NETACQ_EDGE_STATS
-#define WITH_PFX2AS_STATS
-#define WITH_PROTOCOL_STATS
-#define WITH_PORT_STATS
-
 /* ---------- GLOBAL METRIC SETTINGS ---------- */
 
 /** The prefix to attach to all metrics */
+/** @todo make the darknet name configurable */
 #define METRIC_PREFIX "darknet.ucsd-nt"
 
-enum metric_type {
-  METRIC_TYPE_UNIQ_SRC_IP = 0,
-  METRIC_TYPE_UNIQ_DST_IP = 1,
-  METRIC_TYPE_PKT_CNT     = 2,
-  METRIC_TYPE_IP_LEN      = 3,
+enum leafmetric_id {
+  LEAFMETRIC_ID_UNIQ_SRC_IP = 0,
+  LEAFMETRIC_ID_UNIQ_DST_IP = 1,
+  LEAFMETRIC_ID_PKT_CNT     = 2,
+  LEAFMETRIC_ID_IP_LEN      = 3,
 
-  METRIC_TYPE_CNT         = 4
+  LEAFMETRIC_ID_CNT         = 4
 };
 
-const char *metric_type_names[] = {
+const char *leafmetric_names[] = {
   "uniq_src_ip",
   "uniq_dst_ip",
   "pkt_cnt",
   "ip_len"
 };
 
-/* ---------- MAXMIND METRIC SETTINGS ---------- */
-#ifdef WITH_MAXMIND_STATS
+enum leafmetric_flag {
+  LEAFMETRIC_FLAG_UNIQ_SRC_IP   = 0x01,
+  LEAFMETRIC_FLAG_UNIQ_DST_IP   = 0x02,
+  LEAFMETRIC_FLAG_PKT_CNT       = 0x04,
+  LEAFMETRIC_FLAG_IP_LEN        = 0x08,
+};
 
-#define METRIC_PATH_MAXMIND_COUNTRY    METRIC_PREFIX".geo.maxmind"
+enum submetric_id {
+  SUBMETRIC_ID_MAXMIND_COUNTRY     = 0,
+  SUBMETRIC_ID_NETACQ_EDGE_COUNTRY = 1,
+  SUBMETRIC_ID_NETACQ_EDGE_REGION  = 2,
+  SUBMETRIC_ID_PFX2AS              = 3,
+  SUBMETRIC_ID_PROTOCOL            = 4,
+  SUBMETRIC_ID_PORT                = 5,
+
+  SUBMETRIC_ID_CNT                 = 6,
+};
+
+enum submetric_flag {
+  SUBMETRIC_FLAG_MAXMIND_COUNTRY     = 0x01,
+  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY = 0x02,
+  SUBMETRIC_FLAG_NETACQ_EDGE_REGION  = 0x04,
+  SUBMETRIC_FLAG_PFX2AS              = 0x08,
+  SUBMETRIC_FLAG_PROTOCOL            = 0x10,
+  SUBMETRIC_FLAG_PORT                = 0x20,
+};
+
+const uint8_t submetric_leafmetrics[] = {
+  /** Maxmind country */
+  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+  LEAFMETRIC_FLAG_UNIQ_DST_IP |
+  LEAFMETRIC_FLAG_PKT_CNT,
+
+  /* Netacq country */
+  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+  LEAFMETRIC_FLAG_UNIQ_DST_IP |
+  LEAFMETRIC_FLAG_PKT_CNT,
+
+  /* Netacq region */
+  LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
+  /* Pfx2AS */
+  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+  LEAFMETRIC_FLAG_UNIQ_DST_IP |
+  LEAFMETRIC_FLAG_PKT_CNT,
+
+  /* Protocol */
+  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+  LEAFMETRIC_FLAG_UNIQ_DST_IP |
+  LEAFMETRIC_FLAG_PKT_CNT |
+  LEAFMETRIC_FLAG_IP_LEN,
+
+  /* Port */
+  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+  LEAFMETRIC_FLAG_UNIQ_DST_IP |
+  LEAFMETRIC_FLAG_PKT_CNT |
+  LEAFMETRIC_FLAG_IP_LEN,
+};
+
+enum tree_id {
+  TREE_ID_UNFILTERED  = 0,
+  TREE_ID_NONSPOOFED  = 1,
+  TREE_ID_NONERRATIC  = 2,
+  TREE_ID_CNT         = 3,
+};
+
+const char *tree_names[] = {
+  "unfiltered",
+  "non-spoofed",
+  "non-erratic",
+};
+
+const uint8_t tree_submetrics[] = {
+  /** Unfiltered */
+  SUBMETRIC_FLAG_MAXMIND_COUNTRY |
+  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY |
+  SUBMETRIC_FLAG_PROTOCOL |
+  SUBMETRIC_FLAG_PORT,
+
+  /** Non-spoofed */
+  SUBMETRIC_FLAG_MAXMIND_COUNTRY |
+  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY |
+  SUBMETRIC_FLAG_NETACQ_EDGE_REGION |
+  SUBMETRIC_FLAG_PFX2AS |
+  SUBMETRIC_FLAG_PROTOCOL |
+  SUBMETRIC_FLAG_PORT,
+
+  /** Non-erratic */
+  SUBMETRIC_FLAG_MAXMIND_COUNTRY |
+  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY |
+  SUBMETRIC_FLAG_NETACQ_EDGE_REGION |
+  SUBMETRIC_FLAG_PFX2AS,
+};
+
+/** Structure which holds state about sub-metrics for each metric */
+typedef struct leafmetric_package {
+  uint32_t id_offset;
+  enum submetric_id submetric_id;
+  khash_t(32xx) *uniq_src_ip;
+  khash_t(32xx) *uniq_dst_ip;
+  uint64_t pkt_cnt;
+  uint64_t ip_len;
+} leafmetric_package_t;
+
+/* ---------- MAXMIND METRIC SETTINGS ---------- */
+#define METRIC_PATH_MAXMIND_COUNTRY    ".geo.maxmind"
 
 /** The max number of values in a 16 bit number (two 8-bit ascii characters) */
 #define METRIC_MAXMIND_ASCII_MAX UINT16_MAX
 
-#endif
 
 /* ---------- NETACQ EDGE METRIC SETTINGS ---------- */
-#ifdef WITH_NETACQ_EDGE_STATS
-
 #define METRIC_PATH_NETACQ_EDGE_COUNTRY     \
-  METRIC_PREFIX".geo.netacuity.edge.country"
+  ".geo.netacuity.edge.country"
 
 /** The max number of values in a 16 bit number (two 8-bit ascii characters) */
 #define METRIC_NETACQ_EDGE_COUNTRY_MAX UINT16_MAX
 
 #define METRIC_PATH_NETACQ_EDGE_REGION     \
-  METRIC_PREFIX".geo.netacuity.edge.region"
+  ".geo.netacuity.edge.region"
 
 /** The max region code value (currently the actual max is 30,404, but this
  * could easily go higher. be careful) */
@@ -145,12 +242,9 @@ static inline void str_free(char *str)
   free(str);
 }
 
-#endif
 
 /* ---------- PFX2AS METRIC SETTINGS ---------- */
-#ifdef WITH_PFX2AS_STATS
-
-#define METRIC_PATH_PFX2AS             METRIC_PREFIX".routing.pfx2as.asn"
+#define METRIC_PATH_PFX2AS             ".routing.pfx2as.asn"
 #define METRIC_PFX2AS_VAL_MAX          3000
 
 /** Sort PFX2AS ASN Records
@@ -178,23 +272,16 @@ static inline void str_free(char *str)
 
 KSORT_INIT(pfx2as_ip_cnt_desc, ipmeta_record_t*, pfx2as_ip_cnt_lt);
 
-KHASH_INIT(u32metric, uint32_t, metric_package_t *, 1,
+KHASH_INIT(u32metric, uint32_t, leafmetric_package_t *, 1,
 	   kh_int_hash_func2, kh_int_hash_equal)
 
-#endif
 
 /* ---------- PROTOCOL METRIC SETTINGS ---------- */
-#ifdef WITH_PROTOCOL_STATS
-
-#define METRIC_PATH_PROTOCOL            METRIC_PREFIX".traffic.protocol"
+#define METRIC_PATH_PROTOCOL            ".traffic.protocol"
 #define METRIC_PROTOCOL_VAL_MAX         256
 
-#endif
 
 /* ---------- PORT METRIC SETTINGS ---------- */
-
-#ifdef WITH_PORT_STATS
-
 /* these need to be METRIC_DIRECTION_MAX apart */
 enum {
   METRIC_PORT_PROTOCOL_SKIP  = -1,
@@ -212,10 +299,10 @@ enum {
   METRIC_PORT_DIRECTION_MAX = METRIC_PORT_DIRECTION_DST,
 };
 
-#define METRIC_PORT_VAL_MAX 6000
-/* 65536 is the actual max, but we just want the first 6000 */
+#define METRIC_PORT_VAL_MAX 1024
+/* 65536 is the actual max, but we just want the first 1024 */
 
-#define PORT_PREFIX METRIC_PREFIX".traffic.port"
+#define PORT_PREFIX ".traffic.port"
 
 static char *port_metric_paths[] = {
   PORT_PREFIX".tcp.src_port",
@@ -227,15 +314,14 @@ static char *port_metric_paths[] = {
   PORT_PREFIX".other.dst_port",
   */
 };
-#endif
 
 /* ---------- END METRIC SETTINGS ---------- */
 
 /** Common plugin information across all instances */
 static corsaro_plugin_t corsaro_report_plugin = {
   PLUGIN_NAME,                                 /* name */
-  CORSARO_PLUGIN_ID_REPORT,                      /* id */
-  CORSARO_ANON_MAGIC,                          /* magic */
+  CORSARO_PLUGIN_ID_REPORT,                    /* id */
+  CORSARO_REPORT_MAGIC,                        /* magic */
 #ifdef WITH_PLUGIN_SIXT
   CORSARO_PLUGIN_GENERATE_PTRS_FT(corsaro_report),  /* func ptrs */
 #else
@@ -244,53 +330,71 @@ static corsaro_plugin_t corsaro_report_plugin = {
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
 
-/** Holds the state for an instance of this plugin */
-struct corsaro_report_state_t {
+/** Holds the state for an instance of a filter */
+typedef struct metric_tree {
 
-#ifdef WITH_MAXMIND_STATS
+  /** ID of this tree
+   *
+   * The tree ID, in conjunction with tree_submetrics[id] will determine which
+   * of these fields are used in a given tree
+   *
+   */
+  enum tree_id id;
+
+  /** The tag group that will determine whether metrics in this tree get updated */
+  corsaro_tag_group_t *group;
+
+  /** Bit flags indicating which sub metrics are in use in this tree */
+  uint8_t used_metrics;
+
+  /** Bit flags indicating which leaf metrics are in use in this tree */
+  uint8_t used_leaf_metrics;
+
   /** Array of countries (converted to integers) that point to metrics.
    *
    * Even though it uses more memory, we create an array that can hold 2^16
    * countries -- this allows us to directly index a country based on the
    * conversion of the ascii characters in each ISO 3166 2 character code.
    */
-  metric_package_t *maxmind_country_metrics[METRIC_MAXMIND_ASCII_MAX];
-#endif
+  leafmetric_package_t *maxmind_country_metrics[METRIC_MAXMIND_ASCII_MAX];
 
-#ifdef WITH_NETACQ_EDGE_STATS
   /** Array of country codes (specific to netacq) that point to metrics.
    *
    * Even though it uses more memory, we create an array that can hold 2^16
    * countries -- this allows us to directly index a country based on the
    * conversion of the ascii characters in each ISO 3166 2 character code.
    */
-  metric_package_t *netacq_country_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
+  leafmetric_package_t *netacq_country_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
 
   /** Array of region codes (specific to netacq) that point to metrics.
    *
    * Note that many of these will be NULL
    */
-  metric_package_t *netacq_region_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
-#endif
+  leafmetric_package_t *netacq_region_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
 
-#ifdef WITH_PFX2AS_STATS
   /** The minimum number of IPs that an ASN can have before it is considered for
       reporting (based on smallest the top METRIC_PFX2AS_VAL_MAX ASes) */
   int pfx2as_min_ip_cnt;
+
   /** Hash of asns that point to metrics */
   khash_t(u32metric) *pfx2as_metrics;
-#endif
 
-#ifdef WITH_PROTOCOL_STATS
   /** Array of protocols that each contain a metric */
-  metric_package_t *protocol_metrics[METRIC_PROTOCOL_VAL_MAX];
-#endif
+  leafmetric_package_t *protocol_metrics[METRIC_PROTOCOL_VAL_MAX];
 
-#ifdef WITH_PORT_STATS
   /** Array of port metrics */
-  metric_package_t *port_metrics[METRIC_PORT_PROTOCOL_MAX+1]	\
+  leafmetric_package_t *port_metrics[METRIC_PORT_PROTOCOL_MAX+1]	\
   [METRIC_PORT_DIRECTION_MAX+1][METRIC_PORT_VAL_MAX];
-#endif
+} metric_tree_t;
+
+/** Holds the state for an instance of this plugin */
+struct corsaro_report_state_t {
+  /** array of metric trees that we are tracking */
+  metric_tree_t *trees[TREE_ID_CNT];
+
+  /** shortcut to the unfiltered tag in the unfiltered group in the unfiltered
+      tree */
+  corsaro_tag_t *unfiltered_tag;
 
   /** libtimeseries state */
   timeseries_t *timeseries;
@@ -316,59 +420,82 @@ struct corsaro_report_state_t {
 #define PLUGIN(corsaro)						\
   (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_REPORT))
 
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
-  defined(WITH_PROTOCOL_STATS) || defined(WITH_PORT_STATS)
-static metric_package_t *metric_package_new(struct corsaro_report_state_t *state,
-					    const char *metric_prefix,
-					    uint32_t id_offset)
+#define METRIC_KEY_INIT(lmid)						\
+  do {									\
+  snprintf(key_buffer, KEY_BUFFER_LEN,					\
+	   "%s.%s", metric_prefix, leafmetric_names[lmid]);		\
+  timeseries_kp_add_key(state->kp, key_buffer);				\
+  (*id_offset)++;							\
+  } while(0)
+
+#define LMP_IF(lmflag)				\
+  if((submetric_leafmetrics[mp->submetric_id] & lmflag) != 0)
+
+static leafmetric_package_t *leafmetric_package_new(
+					struct corsaro_report_state_t *state,
+					enum submetric_id submetric_id,
+					const char *metric_prefix,
+					uint32_t *id_offset)
 {
-  metric_package_t *mp = NULL;
-  int i;
+  leafmetric_package_t *mp = NULL;
   char key_buffer[KEY_BUFFER_LEN];
 
   /* allocate memory for the metric package */
-  if((mp = malloc(sizeof(metric_package_t))) == NULL)
+  if((mp = malloc(sizeof(leafmetric_package_t))) == NULL)
     {
       /* could not malloc the memory. this is bad */
       return NULL;
     }
 
-  /* create a key in the key package for each sub-metric in the metric
-     package */
-  for(i=0; i<METRIC_TYPE_CNT; i++)
+  /* store the submetric id that owns this leafmetric package
+     this allows us to determine which elements of the package are in use */
+  mp->submetric_id = submetric_id;
+
+  /* the id of the first metric in the key package */
+  mp->id_offset = *id_offset;
+
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_SRC_IP)
     {
-      /* generate a key for this metric and insert it in the key package */
-	  snprintf(key_buffer, KEY_BUFFER_LEN,
-		   "%s.%s", metric_prefix, metric_type_names[i]);
+      mp->uniq_src_ip = kh_init(32xx);
+      METRIC_KEY_INIT(LEAFMETRIC_ID_UNIQ_SRC_IP);
+    }
 
-	  timeseries_kp_add_key(state->kp, key_buffer);
-	}
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_DST_IP)
+    {
+      mp->uniq_dst_ip = kh_init(32xx);
+      METRIC_KEY_INIT(LEAFMETRIC_ID_UNIQ_DST_IP);
+    }
 
-  /* the id of this metric in the key package */
-  mp->id_offset = id_offset;
+  LMP_IF(LEAFMETRIC_FLAG_PKT_CNT)
+    {
+      mp->pkt_cnt = 0;
+      METRIC_KEY_INIT(LEAFMETRIC_ID_PKT_CNT);
+    }
 
-  /* create a new src ip map */
-  mp->uniq_src_ip = kh_init(32xx);
-  /* create a new dst ip map */
-  mp->uniq_dst_ip = kh_init(32xx);
-
-  /* zero the packet count (better than a memset 0 on all of it?) */
-  mp->pkt_cnt = 0;
-  /* and the byte count */
-  mp->ip_len = 0;
+  LMP_IF(LEAFMETRIC_FLAG_IP_LEN)
+    {
+      mp->ip_len = 0;
+      METRIC_KEY_INIT(LEAFMETRIC_ID_IP_LEN);
+    }
 
   return mp;
 }
 
-static void metric_package_destroy(metric_package_t *mp)
+static void metric_package_destroy(leafmetric_package_t *mp)
 {
   assert(mp != NULL);
 
   /* free the src ip map */
-  kh_destroy(32xx, mp->uniq_src_ip);
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_SRC_IP)
+    {
+      kh_destroy(32xx, mp->uniq_src_ip);
+    }
 
   /* free the dst ip map */
-  kh_destroy(32xx, mp->uniq_dst_ip);
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_DST_IP)
+    {
+      kh_destroy(32xx, mp->uniq_dst_ip);
+    }
 
   /* finally, free the metric package */
   free(mp);
@@ -376,7 +503,7 @@ static void metric_package_destroy(metric_package_t *mp)
   return;
 }
 
-static void metric_package_update(metric_package_t *mp,
+static void metric_package_update(leafmetric_package_t *mp,
 				  uint32_t src_ip,
 				  uint32_t dst_ip,
 				  uint16_t ip_len,
@@ -385,45 +512,640 @@ static void metric_package_update(metric_package_t *mp,
   int khret;
   assert(mp != NULL);
 
-  /* simply add the src ip to the map */
-  kh_put(32xx, mp->uniq_src_ip, src_ip, &khret);
-  /* and add the dst ip */
-  kh_put(32xx, mp->uniq_dst_ip, dst_ip, &khret);
-  /* and increment the packet count */
-  mp->pkt_cnt+=pkt_cnt;
-  /* and increment the byte counter */
-  mp->ip_len+=(ip_len*pkt_cnt);
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_SRC_IP)
+    {
+      /* add the src ip to the map */
+      kh_put(32xx, mp->uniq_src_ip, src_ip, &khret);
+    }
+
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_DST_IP)
+    {
+      /* add the dst ip */
+      kh_put(32xx, mp->uniq_dst_ip, dst_ip, &khret);
+    }
+
+  LMP_IF(LEAFMETRIC_FLAG_PKT_CNT)
+    {
+      /* increment the packet count */
+      mp->pkt_cnt+=pkt_cnt;
+    }
+
+  LMP_IF(LEAFMETRIC_FLAG_IP_LEN)
+    {
+      /* increment the byte counter */
+      mp->ip_len+=(ip_len*pkt_cnt);
+    }
 
   return;
 }
 
 static void metric_package_dump(struct corsaro_report_state_t *state,
-				metric_package_t *mp)
+				leafmetric_package_t *mp)
 {
-  timeseries_kp_set(state->kp,
-		    mp->id_offset+METRIC_TYPE_UNIQ_SRC_IP,
-		    (uint64_t)kh_size(mp->uniq_src_ip));
+  int offset = 0;
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_SRC_IP)
+    {
+      timeseries_kp_set(state->kp,
+			mp->id_offset+offset,
+			(uint64_t)kh_size(mp->uniq_src_ip));
 
-  timeseries_kp_set(state->kp,
-		    mp->id_offset+METRIC_TYPE_UNIQ_DST_IP,
-		    (uint64_t)kh_size(mp->uniq_dst_ip));
+      kh_clear(32xx, mp->uniq_src_ip);
+      offset++;
+    }
 
-  timeseries_kp_set(state->kp,
-		    mp->id_offset+METRIC_TYPE_PKT_CNT,
-		    mp->pkt_cnt);
+  LMP_IF(LEAFMETRIC_FLAG_UNIQ_DST_IP)
+    {
+      timeseries_kp_set(state->kp,
+			mp->id_offset+offset,
+			(uint64_t)kh_size(mp->uniq_dst_ip));
 
-  timeseries_kp_set(state->kp,
-		    mp->id_offset+METRIC_TYPE_IP_LEN,
-		    mp->ip_len);
+      kh_clear(32xx, mp->uniq_dst_ip);
+      offset++;
+    }
 
-  /* empty the maps for this country */
-  kh_clear(32xx, mp->uniq_src_ip);
-  kh_clear(32xx, mp->uniq_dst_ip);
-  /* reset the counters */
-  mp->pkt_cnt = 0;
-  mp->ip_len = 0;
+  LMP_IF(LEAFMETRIC_FLAG_PKT_CNT)
+    {
+      timeseries_kp_set(state->kp,
+			mp->id_offset+offset,
+			mp->pkt_cnt);
+
+      mp->pkt_cnt = 0;
+      offset++;
+    }
+
+  LMP_IF(LEAFMETRIC_FLAG_IP_LEN)
+    {
+      timeseries_kp_set(state->kp,
+			mp->id_offset+offset,
+			mp->ip_len);
+
+      mp->ip_len = 0;
+      offset++;
+    }
 }
-#endif
+
+#define METRIC_PREFIX_INIT(smid, target, prefix, format, instance)	\
+  do {									\
+    char key_buffer[KEY_BUFFER_LEN];					\
+    snprintf(key_buffer, KEY_BUFFER_LEN, METRIC_PREFIX".%s%s."format,	\
+	     tree->group->name, prefix, instance);			\
+    if((target = leafmetric_package_new(state,				\
+					smid,				\
+					key_buffer,			\
+					&key_id)) == NULL)		\
+      {									\
+	goto err;							\
+      }									\
+  } while(0)
+
+#define SM_IF(smid)							\
+    if((tree_submetrics[tree->id] & smid) != 0)
+
+/** Create a new metric tree for the given tag
+ *
+ * @todo this code is copied directly from when it only ran once, so it builds
+ * several data structures and massages metric names etc in a way that could
+ * perhaps be abstracted into a prep function that gets run only once prior to
+ * building the trees.
+ */
+static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
+				      uint32_t *id_offset)
+{
+  metric_tree_t *tree = NULL;
+  struct corsaro_report_state_t *state = STATE(corsaro);
+
+  uint32_t key_id = *id_offset;
+
+  int i;
+  ipmeta_provider_t *provider;
+  khiter_t khiter;
+  int khret;
+  /* Array of ASNs, sorted in descending order by number of IPs each AS owns */
+  ipmeta_record_t **pfx2as_records;
+  /* Number of records in the pfx2as_records array */
+  int pfx2as_records_cnt;
+  leafmetric_package_t *tmp_mp;
+  uint32_t tmp_asn;
+
+  char cc_str[6] = "--.--";
+  uint16_t country_idx;
+
+  const char **countries = NULL;
+  int country_cnt = 0;
+  const char **continents = NULL;
+  int continent_cnt = 0;
+
+  ipmeta_provider_netacq_edge_country_t **netacq_countries = NULL;
+  int netacq_countries_cnt = 0;
+  ipmeta_provider_netacq_edge_region_t **regions = NULL;
+  int regions_cnt = 0;
+
+  char *cc_ptr;
+  char *cc_cpy;
+  khash_t(strstr) *country_hash = kh_init(strstr);
+  int j;
+
+  char rc_str[10];
+
+  int proto, dir, port;
+
+  assert(tree_id >= 0 && tree_id < TREE_ID_CNT);
+
+  /* create a new tree */
+  if((tree = malloc_zero(sizeof(metric_tree_t))) == NULL)
+    {
+      corsaro_log(__func__, corsaro, "could not malloc metric tree");
+      return NULL;
+    }
+
+  tree->id = tree_id;
+
+  /* get the appropriate tag group for this tree */
+  if((tree->group = corsaro_tag_group_get(corsaro, tree_names[tree->id]))
+     == NULL)
+    {
+      corsaro_log(__func__, corsaro,
+		  "Required tag group '%' missing. Check your config",
+		  tree_names[tree->id]);
+      return NULL;
+    }
+
+  /* initialize only the submetrics that this tree needs */
+
+  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+    {
+      /* get the maxmind provider (just for sanity) */
+      if((provider =
+	  corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_MAXMIND))
+	 == NULL || ipmeta_is_provider_enabled(provider) == 0)
+	{
+	  corsaro_log(__func__, corsaro,
+		      "ERROR: Maxmind provider must be enabled");
+	  return NULL;
+	}
+
+      /* we want to add an empty metric for all possible countries */
+      country_cnt = ipmeta_provider_maxmind_get_iso2_list(&countries);
+      continent_cnt =
+	ipmeta_provider_maxmind_get_country_continent_list(&continents);
+      assert(country_cnt == continent_cnt);
+
+      for(i=0; i< country_cnt; i++)
+	{
+	  /* what is the index of this country in the maxmind_country_metrics
+	   * array? */
+	  country_idx = (countries[i][0] << 8) | countries[i][1];
+
+	  /* build a string which contains the continent and country code */
+	  memcpy(cc_str, continents[i], 2);
+	  memcpy(&cc_str[3], countries[i], 2);
+
+	  METRIC_PREFIX_INIT(SUBMETRIC_ID_MAXMIND_COUNTRY,
+			     tree->maxmind_country_metrics[country_idx],
+			     METRIC_PATH_MAXMIND_COUNTRY,
+			     "%s", cc_str);
+	}
+    }
+
+  if((tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY) != 0 ||
+     (tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_REGION) != 0)
+    {
+      /* get the netacq edge provider */
+      if((provider =
+	  corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_NETACQ_EDGE))
+	 == NULL || ipmeta_is_provider_enabled(provider) == 0)
+	{
+	  corsaro_log(__func__, corsaro,
+		      "ERROR: Net Acuity Edge provider must be enabled");
+	  return NULL;
+	}
+
+      netacq_countries_cnt =
+	ipmeta_provider_netacq_edge_get_countries(provider, &netacq_countries);
+
+      if(netacq_countries == NULL || netacq_countries_cnt == 0)
+	{
+	  corsaro_log(__func__, corsaro,
+		      "ERROR: Net Acuity Edge provider must be used with the -c"
+		      " option to load country information");
+	  return NULL;
+	}
+
+      for(i=0; i < netacq_countries_cnt; i++)
+	{
+	  assert(netacq_countries[i] != NULL);
+
+	  /* convert the ascii country code to a 16bit uint */
+	  country_idx =
+	    (netacq_countries[i]->iso2[0] << 8) | netacq_countries[i]->iso2[1];
+
+	  /* build a string which contains the continent and country code*/
+	  cc_ptr = cc_str;
+	  cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->continent, 3);
+	  *cc_ptr = '.';
+	  cc_ptr++;
+	  cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->iso2, 3);
+
+	  /* graphite dislikes metrics with *'s in them, replace with '-' */
+	  for(j=0; j<strnlen(cc_str, 5); j++)
+	    {
+	      if(cc_str[j] == '*')
+		{
+		  cc_str[j] = '-';
+		}
+	    }
+
+	  if((cc_cpy = strndup(cc_str, 5)) == NULL)
+	    {
+	      corsaro_log(__func__, corsaro,
+			  "could not allocate country string");
+	      return NULL;
+	    }
+	  khiter = kh_put(strstr, country_hash,
+			  netacq_countries[i]->iso3, &khret);
+	  kh_value(country_hash, khiter) = cc_cpy;
+
+	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+	    {
+	      METRIC_PREFIX_INIT(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY,
+				 tree->netacq_country_metrics[country_idx],
+				 METRIC_PATH_NETACQ_EDGE_COUNTRY,
+				 "%s", cc_str);
+	    }
+	}
+
+      SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+	{
+	  regions_cnt = ipmeta_provider_netacq_edge_get_regions(provider,
+								&regions);
+	  if(regions == NULL || regions_cnt == 0)
+	    {
+	      corsaro_log(__func__, corsaro,
+			  "ERROR: Net Acuity Edge provider must be used with "
+			  "the -r option to load region information");
+	      return NULL;
+	    }
+
+	  for(i=0; i < regions_cnt; i++)
+	    {
+	      assert(regions[i] != NULL);
+	      /* if netacq starts to allocate region codes > 2**16 we probably
+	       * need to switch to using a hash here. Cannot use an assert
+	       * because we disable those in production */
+	      if(regions[i]->code > METRIC_NETACQ_EDGE_REGION_MAX)
+		{
+		  corsaro_log(__func__, corsaro,
+			      "ERROR: Net Acuity Edge region code > 2^16 found");
+		  return NULL;
+		}
+
+	      /* get the continent/country code string */
+	      khiter = kh_get(strstr, country_hash, regions[i]->country_iso);
+	      assert(khiter != kh_end(country_hash));
+
+	      cc_ptr = kh_value(country_hash, khiter);
+	      cc_ptr = stpncpy(rc_str, cc_ptr, 6);
+	      *cc_ptr = '.';
+	      cc_ptr++;
+	      strncpy(cc_ptr, regions[i]->region_iso, 4);
+
+	      /* fix the *'s */
+	      for(; *cc_ptr != '\0'; cc_ptr++)
+		{
+		  if(*cc_ptr == '*')
+		    {
+		      *cc_ptr = '-';
+		    }
+		}
+
+	      METRIC_PREFIX_INIT(SUBMETRIC_ID_NETACQ_EDGE_REGION,
+				 tree->netacq_region_metrics[regions[i]->code],
+				 METRIC_PATH_NETACQ_EDGE_REGION,
+				 "%s", rc_str);
+	    }
+	}
+
+      kh_free_vals(strstr, country_hash, str_free);
+      kh_destroy(strstr, country_hash);
+    }
+
+
+  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+    {
+      /* initialize the metrics hash (i can't think of a way around having this
+	 be a hash...) */
+      tree->pfx2as_metrics = kh_init(u32metric);
+
+      /* initialize the ASNs */
+
+      if((provider =
+	  corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_PFX2AS))
+	 == NULL ||
+	 ipmeta_is_provider_enabled(provider) == 0)
+	{
+	  corsaro_log(__func__, corsaro,
+		      "ERROR: CAIDA Prefix-to-AS provider must be enabled");
+	  return NULL;
+	}
+
+      /* first, get a list of the ASN records from the pfx2as provider */
+      if((pfx2as_records_cnt =
+	  ipmeta_provider_get_all_records(provider,
+					  &pfx2as_records)) <= 0)
+	{
+	  corsaro_log(__func__, corsaro,
+		      "ERROR: could not get array of pfx2as records");
+	  return NULL;
+	}
+
+      /* now, sort that array */
+      /* note that this is sorted so that the ASNs with >1 ASN are at the end */
+      ks_introsort(pfx2as_ip_cnt_desc,
+		   pfx2as_records_cnt,
+		   pfx2as_records);
+
+      /* find out how big the smallest AS is that we are going to track */
+      /* but if we want to track more ASes than actually exist, just leave the
+	 smallest size at it's default of zero - that will track them all */
+      if(METRIC_PFX2AS_VAL_MAX < pfx2as_records_cnt)
+	{
+	  /* now, jump to index 2999 and ask it how many IPs are in that ASN */
+	  assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1] != NULL);
+	  assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt > 0);
+	  tree->pfx2as_min_ip_cnt =
+	    pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt;
+	}
+
+      corsaro_log(__func__, corsaro,
+		  "there are %d ASNs, the ASN at index %d is %d and has %d IPs",
+		  pfx2as_records_cnt,
+		  METRIC_PFX2AS_VAL_MAX-1,
+		  pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn[0],
+		  tree->pfx2as_min_ip_cnt);
+
+      /* and an empty metric for each asn that we will track */
+      for(i = 0;
+	  i < pfx2as_records_cnt &&
+	    pfx2as_records[i]->asn_ip_cnt >= tree->pfx2as_min_ip_cnt;
+	  i++)
+	{
+	  /* we simply refuse to deal with those pesky group ASNs */
+	  if(pfx2as_records[i]->asn_cnt != 1)
+	    {
+	      corsaro_log(__func__, corsaro,
+			  "Corsaro report does not support ASN groups");
+	      return NULL;
+	    }
+
+	  tmp_asn = pfx2as_records[i]->asn[0];
+
+	  /* create a metric package for this asn */
+	  METRIC_PREFIX_INIT(SUBMETRIC_ID_PFX2AS,
+			     tmp_mp, METRIC_PATH_PFX2AS, "%"PRIu32, tmp_asn);
+
+	  /* now insert the mp into the hash */
+	  assert(kh_get(u32metric, tree->pfx2as_metrics, tmp_asn)
+		 == kh_end(tree->pfx2as_metrics)
+		 );
+
+	  khiter = kh_put(u32metric, tree->pfx2as_metrics, tmp_asn, &khret);
+	  kh_value(tree->pfx2as_metrics, khiter) = tmp_mp;
+	}
+
+      /* we're done initializing pfx2as metrics, free the pfx2as record array */
+      free(pfx2as_records);
+    }
+
+  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+    {
+      /* initialize the protocols */
+      for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
+	{
+	  /* create an empty metric package for this protocol */
+	  METRIC_PREFIX_INIT(SUBMETRIC_ID_PROTOCOL,
+			     tree->protocol_metrics[i], METRIC_PATH_PROTOCOL,
+			     "%"PRIu32, i);
+	}
+    }
+
+  SM_IF(SUBMETRIC_FLAG_PORT)
+    {
+      for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
+	{
+	  for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
+	    {
+	      for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+		{
+		  /* initialize a metric package for this proto/dir/port combo */
+		  METRIC_PREFIX_INIT(SUBMETRIC_ID_PORT,
+				     tree->port_metrics[proto][dir][port],
+				     port_metric_paths[
+				        (proto*(METRIC_PORT_PROTOCOL_MAX+1))+dir
+				     ],
+				     "%"PRIu32, port);
+		}
+	    }
+	}
+    }
+
+  /* pass back the updated key id */
+  *id_offset = key_id;
+  return tree;
+
+ err:
+  corsaro_report_close_output(corsaro);
+  return NULL;
+}
+
+static void metric_tree_destroy(metric_tree_t *tree)
+{
+  if(tree == NULL)
+    {
+      return;
+    }
+
+  int i;
+  khiter_t khiter;
+  int proto, dir, port;
+
+  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+  {
+    for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
+      {
+	if(tree->maxmind_country_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->maxmind_country_metrics[i]);
+	    tree->maxmind_country_metrics[i] = NULL;
+	  }
+      }
+  }
+
+  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+  {
+    for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
+      {
+	if(tree->netacq_country_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->netacq_country_metrics[i]);
+	    tree->netacq_country_metrics[i] = NULL;
+	  }
+      }
+  }
+
+  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+  {
+    for(i = 0; i < METRIC_NETACQ_EDGE_REGION_MAX; i++)
+      {
+	if(tree->netacq_region_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->netacq_region_metrics[i]);
+	    tree->netacq_region_metrics[i] = NULL;
+	  }
+      }
+  }
+
+  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+  {
+    if(tree->pfx2as_metrics != NULL)
+      {
+	for(khiter = kh_begin(tree->pfx2as_metrics);
+	    khiter != kh_end(tree->pfx2as_metrics);
+	    ++khiter)
+	  {
+	    if(kh_exist(tree->pfx2as_metrics, khiter))
+	      {
+		metric_package_destroy(kh_val(tree->pfx2as_metrics,
+					      khiter));
+	      }
+	  }
+	kh_destroy(u32metric, tree->pfx2as_metrics);
+	tree->pfx2as_metrics = NULL;
+      }
+  }
+
+  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+  {
+    for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
+      {
+	if(tree->protocol_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->protocol_metrics[i]);
+	    tree->protocol_metrics[i] = NULL;
+	  }
+      }
+  }
+
+  SM_IF(SUBMETRIC_FLAG_PORT)
+  {
+    for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
+      {
+	for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
+	  {
+	    for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+	      {
+		if(tree->port_metrics[proto][dir][port] != NULL)
+		  {
+		    metric_package_destroy(
+					   tree->port_metrics[proto][dir][port]);
+		    tree->port_metrics[proto][dir][port] = NULL;
+		  }
+	      }
+	  }
+      }
+  }
+
+  return;
+}
+
+static int metric_tree_dump(struct corsaro_report_state_t *state,
+			    enum tree_id tree_id)
+{
+  int i;
+  khiter_t khiter;
+  int proto, dir, port;
+
+  metric_tree_t *tree = state->trees[tree_id];
+
+  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+  {
+    for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
+      {
+	/* NOTE: most of these will be NULL! */
+	if(tree->maxmind_country_metrics[i] != NULL)
+	  {
+	    metric_package_dump(state, tree->maxmind_country_metrics[i]);
+	}
+      }
+  }
+
+  if((tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY) != 0 ||
+     (tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_REGION) != 0)
+    {
+      for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
+	{
+	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+	  {
+	    /* NOTE: most of these will be NULL! */
+	    if(tree->netacq_country_metrics[i] != NULL)
+	      {
+		metric_package_dump(state, tree->netacq_country_metrics[i]);
+	      }
+	  }
+
+	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+	  {
+	    /* NOTE: most of these will be NULL! */
+	    if(tree->netacq_region_metrics[i] != NULL)
+	      {
+		metric_package_dump(state, tree->netacq_region_metrics[i]);
+	      }
+	  }
+	}
+    }
+
+  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+  {
+    for(khiter = kh_begin(tree->pfx2as_metrics);
+	khiter != kh_end(tree->pfx2as_metrics);
+	++khiter)
+      {
+	if(kh_exist(tree->pfx2as_metrics, khiter))
+	  {
+	    metric_package_dump(state, kh_val(tree->pfx2as_metrics,
+					      khiter));
+	  }
+      }
+  }
+
+  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+  {
+    /* dump the protocol metrics */
+    for(i = 0; i < METRIC_PROTOCOL_VAL_MAX; i++)
+      {
+	metric_package_dump(state, tree->protocol_metrics[i]);
+      }
+  }
+
+  SM_IF(SUBMETRIC_FLAG_PORT)
+  {
+    for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
+      {
+	for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
+	  {
+	    for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+	      {
+		if(tree->port_metrics[proto][dir][port] != NULL)
+		  {
+		    metric_package_dump(state,
+					tree->port_metrics[proto][dir][port]);
+		  }
+	      }
+	  }
+      }
+  }
+
+  return 0;
+}
 
 static inline uint16_t lookup_convert_cc(corsaro_packet_state_t *state,
 					 ipmeta_provider_id_t provider_id)
@@ -449,125 +1171,145 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 			   uint16_t ip_len, uint8_t protocol, uint64_t pkt_cnt)
 {
   struct corsaro_report_state_t *plugin_state = STATE(corsaro);
-  assert(plugin_state != NULL);
-
-#ifdef WITH_PORT_STATS
+  int i;
+  metric_tree_t *tree = NULL;
   int proto;
-#endif
-
-#if defined WITH_MAXMIND_STATS || defined WITH_NETACQ_EDGE_STATS
-  uint16_t cc;
-#endif
-
-#ifdef WITH_NETACQ_EDGE_STATS
-  uint16_t rc;
-#endif
-
-#ifdef WITH_PFX2AS_STATS
+  uint16_t maxmind_cc;
+  uint16_t netacq_cc;
+  uint16_t netacq_rc = 0;
   khiter_t khiter;
   ipmeta_record_t *record;
-#endif
 
-  /* ==================== GEOGRAPHIC ==================== */
-#ifdef WITH_MAXMIND_STATS
+  assert(plugin_state != NULL);
+
+  /* prep all the results */
+
   /* maxmind country code */
-  cc = lookup_convert_cc(state, IPMETA_PROVIDER_MAXMIND);
-
-  /* update the appropriate country metric package */
-  assert(plugin_state->maxmind_country_metrics[cc] != NULL);
-  metric_package_update(plugin_state->maxmind_country_metrics[cc],
-			src_ip, dst_ip, ip_len, pkt_cnt);
-#endif
-
-#ifdef WITH_NETACQ_EDGE_STATS
+  maxmind_cc = lookup_convert_cc(state, IPMETA_PROVIDER_MAXMIND);
   /* netacq edge country code */
-  cc = lookup_convert_cc(state, IPMETA_PROVIDER_NETACQ_EDGE);
-
-  /* update the appropriate country metric package */
-  assert(plugin_state->netacq_country_metrics[cc] != NULL);
-  metric_package_update(plugin_state->netacq_country_metrics[cc],
-			src_ip, dst_ip, ip_len, pkt_cnt);
-
+  netacq_cc = lookup_convert_cc(state, IPMETA_PROVIDER_NETACQ_EDGE);
   /* netacq edge region code */
   if((record =
       corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_NETACQ_EDGE))
      != NULL)
     {
-      rc = record->region_code;
-      assert(plugin_state->netacq_region_metrics[rc] != NULL);
-      metric_package_update(plugin_state->netacq_region_metrics[rc],
-			    src_ip, dst_ip, ip_len, pkt_cnt);
-    }
-#endif
-
-  /* ==================== PFX2AS ASNs ==================== */
-#ifdef WITH_PFX2AS_STATS
-  /* note we are deliberately discarding ASN records that have more than one ASN
-     because we consider them an artifact of the measurement */
-  /* we are also discarding any AS that is smaller than the smallest AS in our
-     top METRIC_PFX2AS_VAL_MAX ASes list. */
-  /* note that this means there may *occasionally* be more than
-     METRIC_PFX2AS_VAL_MAX ASes dumped. this will only happen when there are
-     multiple ASes of size plugin_state->pfx2as_min_ip_cnt */
-  /* also note that we are NOT recording stats for packets that we cannot
-     compute ans ASN for */
-  if((record = corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_PFX2AS))
-     != NULL
-     && record->asn_cnt == 1
-     && record->asn_ip_cnt >= plugin_state->pfx2as_min_ip_cnt)
-    {
-      khiter = kh_get(u32metric, plugin_state->pfx2as_metrics,
-		      record->asn[0]);
-
-      assert(khiter != kh_end(plugin_state->pfx2as_metrics));
-
-      metric_package_update(kh_val(plugin_state->pfx2as_metrics, khiter),
-			    src_ip, dst_ip, ip_len, pkt_cnt);
-    }
-#endif
-
-  /* ==================== PROTOCOL ==================== */
-#ifdef WITH_PROTOCOL_STATS
-  /* just basic protocol stats */
-  metric_package_update(plugin_state->protocol_metrics[protocol],
-			src_ip, dst_ip, ip_len, pkt_cnt);
-#endif
-
-  /* ==================== PORTS ==================== */
-  /* full port stats for tcp and udp and other */
-#ifdef WITH_PORT_STATS
-  if(protocol == TRACE_IPPROTO_TCP)
-    {
-      proto = METRIC_PORT_PROTOCOL_TCP;
-    }
-  else if(protocol == TRACE_IPPROTO_UDP)
-    {
-      proto = METRIC_PORT_PROTOCOL_UDP;
-    }
-  else
-    {
-      proto = METRIC_PORT_PROTOCOL_SKIP;
+      netacq_rc = record->region_code;
     }
 
-  if(proto != METRIC_PORT_PROTOCOL_SKIP)
+  /* flip on the unfiltered tag */
+  corsaro_tag_set_match(state, plugin_state->unfiltered_tag, 1);
+
+  /* now iterate over each tag and build the tree */
+  for(i=0; i<TREE_ID_CNT; i++)
     {
-      if(src_port < METRIC_PORT_VAL_MAX)
+      tree = plugin_state->trees[i];
+      assert(tree != NULL);
+      if(corsaro_tag_group_is_match(state, tree->group) != 0)
 	{
-	  metric_package_update(plugin_state->
-				port_metrics
-				[proto][METRIC_PORT_DIRECTION_SRC][src_port],
-				src_ip, dst_ip, ip_len, pkt_cnt);
-	}
+	  /* process this packet for this tree */
+	  assert(tree != NULL);
 
-      if(dst_port < METRIC_PORT_VAL_MAX)
-	{
-	  metric_package_update(plugin_state->
-				port_metrics
-				[proto][METRIC_PORT_DIRECTION_DST][dst_port],
-				src_ip, dst_ip, ip_len, pkt_cnt);
+	  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+	  {
+	    assert(tree->maxmind_country_metrics[maxmind_cc] != NULL);
+	    metric_package_update(tree->maxmind_country_metrics[maxmind_cc],
+				  src_ip, dst_ip, ip_len, pkt_cnt);
+	  }
+
+	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+	  {
+	    assert(tree->netacq_country_metrics[netacq_cc] != NULL);
+	    metric_package_update(tree->netacq_country_metrics[netacq_cc],
+				  src_ip, dst_ip, ip_len, pkt_cnt);
+	  }
+
+	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+	  {
+	    if(netacq_rc != 0)
+	      {
+		/* if this code is run on old region files, it breaks */
+		if(tree->netacq_region_metrics[netacq_rc] == NULL)
+		  {
+		    corsaro_log(__func__, corsaro,
+				"Missing region code %d. "
+				"Ensure you are not using old region files",
+				netacq_rc);
+		    assert(0); /* in case we have asserts on */
+		    return -1;
+		  }
+		metric_package_update(tree->netacq_region_metrics[netacq_rc],
+				      src_ip, dst_ip, ip_len, pkt_cnt);
+	      }
+	  }
+
+	  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+	  {
+	    /* note we are deliberately discarding ASN records that have more
+	       than one ASN because we consider them an artifact of the
+	       measurement */
+	    /* we are also discarding any AS that is smaller than the smallest
+	       AS in our top METRIC_PFX2AS_VAL_MAX ASes list. */
+	    /* note that this means there may *occasionally* be more than
+	       METRIC_PFX2AS_VAL_MAX ASes dumped. this will only happen when
+	       there are multiple ASes of size
+	       plugin_state->pfx2as_min_ip_cnt */
+	    /* also note that we are NOT recording stats for packets that we
+	       cannot compute ans ASN for */
+	    if((record = corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_PFX2AS))
+	       != NULL
+	       && record->asn_cnt == 1
+	       && record->asn_ip_cnt >= tree->pfx2as_min_ip_cnt)
+	      {
+		khiter = kh_get(u32metric, tree->pfx2as_metrics, record->asn[0]);
+
+		assert(khiter != kh_end(tree->pfx2as_metrics));
+		metric_package_update(kh_val(tree->pfx2as_metrics, khiter),
+				      src_ip, dst_ip, ip_len, pkt_cnt);
+	      }
+	  }
+
+	  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+	  {
+	    metric_package_update(tree->protocol_metrics[protocol],
+				  src_ip, dst_ip, ip_len, pkt_cnt);
+	  }
+
+	  SM_IF(SUBMETRIC_FLAG_PORT)
+	  {
+	    if(protocol == TRACE_IPPROTO_TCP)
+	      {
+		proto = METRIC_PORT_PROTOCOL_TCP;
+	      }
+	    else if(protocol == TRACE_IPPROTO_UDP)
+	      {
+		proto = METRIC_PORT_PROTOCOL_UDP;
+	      }
+	    else
+	      {
+		proto = METRIC_PORT_PROTOCOL_SKIP;
+	      }
+
+	    if(proto != METRIC_PORT_PROTOCOL_SKIP)
+	      {
+		if(src_port < METRIC_PORT_VAL_MAX)
+		  {
+		    metric_package_update(tree->
+					  port_metrics
+					  [proto][METRIC_PORT_DIRECTION_SRC][src_port],
+					  src_ip, dst_ip, ip_len, pkt_cnt);
+		  }
+
+		if(dst_port < METRIC_PORT_VAL_MAX)
+		  {
+		    metric_package_update(tree->
+					  port_metrics
+					  [proto][METRIC_PORT_DIRECTION_DST][dst_port],
+					  src_ip, dst_ip, ip_len, pkt_cnt);
+		  }
+	      }
+	  }
 	}
     }
-#endif
 
   return 0;
 }
@@ -722,78 +1464,16 @@ int corsaro_report_probe_magic(corsaro_in_t *corsaro, corsaro_file_in_t *file)
   return 0;
 }
 
-#define METRIC_PREFIX_INIT(target, prefix, format, instance)		\
-  do {									\
-    char key_buffer[KEY_BUFFER_LEN];					\
-    snprintf(key_buffer, KEY_BUFFER_LEN, "%s."format, prefix, instance); \
-    if((target = metric_package_new(state,				\
-				    key_buffer,				\
-				    key_id)) == NULL)			\
-      {									\
-	goto err;							\
-      }									\
-									\
-    key_id += METRIC_TYPE_CNT;						\
-  } while(0)
-
 int corsaro_report_init_output(corsaro_t *corsaro)
 {
   struct corsaro_report_state_t *state;
   corsaro_plugin_t *plugin = PLUGIN(corsaro);
+  corsaro_tag_group_t *group;
+
+  int i;
 
   /* the current key id (used by METRIC_PREFIX_INIT) */
-  int key_id = 0;
-
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_NETACQ_EDGE_STATS) \
-  || defined(WITH_PFX2AS_STATS) || defined(WITH_PROTOCOL_STATS)
-  int i;
-#endif
-
-#if defined(WITH_PFX2AS_STATS) || defined(WITH_NETACQ_EDGE_STATS)
-  khiter_t khiter;
-  int khret;
-#endif
-
-#ifdef WITH_PFX2AS_STATS
-  /* Array of ASNs, sorted in descending order by number of IPs each AS owns */
-  ipmeta_record_t **pfx2as_records;
-  /* Number of records in the pfx2as_records array */
-  int pfx2as_records_cnt;
-
-  metric_package_t *tmp_mp;
-  uint32_t tmp_asn;
-#endif
-
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_NETACQ_EDGE_STATS)
-  char cc_str[6] = "--.--";
-  uint16_t country_idx;
-#endif
-
-#ifdef WITH_MAXMIND_STATS
-  const char **countries;
-  int country_cnt;
-  const char **continents;
-  int continent_cnt;
-#endif
-
-#ifdef WITH_NETACQ_EDGE_STATS
-  ipmeta_provider_t *provider;
-  ipmeta_provider_netacq_edge_country_t **netacq_countries;
-  int netacq_countries_cnt;
-  ipmeta_provider_netacq_edge_region_t **regions;
-  int regions_cnt;
-
-  char *cc_ptr;
-  char *cc_cpy;
-  khash_t(strstr) *country_hash = kh_init(strstr);
-  int j;
-
-  char rc_str[10];
-#endif
-
-#ifdef WITH_PORT_STATS
-  int proto, dir, port;
-#endif
+  uint32_t key_id = 0;
 
   assert(plugin != NULL);
 
@@ -819,7 +1499,7 @@ int corsaro_report_init_output(corsaro_t *corsaro)
      NB: this must be done after timeseries is initialized */
   if(parse_args(corsaro) != 0)
     {
-      return -1;
+      goto err;
     }
 
   if((state->kp = timeseries_kp_init(0)) == NULL)
@@ -829,246 +1509,37 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       goto err;
     }
 
-  /* initialize the providers */
-#ifdef WITH_MAXMIND_STATS
-  /* we want to add an empty metric for all possible countries */
-  country_cnt = ipmeta_provider_maxmind_get_iso2_list(&countries);
-  continent_cnt =
-    ipmeta_provider_maxmind_get_country_continent_list(&continents);
-  assert(country_cnt == continent_cnt);
-
-  for(i=0; i< country_cnt; i++)
-    {
-      /* what is the index of this country in the maxmind_country_metrics
-       * array? */
-      country_idx = (countries[i][0] << 8) | countries[i][1];
-
-      /* quickly build a string which contains the continent and country code*/
-      memcpy(cc_str, continents[i], 2);
-      memcpy(&cc_str[3], countries[i], 2);
-
-      METRIC_PREFIX_INIT(state->maxmind_country_metrics[country_idx],
-			 METRIC_PATH_MAXMIND_COUNTRY,
-			 "%s", cc_str);
-    }
-#endif
-
-  /* netacq regions */
-#ifdef WITH_NETACQ_EDGE_STATS
-  /* get the netacq edge provider */
-  if((provider =
-      corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_NETACQ_EDGE))
-     == NULL || ipmeta_is_provider_enabled(provider) == 0)
+  /* create the unfiltered group and tag */
+  if((group = corsaro_tag_group_init(corsaro, tree_names[TREE_ID_UNFILTERED],
+				     CORSARO_TAG_GROUP_MATCH_MODE_ANY,
+				     NULL)) == NULL)
     {
       corsaro_log(__func__, corsaro,
-		  "ERROR: Net Acuity Edge provider must be enabled");
-      return -1;
+		  "could not create group for unfiltered packets");
+      goto err;
     }
-
-  /* netacq countries */
-  netacq_countries_cnt =
-    ipmeta_provider_netacq_edge_get_countries(provider, &netacq_countries);
-
-  if(countries == NULL || netacq_countries_cnt == 0)
+  if((state->unfiltered_tag =
+      corsaro_tag_init(corsaro, tree_names[TREE_ID_UNFILTERED], NULL))
+     == NULL)
     {
       corsaro_log(__func__, corsaro,
-		  "ERROR: Net Acuity Edge provider must be used with the -c "
-		  "option to load country information");
-      return -1;
+		  "could not create tag for unfiltered packets");
+      goto err;
     }
-  for(i=0; i < netacq_countries_cnt; i++)
+  if(corsaro_tag_group_add_tag(group, state->unfiltered_tag) != 0)
     {
-      assert(netacq_countries[i] != NULL);
+      corsaro_log(__func__, corsaro, "could not add tag to unfiltered group");
+      goto err;
+    }
 
-      /* convert the ascii country code to a 16bit uint */
-      country_idx =
-	(netacq_countries[i]->iso2[0] << 8) | netacq_countries[i]->iso2[1];
-
-      /* build a string which contains the continent and country code*/
-      cc_ptr = cc_str;
-      cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->continent, 3);
-      *cc_ptr = '.';
-      cc_ptr++;
-      cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->iso2, 3);
-
-      /* graphite dislikes metrics with *'s in them, replace with '-' */
-      for(j=0; j<strnlen(cc_str, 5); j++)
+  for(i=0; i<TREE_ID_CNT; i++)
+    {
+      if((state->trees[i] = metric_tree_new(corsaro, i, &key_id))
+	 == NULL)
 	{
-	  if(cc_str[j] == '*')
-	    {
-	      cc_str[j] = '-';
-	    }
-	}
-
-      if((cc_cpy = strndup(cc_str, 5)) == NULL)
-	{
-	  corsaro_log(__func__, corsaro, "could not allocate country string");
-	  return -1;
-	}
-      khiter = kh_put(strstr, country_hash, netacq_countries[i]->iso3, &khret);
-      kh_value(country_hash, khiter) = cc_cpy;
-
-      /*
-      memcpy(cc_str, netacq_countries[i]->continent, 2);
-      memcpy(&cc_str[3], netacq_countries[i]->iso2, 2);
-      */
-
-      METRIC_PREFIX_INIT(state->netacq_country_metrics[country_idx],
-			 METRIC_PATH_NETACQ_EDGE_COUNTRY,
-			 "%s", cc_str);
-    }
-
-  /* net acq regions */
-  regions_cnt = ipmeta_provider_netacq_edge_get_regions(provider, &regions);
-  if(regions == NULL || regions_cnt == 0)
-    {
-      corsaro_log(__func__, corsaro,
-		  "ERROR: Net Acuity Edge provider must be used with the -r "
-		  "option to load region information");
-      return -1;
-    }
-
-  for(i=0; i < regions_cnt; i++)
-    {
-      assert(regions[i] != NULL);
-      /* if netacq starts to allocate region codes > 2**16 we probably need to
-       * switch to using a hash here. Cannot use an assert because we disable
-       * those in production */
-      if(regions[i]->code > METRIC_NETACQ_EDGE_REGION_MAX)
-	{
-	  corsaro_log(__func__, corsaro,
-		      "ERROR: Net Acuity Edge region code > 2^16 found");
-	  return -1;
-	}
-
-      /* get the continent/country code string */
-      khiter = kh_get(strstr, country_hash, regions[i]->country_iso);
-      assert(khiter != kh_end(country_hash));
-
-      cc_ptr = kh_value(country_hash, khiter);
-      cc_ptr = stpncpy(rc_str, cc_ptr, 6);
-      *cc_ptr = '.';
-      cc_ptr++;
-      strncpy(cc_ptr, regions[i]->region_iso, 4);
-
-      /* fix the *'s */
-      for(; *cc_ptr != '\0'; cc_ptr++)
-	{
-	  if(*cc_ptr == '*')
-	    {
-	      *cc_ptr = '-';
-	    }
-	}
-
-      METRIC_PREFIX_INIT(state->netacq_region_metrics[regions[i]->code],
-			 METRIC_PATH_NETACQ_EDGE_REGION,
-			 "%s", rc_str);
-    }
-
-  kh_free_vals(strstr, country_hash, str_free);
-  kh_destroy(strstr, country_hash);
-#endif
-
-#ifdef WITH_PFX2AS_STATS
-  /** @todo add some code to corsaro_ipmeta that allows a plugin to check that a
-      given provider is initialized */
-
-  /* initialize the metrics hash (i can't think of a way around having this be a
-     hash...) */
-  state->pfx2as_metrics = kh_init(u32metric);
-
-  /* initialize the ASNs */
-
-  /* first, get a list of the ASN records from the pfx2as provider */
-  if((pfx2as_records_cnt =
-      ipmeta_provider_get_all_records(
-				      corsaro_ipmeta_get_provider(corsaro,
-						      IPMETA_PROVIDER_PFX2AS),
-				      &pfx2as_records)) <= 0)
-    {
-      corsaro_log(__func__, corsaro,
-		  "ERROR: could not get array of pfx2as records");
-      return -1;
-    }
-
-  /* now, sort that array */
-  /* note that this is sorted so that the ASNs with >1 ASN are at the
-     end */
-  ks_introsort(pfx2as_ip_cnt_desc,
-	       pfx2as_records_cnt,
-	       pfx2as_records);
-
-  /* find out how big the smallest AS is that we are going to track */
-  /* but if we want to track more ASes than actually exist, just leave the
-     smallest size at it's default of zero - that will track them all */
-  if(METRIC_PFX2AS_VAL_MAX < pfx2as_records_cnt)
-    {
-      /* now, jump to index 2999 and ask it how many IPs are in that ASN */
-      assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1] != NULL);
-      assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt > 0);
-      state->pfx2as_min_ip_cnt =
-	pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt;
-    }
-
-  corsaro_log(__func__, corsaro,
-	      "there are %d ASNs, the ASN at index %d is %d and has %d IPs",
-	      pfx2as_records_cnt,
-	      METRIC_PFX2AS_VAL_MAX-1,
-	      pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn[0],
-	      state->pfx2as_min_ip_cnt);
-
-  /* and an empty metric for each asn that we will track */
-  for(i = 0;
-      i < pfx2as_records_cnt &&
-	pfx2as_records[i]->asn_ip_cnt >= state->pfx2as_min_ip_cnt;
-      i++)
-    {
-      /* we simply refuse to deal with those pesky group ASNs */
-      assert(pfx2as_records[i]->asn_cnt == 1);
-
-      tmp_asn = pfx2as_records[i]->asn[0];
-
-      /* create a metric package for this asn */
-      METRIC_PREFIX_INIT(tmp_mp, METRIC_PATH_PFX2AS, "%"PRIu32, tmp_asn);
-
-      /* now insert the mp into the hash */
-      assert(kh_get(u32metric, state->pfx2as_metrics, tmp_asn)
-	     == kh_end(state->pfx2as_metrics)
-	     );
-
-      khiter = kh_put(u32metric, state->pfx2as_metrics, tmp_asn, &khret);
-      kh_value(state->pfx2as_metrics, khiter) = tmp_mp;
-    }
-
-  /* we're done initializing pfx2as metrics, free the pfx2as record array */
-  free(pfx2as_records);
-#endif
-
-#ifdef WITH_PROTOCOL_STATS
-  /* initialize the protocols */
-  for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
-    {
-      /* create an empty metric package for this protocol */
-      METRIC_PREFIX_INIT(state->protocol_metrics[i], METRIC_PATH_PROTOCOL,
-			 "%"PRIu32, i);
-    }
-#endif
-
-#ifdef WITH_PORT_STATS
-  for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
-    {
-      for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
-	{
-	  for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
-	    {
-	      /* initialize a metric package for this proto/dir/port combo */
-	      METRIC_PREFIX_INIT(state->port_metrics[proto][dir][port],
-		  port_metric_paths[(proto*(METRIC_PORT_PROTOCOL_MAX+1))+dir],
-				 "%"PRIu32, port);
-	    }
+	  goto err;
 	}
     }
-#endif
 
   return 0;
 
@@ -1091,124 +1562,48 @@ int corsaro_report_close_input(corsaro_in_t *corsaro)
 
 int corsaro_report_close_output(corsaro_t *corsaro)
 {
-  /* clean up and close RRD stuff */
+  int i;
   struct corsaro_report_state_t *state = STATE(corsaro);
 
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
-  defined(WITH_PROTOCOL_STATS) || defined(WITH_PORT_STATS)
-  int i;
-#endif
-
-#ifdef WITH_PFX2AS_STATS
-  khiter_t khiter;
-#endif
-
-#ifdef WITH_PORT_STATS
-  int proto, dir, port;
-#endif
-
-  if(state != NULL)
+  if(state == NULL)
     {
-#ifdef WITH_MAXMIND_STATS
-      for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
-	{
-	  if(state->maxmind_country_metrics[i] != NULL)
-	    {
-	      metric_package_destroy(state->maxmind_country_metrics[i]);
-	      state->maxmind_country_metrics[i] = NULL;
-	    }
-	}
-#endif
-
-#ifdef WITH_NETACQ_EDGE_STATS
-      for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
-	{
-	  if(state->netacq_country_metrics[i] != NULL)
-	    {
-	      metric_package_destroy(state->netacq_country_metrics[i]);
-	      state->netacq_country_metrics[i] = NULL;
-	    }
-	}
-      for(i = 0; i < METRIC_NETACQ_EDGE_REGION_MAX; i++)
-	{
-	  if(state->netacq_region_metrics[i] != NULL)
-	    {
-	      metric_package_destroy(state->netacq_region_metrics[i]);
-	      state->netacq_region_metrics[i] = NULL;
-	    }
-	}
-#endif
-
-#ifdef WITH_PFX2AS_STATS
-      if(state->pfx2as_metrics != NULL)
-	{
-	  for(khiter = kh_begin(state->pfx2as_metrics);
-	      khiter != kh_end(state->pfx2as_metrics);
-	      ++khiter)
-	    {
-	      if(kh_exist(state->pfx2as_metrics, khiter))
-		{
-		  metric_package_destroy(kh_val(state->pfx2as_metrics,
-						khiter));
-		}
-	    }
-	  kh_destroy(u32metric, state->pfx2as_metrics);
-	  state->pfx2as_metrics = NULL;
-	}
-#endif
-
-#ifdef WITH_PROTOCOL_STATS
-      for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
-	{
-	  if(state->protocol_metrics[i] != NULL)
-	    {
-	      metric_package_destroy(state->protocol_metrics[i]);
-	      state->protocol_metrics[i] = NULL;
-	    }
-	}
-#endif
-
-#ifdef WITH_PORT_STATS
-      for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
-	{
-	  for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
-	    {
-	      for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
-		{
-		  if(state->port_metrics[proto][dir][port] != NULL)
-		    {
-		      metric_package_destroy(
-				     state->port_metrics[proto][dir][port]);
-		      state->port_metrics[proto][dir][port] = NULL;
-		    }
-		}
-	    }
-	}
-#endif
-
-      /* free the key package */
-      if(state->kp != NULL)
-	{
-	  timeseries_kp_free(state->kp);
-	  state->kp = NULL;
-	}
-
-      /* free the timeseries framework */
-      if(state->timeseries != NULL)
-	{
-	  timeseries_free(state->timeseries);
-	  state->timeseries = NULL;
-	}
-
-      /* the backends themselves should have been free'd by timeseries_free */
-      for(i=0; i<state->enabled_backends_cnt; i++)
-	{
-	  state->enabled_backends[i] = NULL;
-	}
-      state->enabled_backends_cnt = 0;
-
-      corsaro_plugin_free_state(corsaro->plugin_manager, PLUGIN(corsaro));
+      return 0;
     }
+
+  /* free the key package */
+  if(state->kp != NULL)
+    {
+      timeseries_kp_free(state->kp);
+      state->kp = NULL;
+    }
+
+  /* free the timeseries framework */
+  if(state->timeseries != NULL)
+    {
+      timeseries_free(state->timeseries);
+      state->timeseries = NULL;
+    }
+
+  /* the backends themselves should have been free'd by timeseries_free */
+  for(i=0; i<state->enabled_backends_cnt; i++)
+    {
+      state->enabled_backends[i] = NULL;
+    }
+  state->enabled_backends_cnt = 0;
+
+  if(state->trees != NULL)
+    {
+      for(i=0; i<TREE_ID_CNT; i++)
+	{
+	  if(state->trees[i] != NULL)
+	    {
+	      metric_tree_destroy(state->trees[i]);
+	      state->trees[i] = NULL;
+	    }
+	}
+    }
+
+  corsaro_plugin_free_state(corsaro->plugin_manager, PLUGIN(corsaro));
 
   return 0;
 }
@@ -1239,114 +1634,35 @@ int corsaro_report_start_interval(corsaro_t *corsaro,
 int corsaro_report_end_interval(corsaro_t *corsaro,
 				corsaro_interval_t *int_end)
 {
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_NETACQ_EDGE_STATS)	\
-  || defined(WITH_PFX2AS_STATS) || defined(WITH_PROTOCOL_STATS)		\
-  || defined(WITH_PORT_STATS)
   struct corsaro_report_state_t *state = STATE(corsaro);
   int i;
-#endif
 
-#ifdef WITH_PFX2AS_STATS
-  khiter_t khiter;
-#endif
-
-#ifdef WITH_PORT_STATS
-  int proto, dir, port;
-#endif
-
-#ifdef WITH_MAXMIND_STATS
-  for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
+  for(i=0; i<TREE_ID_CNT; i++)
     {
-      /* NOTE: most of these will be NULL! */
-      if(state->maxmind_country_metrics[i] != NULL)
+      assert(state->trees[i] != NULL);
+      if(metric_tree_dump(state, i) != 0)
 	{
-	  metric_package_dump(state, state->maxmind_country_metrics[i]);
+	  return -1;
 	}
     }
-#endif
 
-#ifdef WITH_NETACQ_EDGE_STATS
-  for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
-    {
-      /* NOTE: most of these will be NULL! */
-      if(state->netacq_country_metrics[i] != NULL)
-	{
-	  metric_package_dump(state, state->netacq_country_metrics[i]);
-	}
-
-      /* NOTE: most of these will be NULL! */
-      if(state->netacq_region_metrics[i] != NULL)
-	{
-	  metric_package_dump(state, state->netacq_region_metrics[i]);
-	}
-    }
-#endif
-
-#ifdef WITH_PFX2AS_STATS
-  for(khiter = kh_begin(state->pfx2as_metrics);
-      khiter != kh_end(state->pfx2as_metrics);
-      ++khiter)
-    {
-      if(kh_exist(state->pfx2as_metrics, khiter))
-	{
-	  metric_package_dump(state, kh_val(state->pfx2as_metrics,
-					khiter));
-	}
-    }
-#endif
-
-#ifdef WITH_PROTOCOL_STATS
-  /* dump the protocol metrics */
-  for(i = 0; i < METRIC_PROTOCOL_VAL_MAX; i++)
-    {
-      metric_package_dump(state, state->protocol_metrics[i]);
-    }
-#endif
-
-#ifdef WITH_PORT_STATS
-  for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
-    {
-      for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
-	{
-	  for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
-	    {
-	      if(state->port_metrics[proto][dir][port] != NULL)
-		{
-		  metric_package_dump(state,
-				      state->port_metrics[proto][dir][port]);
-		}
-	    }
-	}
-    }
-#endif
-
-#if defined(WITH_MAXMIND_STATS) || defined(WITH_PFX2AS_STATS) ||	\
-  defined(WITH_PROTOCOL_STATS) || defined(WITH_PORT_STATS)
   /* now flush to each backend */
   for(i=0; i<state->enabled_backends_cnt; i++)
     {
       timeseries_kp_flush(state->enabled_backends[i], state->kp, state->time);
     }
-#endif
 
   return 0;
 }
 
 int corsaro_report_process_packet(corsaro_t *corsaro,
-				corsaro_packet_t *packet)
+				  corsaro_packet_t *packet)
 {
   libtrace_packet_t *ltpacket = LT_PKT(packet);
   libtrace_ip_t  *ip_hdr  = NULL;
   libtrace_icmp_t *icmp_hdr = NULL;
   uint16_t src_port;
   uint16_t dst_port;
-
-  /* no point carrying on if a previous plugin has already decided we should
-     ignore this packet */
-  if((packet->state.flags & CORSARO_PACKET_STATE_IGNORE) != 0)
-    {
-      return 0;
-    }
 
   /* check for ipv4 */
   if((ip_hdr = trace_get_ip(ltpacket)) == NULL)
@@ -1386,13 +1702,6 @@ int corsaro_report_process_flowtuple(corsaro_t *corsaro,
 				     corsaro_flowtuple_t *flowtuple,
 				     corsaro_packet_state_t *state)
 {
-  /* no point carrying on if a previous plugin has already decided we should
-     ignore this tuple */
-  if((state->flags & CORSARO_PACKET_STATE_IGNORE) != 0)
-    {
-      return 0;
-    }
-
   if(process_generic(corsaro, state,
 		     corsaro_flowtuple_get_source_ip(flowtuple),
 		     corsaro_flowtuple_get_destination_ip(flowtuple),
