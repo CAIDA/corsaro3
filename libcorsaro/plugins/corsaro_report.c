@@ -136,38 +136,6 @@ enum submetric_flag {
   SUBMETRIC_FLAG_PORT                = 0x20,
 };
 
-const uint8_t submetric_leafmetrics[] = {
-  /** Maxmind country */
-  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
-  LEAFMETRIC_FLAG_UNIQ_DST_IP |
-  LEAFMETRIC_FLAG_PKT_CNT,
-
-  /* Netacq country */
-  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
-  LEAFMETRIC_FLAG_UNIQ_DST_IP |
-  LEAFMETRIC_FLAG_PKT_CNT,
-
-  /* Netacq region */
-  LEAFMETRIC_FLAG_UNIQ_SRC_IP,
-
-  /* Pfx2AS */
-  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
-  LEAFMETRIC_FLAG_UNIQ_DST_IP |
-  LEAFMETRIC_FLAG_PKT_CNT,
-
-  /* Protocol */
-  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
-  LEAFMETRIC_FLAG_UNIQ_DST_IP |
-  LEAFMETRIC_FLAG_PKT_CNT |
-  LEAFMETRIC_FLAG_IP_LEN,
-
-  /* Port */
-  LEAFMETRIC_FLAG_UNIQ_SRC_IP |
-  LEAFMETRIC_FLAG_UNIQ_DST_IP |
-  LEAFMETRIC_FLAG_PKT_CNT |
-  LEAFMETRIC_FLAG_IP_LEN,
-};
-
 enum tree_id {
   TREE_ID_UNFILTERED  = 0,
   TREE_ID_NONSPOOFED  = 1,
@@ -181,31 +149,96 @@ const char *tree_names[] = {
   "non-erratic",
 };
 
-const uint8_t tree_submetrics[] = {
-  /** Unfiltered */
-  SUBMETRIC_FLAG_MAXMIND_COUNTRY |
-  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY |
-  SUBMETRIC_FLAG_PROTOCOL |
-  SUBMETRIC_FLAG_PORT,
+/* for each tree/submetric combo, list the leafmetrics */
+const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
+  /* Unfiltered */
+  {
+    /* Maxmind country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Netacq country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Netacq region */
+    0,
+
+    /* pfx2as */
+    0,
+
+    /* Protocol */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Port */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+  },
 
   /** Non-spoofed */
-  SUBMETRIC_FLAG_MAXMIND_COUNTRY |
-  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY |
-  SUBMETRIC_FLAG_NETACQ_EDGE_REGION |
-  SUBMETRIC_FLAG_PFX2AS |
-  SUBMETRIC_FLAG_PROTOCOL |
-  SUBMETRIC_FLAG_PORT,
+  {
+   /* Maxmind country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Netacq country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Netacq region */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
+    /* pfx2as */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
+
+    /* Protocol */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Port */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
+  },
 
   /** Non-erratic */
-  SUBMETRIC_FLAG_MAXMIND_COUNTRY |
-  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY |
-  SUBMETRIC_FLAG_NETACQ_EDGE_REGION |
-  SUBMETRIC_FLAG_PFX2AS,
+  {
+   /* Maxmind country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
+    /* Netacq country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
+    /* Netacq region */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
+    /* pfx2as */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
+    /* Protocol */
+    0,
+
+    /* Port */
+    0,
+  },
 };
 
 /** Structure which holds state about sub-metrics for each metric */
 typedef struct leafmetric_package {
   uint32_t id_offset;
+  enum tree_id tree_id;
   enum submetric_id submetric_id;
   khash_t(32xx) *uniq_src_ip;
   khash_t(32xx) *uniq_dst_ip;
@@ -222,13 +255,13 @@ typedef struct leafmetric_package {
 
 /* ---------- NETACQ EDGE METRIC SETTINGS ---------- */
 #define METRIC_PATH_NETACQ_EDGE_COUNTRY     \
-  ".geo.netacuity.edge.country"
+  ".geo.netacuity.edge"
 
 /** The max number of values in a 16 bit number (two 8-bit ascii characters) */
 #define METRIC_NETACQ_EDGE_COUNTRY_MAX UINT16_MAX
 
 #define METRIC_PATH_NETACQ_EDGE_REGION     \
-  ".geo.netacuity.edge.region"
+  ".geo.netacuity.edge"
 
 /** The max region code value (currently the actual max is 30,404, but this
  * could easily go higher. be careful) */
@@ -428,11 +461,12 @@ struct corsaro_report_state_t {
   (*id_offset)++;							\
   } while(0)
 
-#define LMP_IF(lmflag)				\
-  if((submetric_leafmetrics[mp->submetric_id] & lmflag) != 0)
+#define LMP_IF(lmflag)					\
+  if((tree_submetric_leafmetrics[mp->tree_id][mp->submetric_id] & lmflag) != 0)
 
 static leafmetric_package_t *leafmetric_package_new(
 					struct corsaro_report_state_t *state,
+					enum tree_id tree_id,
 					enum submetric_id submetric_id,
 					const char *metric_prefix,
 					uint32_t *id_offset)
@@ -446,6 +480,10 @@ static leafmetric_package_t *leafmetric_package_new(
       /* could not malloc the memory. this is bad */
       return NULL;
     }
+
+  /* store the tree that owns this leafmetric package
+     needed to determine which elements of the package are in use */
+  mp->tree_id = tree_id;
 
   /* store the submetric id that owns this leafmetric package
      this allows us to determine which elements of the package are in use */
@@ -584,12 +622,13 @@ static void metric_package_dump(struct corsaro_report_state_t *state,
     }
 }
 
-#define METRIC_PREFIX_INIT(smid, target, prefix, format, instance)	\
+#define METRIC_PREFIX_INIT(treeid, smid, target, prefix, format, instance) \
   do {									\
     char key_buffer[KEY_BUFFER_LEN];					\
     snprintf(key_buffer, KEY_BUFFER_LEN, METRIC_PREFIX".%s%s."format,	\
 	     tree->group->name, prefix, instance);			\
     if((target = leafmetric_package_new(state,				\
+					treeid,				\
 					smid,				\
 					key_buffer,			\
 					&key_id)) == NULL)		\
@@ -599,7 +638,7 @@ static void metric_package_dump(struct corsaro_report_state_t *state,
   } while(0)
 
 #define SM_IF(smid)							\
-    if((tree_submetrics[tree->id] & smid) != 0)
+    if((tree_submetric_leafmetrics[tree->id][smid]) != 0)
 
 /** Create a new metric tree for the given tag
  *
@@ -645,7 +684,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   khash_t(strstr) *country_hash = kh_init(strstr);
   int j;
 
-  char rc_str[10];
+  char rc_str[17]; /* XX.XX.region.XXX\0 */
 
   int proto, dir, port;
 
@@ -672,7 +711,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
   /* initialize only the submetrics that this tree needs */
 
-  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+  SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
     {
       /* get the maxmind provider (just for sanity) */
       if((provider =
@@ -700,15 +739,16 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	  memcpy(cc_str, continents[i], 2);
 	  memcpy(&cc_str[3], countries[i], 2);
 
-	  METRIC_PREFIX_INIT(SUBMETRIC_ID_MAXMIND_COUNTRY,
+	  METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_MAXMIND_COUNTRY,
 			     tree->maxmind_country_metrics[country_idx],
 			     METRIC_PATH_MAXMIND_COUNTRY,
 			     "%s", cc_str);
 	}
     }
 
-  if((tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY) != 0 ||
-     (tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_REGION) != 0)
+  if(tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_COUNTRY] != 0
+     ||
+     tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_REGION] != 0)
     {
       /* get the netacq edge provider */
       if((provider =
@@ -765,16 +805,16 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 			  netacq_countries[i]->iso3, &khret);
 	  kh_value(country_hash, khiter) = cc_cpy;
 
-	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
 	    {
-	      METRIC_PREFIX_INIT(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY,
+	      METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_NETACQ_EDGE_COUNTRY,
 				 tree->netacq_country_metrics[country_idx],
 				 METRIC_PATH_NETACQ_EDGE_COUNTRY,
 				 "%s", cc_str);
 	    }
 	}
 
-      SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+      SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
 	{
 	  regions_cnt = ipmeta_provider_netacq_edge_get_regions(provider,
 								&regions);
@@ -805,8 +845,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
 	      cc_ptr = kh_value(country_hash, khiter);
 	      cc_ptr = stpncpy(rc_str, cc_ptr, 6);
-	      *cc_ptr = '.';
-	      cc_ptr++;
+	      cc_ptr = stpncpy(cc_ptr, ".region.", 9);
 	      strncpy(cc_ptr, regions[i]->region_iso, 4);
 
 	      /* fix the *'s */
@@ -818,7 +857,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 		    }
 		}
 
-	      METRIC_PREFIX_INIT(SUBMETRIC_ID_NETACQ_EDGE_REGION,
+	      METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_NETACQ_EDGE_REGION,
 				 tree->netacq_region_metrics[regions[i]->code],
 				 METRIC_PATH_NETACQ_EDGE_REGION,
 				 "%s", rc_str);
@@ -830,7 +869,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
     }
 
 
-  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+  SM_IF(SUBMETRIC_ID_PFX2AS)
     {
       /* initialize the metrics hash (i can't think of a way around having this
 	 be a hash...) */
@@ -900,7 +939,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	  tmp_asn = pfx2as_records[i]->asn[0];
 
 	  /* create a metric package for this asn */
-	  METRIC_PREFIX_INIT(SUBMETRIC_ID_PFX2AS,
+	  METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_PFX2AS,
 			     tmp_mp, METRIC_PATH_PFX2AS, "%"PRIu32, tmp_asn);
 
 	  /* now insert the mp into the hash */
@@ -916,19 +955,19 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
       free(pfx2as_records);
     }
 
-  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+  SM_IF(SUBMETRIC_ID_PROTOCOL)
     {
       /* initialize the protocols */
       for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
 	{
 	  /* create an empty metric package for this protocol */
-	  METRIC_PREFIX_INIT(SUBMETRIC_ID_PROTOCOL,
+	  METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_PROTOCOL,
 			     tree->protocol_metrics[i], METRIC_PATH_PROTOCOL,
 			     "%"PRIu32, i);
 	}
     }
 
-  SM_IF(SUBMETRIC_FLAG_PORT)
+  SM_IF(SUBMETRIC_ID_PORT)
     {
       for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
 	{
@@ -937,7 +976,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	      for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
 		{
 		  /* initialize a metric package for this proto/dir/port combo */
-		  METRIC_PREFIX_INIT(SUBMETRIC_ID_PORT,
+		  METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_PORT,
 				     tree->port_metrics[proto][dir][port],
 				     port_metric_paths[
 				        (proto*(METRIC_PORT_PROTOCOL_MAX+1))+dir
@@ -968,7 +1007,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
   khiter_t khiter;
   int proto, dir, port;
 
-  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+  SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
   {
     for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
       {
@@ -980,7 +1019,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
       }
   }
 
-  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
   {
     for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
       {
@@ -992,7 +1031,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
       }
   }
 
-  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
   {
     for(i = 0; i < METRIC_NETACQ_EDGE_REGION_MAX; i++)
       {
@@ -1004,7 +1043,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
       }
   }
 
-  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+  SM_IF(SUBMETRIC_ID_PFX2AS)
   {
     if(tree->pfx2as_metrics != NULL)
       {
@@ -1023,7 +1062,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
       }
   }
 
-  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+  SM_IF(SUBMETRIC_ID_PROTOCOL)
   {
     for(i=0; i < METRIC_PROTOCOL_VAL_MAX; i++)
       {
@@ -1035,7 +1074,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
       }
   }
 
-  SM_IF(SUBMETRIC_FLAG_PORT)
+  SM_IF(SUBMETRIC_ID_PORT)
   {
     for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
       {
@@ -1066,7 +1105,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 
   metric_tree_t *tree = state->trees[tree_id];
 
-  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+  SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
   {
     for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
       {
@@ -1078,12 +1117,13 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
       }
   }
 
-  if((tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY) != 0 ||
-     (tree_submetrics[tree_id] & SUBMETRIC_FLAG_NETACQ_EDGE_REGION) != 0)
+  if(tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_COUNTRY] != 0
+     ||
+     tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_REGION] != 0)
     {
       for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
 	{
-	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
 	  {
 	    /* NOTE: most of these will be NULL! */
 	    if(tree->netacq_country_metrics[i] != NULL)
@@ -1092,7 +1132,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 	      }
 	  }
 
-	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
 	  {
 	    /* NOTE: most of these will be NULL! */
 	    if(tree->netacq_region_metrics[i] != NULL)
@@ -1103,7 +1143,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 	}
     }
 
-  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+  SM_IF(SUBMETRIC_ID_PFX2AS)
   {
     for(khiter = kh_begin(tree->pfx2as_metrics);
 	khiter != kh_end(tree->pfx2as_metrics);
@@ -1117,7 +1157,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
       }
   }
 
-  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+  SM_IF(SUBMETRIC_ID_PROTOCOL)
   {
     /* dump the protocol metrics */
     for(i = 0; i < METRIC_PROTOCOL_VAL_MAX; i++)
@@ -1126,7 +1166,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
       }
   }
 
-  SM_IF(SUBMETRIC_FLAG_PORT)
+  SM_IF(SUBMETRIC_ID_PORT)
   {
     for(proto = 0; proto <= METRIC_PORT_PROTOCOL_MAX; proto++)
       {
@@ -1209,21 +1249,21 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	  /* process this packet for this tree */
 	  assert(tree != NULL);
 
-	  SM_IF(SUBMETRIC_FLAG_MAXMIND_COUNTRY)
+	  SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
 	  {
 	    assert(tree->maxmind_country_metrics[maxmind_cc] != NULL);
 	    metric_package_update(tree->maxmind_country_metrics[maxmind_cc],
 				  src_ip, dst_ip, ip_len, pkt_cnt);
 	  }
 
-	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY)
+	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
 	  {
 	    assert(tree->netacq_country_metrics[netacq_cc] != NULL);
 	    metric_package_update(tree->netacq_country_metrics[netacq_cc],
 				  src_ip, dst_ip, ip_len, pkt_cnt);
 	  }
 
-	  SM_IF(SUBMETRIC_FLAG_NETACQ_EDGE_REGION)
+	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
 	  {
 	    if(netacq_rc != 0)
 	      {
@@ -1242,7 +1282,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	      }
 	  }
 
-	  SM_IF(SUBMETRIC_FLAG_PFX2AS)
+	  SM_IF(SUBMETRIC_ID_PFX2AS)
 	  {
 	    /* note we are deliberately discarding ASN records that have more
 	       than one ASN because we consider them an artifact of the
@@ -1268,13 +1308,13 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	      }
 	  }
 
-	  SM_IF(SUBMETRIC_FLAG_PROTOCOL)
+	  SM_IF(SUBMETRIC_ID_PROTOCOL)
 	  {
 	    metric_package_update(tree->protocol_metrics[protocol],
 				  src_ip, dst_ip, ip_len, pkt_cnt);
 	  }
 
-	  SM_IF(SUBMETRIC_FLAG_PORT)
+	  SM_IF(SUBMETRIC_ID_PORT)
 	  {
 	    if(protocol == TRACE_IPPROTO_TCP)
 	      {
