@@ -118,22 +118,24 @@ enum leafmetric_flag {
 
 enum submetric_id {
   SUBMETRIC_ID_MAXMIND_COUNTRY     = 0,
-  SUBMETRIC_ID_NETACQ_EDGE_COUNTRY = 1,
-  SUBMETRIC_ID_NETACQ_EDGE_REGION  = 2,
-  SUBMETRIC_ID_PFX2AS              = 3,
-  SUBMETRIC_ID_PROTOCOL            = 4,
-  SUBMETRIC_ID_PORT                = 5,
+  SUBMETRIC_ID_MAXMIND_CONTINENT   = 1,
+  SUBMETRIC_ID_NETACQ_EDGE_COUNTRY = 2,
+  SUBMETRIC_ID_NETACQ_EDGE_REGION  = 3,
+  SUBMETRIC_ID_PFX2AS              = 4,
+  SUBMETRIC_ID_PROTOCOL            = 5,
+  SUBMETRIC_ID_PORT                = 6,
 
-  SUBMETRIC_ID_CNT                 = 6,
+  SUBMETRIC_ID_CNT                 = 7,
 };
 
 enum submetric_flag {
   SUBMETRIC_FLAG_MAXMIND_COUNTRY     = 0x01,
-  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY = 0x02,
-  SUBMETRIC_FLAG_NETACQ_EDGE_REGION  = 0x04,
-  SUBMETRIC_FLAG_PFX2AS              = 0x08,
-  SUBMETRIC_FLAG_PROTOCOL            = 0x10,
-  SUBMETRIC_FLAG_PORT                = 0x20,
+  SUBMETRIC_FLAG_MAXMIND_CONTINENT   = 0x02,
+  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY = 0x04,
+  SUBMETRIC_FLAG_NETACQ_EDGE_REGION  = 0x08,
+  SUBMETRIC_FLAG_PFX2AS              = 0x10,
+  SUBMETRIC_FLAG_PROTOCOL            = 0x20,
+  SUBMETRIC_FLAG_PORT                = 0x30,
 };
 
 enum tree_id {
@@ -154,6 +156,11 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
   /* Unfiltered */
   {
     /* Maxmind country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Maxmind continent */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT,
@@ -183,6 +190,11 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
   /** Non-spoofed */
   {
    /* Maxmind country */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
+   /* Maxmind continent */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT,
@@ -218,6 +230,9 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
    /* Maxmind country */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
 
+   /* Maxmind continent */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
     /* Netacq country */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
 
@@ -247,6 +262,19 @@ typedef struct leafmetric_package {
 } leafmetric_package_t;
 
 /* ---------- MAXMIND METRIC SETTINGS ---------- */
+const char *maxmind_continents[] = {
+  "--",
+  "AF",
+  "AN",
+  "AS",
+  "EU",
+  "NA",
+  "OC",
+  "SA",
+};
+
+#define METRIC_PATH_MAXMIND_CONTINENT ".geo.maxmind"
+
 #define METRIC_PATH_MAXMIND_COUNTRY    ".geo.maxmind"
 
 /** The max number of values in a 16 bit number (two 8-bit ascii characters) */
@@ -269,6 +297,9 @@ typedef struct leafmetric_package {
 
 /** a hash type to map ISO3 country codes to a continent.ISO2 string */
 KHASH_INIT(strstr, char*, char*, 1, kh_str_hash_func, kh_str_hash_equal)
+
+/** Convert a 2 char byte array to a 16 bit number */
+#define CC_16(bytes)    ((bytes[0] << 8) | bytes[1])
 
 static inline void str_free(char *str)
 {
@@ -374,7 +405,8 @@ typedef struct metric_tree {
    */
   enum tree_id id;
 
-  /** The tag group that will determine whether metrics in this tree get updated */
+  /** The tag group that will determine whether metrics in this tree get
+      updated */
   corsaro_tag_group_t *group;
 
   /** Bit flags indicating which sub metrics are in use in this tree */
@@ -382,6 +414,14 @@ typedef struct metric_tree {
 
   /** Bit flags indicating which leaf metrics are in use in this tree */
   uint8_t used_leaf_metrics;
+
+  /** Array of continents (converted to integers) that point to metrics.
+   *
+   * Even though it uses more memory, we create an array that can hold 2^16
+   * continents -- this allows us to directly index a country based on the
+   * conversion of the ascii characters in each 2 character code.
+   */
+  leafmetric_package_t *maxmind_continent_metrics[METRIC_MAXMIND_ASCII_MAX];
 
   /** Array of countries (converted to integers) that point to metrics.
    *
@@ -443,6 +483,20 @@ struct corsaro_report_state_t {
 
   /** the 'current' time (i.e. the start of the current interval) */
   uint32_t time;
+
+  /* CACHED INFO FOR TREE BUILDING */
+
+  /** Array of continents that correspond to maxmind countries */
+  const char **maxmind_continents;
+
+  /** Number of maxmind country-continent entries */
+  int maxmind_continents_cnt;
+
+  /** Array of maxmind countries */
+  const char **maxmind_countries;
+
+  /** Number of maxmind countries */
+  int maxmind_countries_cnt;
 };
 
 /** Extends the generic plugin state convenience macro in corsaro_plugin.h */
@@ -655,8 +709,10 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
   uint32_t key_id = *id_offset;
 
-  int i;
+  /* to remove... */
   ipmeta_provider_t *provider;
+
+  int i;
   khiter_t khiter;
   int khret;
   /* Array of ASNs, sorted in descending order by number of IPs each AS owns */
@@ -668,11 +724,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
   char cc_str[6] = "--.--";
   uint16_t country_idx;
-
-  const char **countries = NULL;
-  int country_cnt = 0;
-  const char **continents = NULL;
-  int continent_cnt = 0;
+  uint16_t continent_idx;
 
   ipmeta_provider_netacq_edge_country_t **netacq_countries = NULL;
   int netacq_countries_cnt = 0;
@@ -684,7 +736,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   khash_t(strstr) *country_hash = kh_init(strstr);
   int j;
 
-  char rc_str[17]; /* XX.XX.region.XXX\0 */
+  char rc_str[10]; /* XX.XX.XXX\0 */
 
   int proto, dir, port;
 
@@ -710,41 +762,42 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
     }
 
   /* initialize only the submetrics that this tree needs */
+  SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
+  {
+    /* add a metric package for all possible continents */
+    for(i=0; i < ARR_CNT(maxmind_continents); i++)
+      {
+	/* what is the index of this continent in the
+	   maxmind_continent_metrics array? */
+	continent_idx = CC_16(maxmind_continents[i]);
+
+	METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_MAXMIND_CONTINENT,
+			   tree->maxmind_continent_metrics[continent_idx],
+			   METRIC_PATH_MAXMIND_CONTINENT,
+			   "%s", maxmind_continents[i]);
+      }
+  }
 
   SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
-    {
-      /* get the maxmind provider (just for sanity) */
-      if((provider =
-	  corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_MAXMIND))
-	 == NULL || ipmeta_is_provider_enabled(provider) == 0)
-	{
-	  corsaro_log(__func__, corsaro,
-		      "ERROR: Maxmind provider must be enabled");
-	  return NULL;
-	}
+  {
+    /* we want to add an empty metric for all possible countries */
+    for(i=0; i< state->maxmind_countries_cnt; i++)
+      {
+	/* what is the index of this country in the maxmind_country_metrics
+	 * array? */
+	country_idx = CC_16(state->maxmind_countries[i]);
 
-      /* we want to add an empty metric for all possible countries */
-      country_cnt = ipmeta_provider_maxmind_get_iso2_list(&countries);
-      continent_cnt =
-	ipmeta_provider_maxmind_get_country_continent_list(&continents);
-      assert(country_cnt == continent_cnt);
+	/* build a string which contains the continent and country code */
+	memcpy(cc_str, state->maxmind_continents[i], 2);
+	memcpy(&cc_str[3], state->maxmind_countries[i], 2);
 
-      for(i=0; i< country_cnt; i++)
-	{
-	  /* what is the index of this country in the maxmind_country_metrics
-	   * array? */
-	  country_idx = (countries[i][0] << 8) | countries[i][1];
+	METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_MAXMIND_COUNTRY,
+			   tree->maxmind_country_metrics[country_idx],
+			   METRIC_PATH_MAXMIND_COUNTRY,
+			   "%s", cc_str);
+      }
+  }
 
-	  /* build a string which contains the continent and country code */
-	  memcpy(cc_str, continents[i], 2);
-	  memcpy(&cc_str[3], countries[i], 2);
-
-	  METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_MAXMIND_COUNTRY,
-			     tree->maxmind_country_metrics[country_idx],
-			     METRIC_PATH_MAXMIND_COUNTRY,
-			     "%s", cc_str);
-	}
-    }
 
   if(tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_COUNTRY] != 0
      ||
@@ -776,8 +829,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	  assert(netacq_countries[i] != NULL);
 
 	  /* convert the ascii country code to a 16bit uint */
-	  country_idx =
-	    (netacq_countries[i]->iso2[0] << 8) | netacq_countries[i]->iso2[1];
+	  country_idx = CC_16(netacq_countries[i]->iso2);
 
 	  /* build a string which contains the continent and country code*/
 	  cc_ptr = cc_str;
@@ -845,7 +897,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
 	      cc_ptr = kh_value(country_hash, khiter);
 	      cc_ptr = stpncpy(rc_str, cc_ptr, 6);
-	      cc_ptr = stpncpy(cc_ptr, ".region.", 9);
+	      cc_ptr = stpncpy(cc_ptr, ".", 1);
 	      strncpy(cc_ptr, regions[i]->region_iso, 4);
 
 	      /* fix the *'s */
@@ -1007,6 +1059,18 @@ static void metric_tree_destroy(metric_tree_t *tree)
   khiter_t khiter;
   int proto, dir, port;
 
+  SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
+  {
+    for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
+      {
+	if(tree->maxmind_continent_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->maxmind_continent_metrics[i]);
+	    tree->maxmind_continent_metrics[i] = NULL;
+	  }
+      }
+  }
+
   SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
   {
     for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
@@ -1105,6 +1169,18 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 
   metric_tree_t *tree = state->trees[tree_id];
 
+  SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
+  {
+    for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
+      {
+	/* NOTE: most of these will be NULL! */
+	if(tree->maxmind_continent_metrics[i] != NULL)
+	  {
+	    metric_package_dump(state, tree->maxmind_continent_metrics[i]);
+	}
+      }
+  }
+
   SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
   {
     for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
@@ -1188,7 +1264,8 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 }
 
 static inline uint16_t lookup_convert_cc(corsaro_packet_state_t *state,
-					 ipmeta_provider_id_t provider_id)
+					 ipmeta_provider_id_t provider_id,
+					 uint16_t *cont)
 {
   ipmeta_record_t *record;
 
@@ -1196,12 +1273,21 @@ static inline uint16_t lookup_convert_cc(corsaro_packet_state_t *state,
       corsaro_ipmeta_get_record(state, provider_id))
      != NULL)
     {
+      if(record->continent_code != NULL)
+	{
+	  *cont = CC_16(record->continent_code);
+	}
+      else
+	{
+	  *cont = 0x2D2D; /* "--" */
+	}
       if(record->country_code != NULL)
 	{
-	  return (record->country_code[0]<<8) | record->country_code[1];
+	  return CC_16(record->country_code);
 	}
     }
 
+  *cont = 0x2D2D; /* "--" */
   return 0x2D2D; /* "--" */
 }
 
@@ -1214,7 +1300,9 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
   int i;
   metric_tree_t *tree = NULL;
   int proto;
+  uint16_t maxmind_cont;
   uint16_t maxmind_cc;
+  uint16_t netacq_cont;
   uint16_t netacq_cc;
   uint16_t netacq_rc = 0;
   khiter_t khiter;
@@ -1224,10 +1312,12 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 
   /* prep all the results */
 
-  /* maxmind country code */
-  maxmind_cc = lookup_convert_cc(state, IPMETA_PROVIDER_MAXMIND);
+  /* maxmind country and continent code */
+  maxmind_cc = lookup_convert_cc(state, IPMETA_PROVIDER_MAXMIND,
+				 &maxmind_cont);
   /* netacq edge country code */
-  netacq_cc = lookup_convert_cc(state, IPMETA_PROVIDER_NETACQ_EDGE);
+  netacq_cc = lookup_convert_cc(state, IPMETA_PROVIDER_NETACQ_EDGE,
+				&netacq_cont);
   /* netacq edge region code */
   if((record =
       corsaro_ipmeta_get_record(state, IPMETA_PROVIDER_NETACQ_EDGE))
@@ -1248,6 +1338,13 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	{
 	  /* process this packet for this tree */
 	  assert(tree != NULL);
+
+	  SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
+	  {
+	    assert(tree->maxmind_continent_metrics[maxmind_cont] != NULL);
+	    metric_package_update(tree->maxmind_continent_metrics[maxmind_cont],
+				  src_ip, dst_ip, ip_len, pkt_cnt);
+	  }
 
 	  SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
 	  {
@@ -1510,6 +1607,8 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   corsaro_plugin_t *plugin = PLUGIN(corsaro);
   corsaro_tag_group_t *group;
 
+  ipmeta_provider_t *provider;
+
   int i;
 
   /* the current key id (used by METRIC_PREFIX_INIT) */
@@ -1571,6 +1670,24 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       corsaro_log(__func__, corsaro, "could not add tag to unfiltered group");
       goto err;
     }
+
+  /* grab the stuff we need for maxmind */
+  if((provider =
+      corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_MAXMIND))
+     == NULL || ipmeta_is_provider_enabled(provider) == 0)
+    {
+      corsaro_log(__func__, corsaro,
+		  "ERROR: Maxmind provider must be enabled");
+      goto err;
+    }
+  /* get a list of all the continents */
+  state->maxmind_continents_cnt =
+    ipmeta_provider_maxmind_get_country_continent_list(
+						&state->maxmind_continents);
+  /* get a list of all the countries */
+  state->maxmind_countries_cnt =
+    ipmeta_provider_maxmind_get_iso2_list(&state->maxmind_countries);
+  assert(state->maxmind_countries_cnt == state->maxmind_continents_cnt);
 
   for(i=0; i<TREE_ID_CNT; i++)
     {
