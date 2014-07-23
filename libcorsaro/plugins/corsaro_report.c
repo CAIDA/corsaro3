@@ -317,7 +317,17 @@ static inline void str_free(char *str)
 
 /* ---------- PFX2AS METRIC SETTINGS ---------- */
 #define METRIC_PATH_PFX2AS             ".routing.pfx2as.asn"
-#define METRIC_PFX2AS_VAL_MAX          3000
+
+uint32_t tree_pfx2as_max[] = {
+  /** unfiltered */
+  0,
+
+  /** Non-spoofed */
+  3000,
+
+  /** Non-erratic */
+  UINT32_MAX,
+};
 
 /** Sort PFX2AS ASN Records
  *
@@ -1001,21 +1011,22 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
       /* find out how big the smallest AS is that we are going to track */
       /* but if we want to track more ASes than actually exist, just leave the
 	 smallest size at it's default of zero - that will track them all */
-      if(METRIC_PFX2AS_VAL_MAX < pfx2as_records_cnt)
+      if(tree_pfx2as_max[tree->id] < pfx2as_records_cnt)
 	{
 	  /* now, jump to index 2999 and ask it how many IPs are in that ASN */
-	  assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1] != NULL);
-	  assert(pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt > 0);
+	  assert(pfx2as_records[tree_pfx2as_max[tree->id]-1] != NULL);
+	  assert(pfx2as_records[tree_pfx2as_max[tree->id]-1]->asn_ip_cnt > 0);
 	  tree->pfx2as_min_ip_cnt =
-	    pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn_ip_cnt;
-	}
+	    pfx2as_records[tree_pfx2as_max[tree->id]-1]->asn_ip_cnt;
 
-      corsaro_log(__func__, corsaro,
-		  "there are %d ASNs, the ASN at index %d is %d and has %d IPs",
-		  pfx2as_records_cnt,
-		  METRIC_PFX2AS_VAL_MAX-1,
-		  pfx2as_records[METRIC_PFX2AS_VAL_MAX-1]->asn[0],
-		  tree->pfx2as_min_ip_cnt);
+	  corsaro_log(__func__, corsaro,
+		      "there are %d ASNs, the ASN at index %d is %d "
+		      "and has %d IPs",
+		      pfx2as_records_cnt,
+		      tree_pfx2as_max[tree->id]-1,
+		      pfx2as_records[tree_pfx2as_max[tree->id]-1]->asn[0],
+		      tree->pfx2as_min_ip_cnt);
+	}
 
       /* and an empty metric for each asn that we will track */
       for(i = 0;
@@ -1026,9 +1037,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	  /* we simply refuse to deal with those pesky group ASNs */
 	  if(pfx2as_records[i]->asn_cnt != 1)
 	    {
-	      corsaro_log(__func__, corsaro,
-			  "Corsaro report does not support ASN groups");
-	      return NULL;
+	      continue;
 	    }
 
 	  tmp_asn = pfx2as_records[i]->asn[0];
