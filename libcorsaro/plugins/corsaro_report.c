@@ -371,8 +371,19 @@ enum {
   METRIC_PORT_DIRECTION_MAX = METRIC_PORT_DIRECTION_DST,
 };
 
-#define METRIC_PORT_VAL_MAX 1024
-/* 65536 is the actual max, but we just want the first 1024 */
+#define METRIC_PORT_VAL_CNT UINT16_MAX+1
+
+uint16_t tree_port_max[] = {
+  /** unfiltered */
+  1024,
+
+  /** Non-spoofed */
+  /* ideally we want this to be UINT16_MAX, but until we get DBATS... */
+  6000,
+
+  /** Non-erratic */
+  0, /* no port info */
+};
 
 #define PORT_PREFIX ".traffic.port"
 
@@ -473,7 +484,7 @@ typedef struct metric_tree {
 
   /** Array of port metrics */
   leafmetric_package_t *port_metrics[METRIC_PORT_PROTOCOL_MAX+1]	\
-  [METRIC_PORT_DIRECTION_MAX+1][METRIC_PORT_VAL_MAX];
+  [METRIC_PORT_DIRECTION_MAX+1][METRIC_PORT_VAL_CNT];
 } metric_tree_t;
 
 /** Holds the state for an instance of this plugin */
@@ -1057,7 +1068,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	{
 	  for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
 	    {
-	      for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+	      for(port = 0; port < tree_port_max[tree_id]; port++)
 		{
 		  /* initialize a metric package for this proto/dir/port combo */
 		  METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_PORT,
@@ -1188,7 +1199,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
       {
 	for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
 	  {
-	    for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+	    for(port = 0; port < tree_port_max[tree->id]; port++)
 	      {
 		if(tree->port_metrics[proto][dir][port] != NULL)
 		  {
@@ -1302,7 +1313,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
       {
 	for(dir = 0; dir <= METRIC_PORT_DIRECTION_MAX; dir++)
 	  {
-	    for(port = 0; port < METRIC_PORT_VAL_MAX; port++)
+	    for(port = 0; port < tree_port_max[tree->id]; port++)
 	      {
 		if(tree->port_metrics[proto][dir][port] != NULL)
 		  {
@@ -1489,7 +1500,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 
 	    if(proto != METRIC_PORT_PROTOCOL_SKIP)
 	      {
-		if(src_port < METRIC_PORT_VAL_MAX)
+		if(src_port < tree_port_max[tree->id])
 		  {
 		    metric_package_update(tree->
 					  port_metrics
@@ -1497,7 +1508,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 					  src_ip, dst_ip, ip_len, pkt_cnt);
 		  }
 
-		if(dst_port < METRIC_PORT_VAL_MAX)
+		if(dst_port < tree_port_max[tree->id])
 		  {
 		    metric_package_update(tree->
 					  port_metrics
