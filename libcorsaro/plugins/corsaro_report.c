@@ -117,25 +117,20 @@ enum leafmetric_flag {
 };
 
 enum submetric_id {
-  SUBMETRIC_ID_MAXMIND_COUNTRY     = 0,
-  SUBMETRIC_ID_MAXMIND_CONTINENT   = 1,
-  SUBMETRIC_ID_NETACQ_EDGE_COUNTRY = 2,
-  SUBMETRIC_ID_NETACQ_EDGE_REGION  = 3,
-  SUBMETRIC_ID_PFX2AS              = 4,
-  SUBMETRIC_ID_PROTOCOL            = 5,
-  SUBMETRIC_ID_PORT                = 6,
+  SUBMETRIC_ID_MAXMIND_CONTINENT     = 0,
+  SUBMETRIC_ID_MAXMIND_COUNTRY       = 1,
 
-  SUBMETRIC_ID_CNT                 = 7,
-};
+  SUBMETRIC_ID_NETACQ_EDGE_CONTINENT = 2,
+  SUBMETRIC_ID_NETACQ_EDGE_COUNTRY   = 3,
+  SUBMETRIC_ID_NETACQ_EDGE_REGION    = 4,
 
-enum submetric_flag {
-  SUBMETRIC_FLAG_MAXMIND_COUNTRY     = 0x01,
-  SUBMETRIC_FLAG_MAXMIND_CONTINENT   = 0x02,
-  SUBMETRIC_FLAG_NETACQ_EDGE_COUNTRY = 0x04,
-  SUBMETRIC_FLAG_NETACQ_EDGE_REGION  = 0x08,
-  SUBMETRIC_FLAG_PFX2AS              = 0x10,
-  SUBMETRIC_FLAG_PROTOCOL            = 0x20,
-  SUBMETRIC_FLAG_PORT                = 0x30,
+  SUBMETRIC_ID_PFX2AS                = 5,
+
+  SUBMETRIC_ID_PROTOCOL              = 6,
+
+  SUBMETRIC_ID_PORT                  = 7,
+
+  SUBMETRIC_ID_CNT                   = 8,
 };
 
 enum tree_id {
@@ -155,12 +150,17 @@ const char *tree_names[] = {
 const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
   /* Unfiltered */
   {
+    /* Maxmind continent */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
     /* Maxmind country */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT,
 
-    /* Maxmind continent */
+    /* Netacq continent */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT,
@@ -189,12 +189,17 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
 
   /** Non-spoofed */
   {
+   /* Maxmind continent */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT,
+
    /* Maxmind country */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT,
 
-   /* Maxmind continent */
+    /* Netacq continent */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT,
@@ -227,10 +232,13 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
 
   /** Non-erratic */
   {
+   /* Maxmind continent */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
    /* Maxmind country */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
 
-   /* Maxmind continent */
+    /* Netacq continent */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
 
     /* Netacq country */
@@ -262,7 +270,7 @@ typedef struct leafmetric_package {
 } leafmetric_package_t;
 
 /* ---------- MAXMIND METRIC SETTINGS ---------- */
-const char *maxmind_continents[] = {
+const char *continent_strings[] = {
   "--",
   "AF",
   "AN",
@@ -282,18 +290,18 @@ const char *maxmind_continents[] = {
 
 
 /* ---------- NETACQ EDGE METRIC SETTINGS ---------- */
-#define METRIC_PATH_NETACQ_EDGE_COUNTRY     \
+#define METRIC_PATH_NETACQ_EDGE_CONTINENT     \
   ".geo.netacuity.edge"
 
-/** The max number of values in a 16 bit number (two 8-bit ascii characters) */
-#define METRIC_NETACQ_EDGE_COUNTRY_MAX UINT16_MAX
+#define METRIC_PATH_NETACQ_EDGE_COUNTRY     \
+  ".geo.netacuity.edge"
 
 #define METRIC_PATH_NETACQ_EDGE_REGION     \
   ".geo.netacuity.edge"
 
 /** The max region code value (currently the actual max is 30,404, but this
  * could easily go higher. be careful) */
-#define METRIC_NETACQ_EDGE_REGION_MAX UINT16_MAX
+#define METRIC_NETACQ_EDGE_ASCII_MAX UINT16_MAX
 
 /** a hash type to map ISO3 country codes to a continent.ISO2 string */
 KHASH_INIT(strstr, char*, char*, 1, kh_str_hash_func, kh_str_hash_equal)
@@ -431,19 +439,27 @@ typedef struct metric_tree {
    */
   leafmetric_package_t *maxmind_country_metrics[METRIC_MAXMIND_ASCII_MAX];
 
+  /** Array of continent codes (specific to netacq) that point to metrics.
+   *
+   * Even though it uses more memory, we create an array that can hold 2^16
+   * countries -- this allows us to directly index a continent based on the
+   * conversion of the ascii characters in each 2 character code.
+   */
+  leafmetric_package_t *netacq_continent_metrics[METRIC_NETACQ_EDGE_ASCII_MAX];
+
   /** Array of country codes (specific to netacq) that point to metrics.
    *
    * Even though it uses more memory, we create an array that can hold 2^16
    * countries -- this allows us to directly index a country based on the
    * conversion of the ascii characters in each ISO 3166 2 character code.
    */
-  leafmetric_package_t *netacq_country_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
+  leafmetric_package_t *netacq_country_metrics[METRIC_NETACQ_EDGE_ASCII_MAX];
 
   /** Array of region codes (specific to netacq) that point to metrics.
    *
    * Note that many of these will be NULL
    */
-  leafmetric_package_t *netacq_region_metrics[METRIC_NETACQ_EDGE_REGION_MAX];
+  leafmetric_package_t *netacq_region_metrics[METRIC_NETACQ_EDGE_ASCII_MAX];
 
   /** The minimum number of IPs that an ASN can have before it is considered for
       reporting (based on smallest the top METRIC_PFX2AS_VAL_MAX ASes) */
@@ -709,7 +725,6 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
   uint32_t key_id = *id_offset;
 
-  /* to remove... */
   ipmeta_provider_t *provider;
 
   int i;
@@ -765,16 +780,16 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
   {
     /* add a metric package for all possible continents */
-    for(i=0; i < ARR_CNT(maxmind_continents); i++)
+    for(i=0; i < ARR_CNT(continent_strings); i++)
       {
 	/* what is the index of this continent in the
 	   maxmind_continent_metrics array? */
-	continent_idx = CC_16(maxmind_continents[i]);
+	continent_idx = CC_16(continent_strings[i]);
 
 	METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_MAXMIND_CONTINENT,
 			   tree->maxmind_continent_metrics[continent_idx],
 			   METRIC_PATH_MAXMIND_CONTINENT,
-			   "%s", maxmind_continents[i]);
+			   "%s", continent_strings[i]);
       }
   }
 
@@ -799,7 +814,9 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   }
 
 
-  if(tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_COUNTRY] != 0
+  if(tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_CONTINENT] != 0
+     ||
+     tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_COUNTRY] != 0
      ||
      tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_REGION] != 0)
     {
@@ -823,6 +840,21 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 		      " option to load country information");
 	  return NULL;
 	}
+
+      SM_IF(SUBMETRIC_ID_NETACQ_EDGE_CONTINENT)
+      {
+	/* add a metric package for all possible continents */
+	for(i=0; i < ARR_CNT(continent_strings); i++)
+	  {
+	    /* what is the index of this continent in the array? */
+	    continent_idx = CC_16(continent_strings[i]);
+
+	    METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_NETACQ_EDGE_CONTINENT,
+			       tree->netacq_continent_metrics[continent_idx],
+			       METRIC_PATH_NETACQ_EDGE_CONTINENT,
+			       "%s", continent_strings[i]);
+	  }
+      }
 
       for(i=0; i < netacq_countries_cnt; i++)
 	{
@@ -884,7 +916,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	      /* if netacq starts to allocate region codes > 2**16 we probably
 	       * need to switch to using a hash here. Cannot use an assert
 	       * because we disable those in production */
-	      if(regions[i]->code > METRIC_NETACQ_EDGE_REGION_MAX)
+	      if(regions[i]->code > METRIC_NETACQ_EDGE_ASCII_MAX)
 		{
 		  corsaro_log(__func__, corsaro,
 			      "ERROR: Net Acuity Edge region code > 2^16 found");
@@ -1083,9 +1115,21 @@ static void metric_tree_destroy(metric_tree_t *tree)
       }
   }
 
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_CONTINENT)
+  {
+    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
+      {
+	if(tree->netacq_continent_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->netacq_continent_metrics[i]);
+	    tree->netacq_continent_metrics[i] = NULL;
+	  }
+      }
+  }
+
   SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
   {
-    for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
+    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
       {
 	if(tree->netacq_country_metrics[i] != NULL)
 	  {
@@ -1097,7 +1141,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
 
   SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
   {
-    for(i = 0; i < METRIC_NETACQ_EDGE_REGION_MAX; i++)
+    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
       {
 	if(tree->netacq_region_metrics[i] != NULL)
 	  {
@@ -1193,31 +1237,41 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
       }
   }
 
-  if(tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_COUNTRY] != 0
-     ||
-     tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_REGION] != 0)
-    {
-      for(i = 0; i < METRIC_NETACQ_EDGE_COUNTRY_MAX; i++)
-	{
-	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_CONTINENT)
+  {
+    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
+      {
+	/* NOTE: most of these will be NULL! */
+	if(tree->netacq_continent_metrics[i] != NULL)
 	  {
-	    /* NOTE: most of these will be NULL! */
-	    if(tree->netacq_country_metrics[i] != NULL)
-	      {
-		metric_package_dump(state, tree->netacq_country_metrics[i]);
-	      }
+	    metric_package_dump(state, tree->netacq_continent_metrics[i]);
 	  }
+      }
+  }
 
-	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
+  {
+    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
+      {
+	/* NOTE: most of these will be NULL! */
+	if(tree->netacq_country_metrics[i] != NULL)
 	  {
-	    /* NOTE: most of these will be NULL! */
-	    if(tree->netacq_region_metrics[i] != NULL)
-	      {
-		metric_package_dump(state, tree->netacq_region_metrics[i]);
-	      }
+	    metric_package_dump(state, tree->netacq_country_metrics[i]);
 	  }
-	}
-    }
+      }
+  }
+
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
+  {
+    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
+      {
+	/* NOTE: most of these will be NULL! */
+	if(tree->netacq_region_metrics[i] != NULL)
+	  {
+	    metric_package_dump(state, tree->netacq_region_metrics[i]);
+	  }
+      }
+  }
 
   SM_IF(SUBMETRIC_ID_PFX2AS)
   {
@@ -1350,6 +1404,13 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	  {
 	    assert(tree->maxmind_country_metrics[maxmind_cc] != NULL);
 	    metric_package_update(tree->maxmind_country_metrics[maxmind_cc],
+				  src_ip, dst_ip, ip_len, pkt_cnt);
+	  }
+
+	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_CONTINENT)
+	  {
+	    assert(tree->netacq_continent_metrics[netacq_cont] != NULL);
+	    metric_package_update(tree->netacq_continent_metrics[netacq_cont],
 				  src_ip, dst_ip, ip_len, pkt_cnt);
 	  }
 
