@@ -465,11 +465,7 @@ static corsaro_plugin_t corsaro_report_plugin = {
   PLUGIN_NAME,                                 /* name */
   CORSARO_PLUGIN_ID_REPORT,                    /* id */
   CORSARO_REPORT_MAGIC,                        /* magic */
-#ifdef WITH_PLUGIN_SIXT
-  CORSARO_PLUGIN_GENERATE_PTRS_FT(corsaro_report),  /* func ptrs */
-#else
   CORSARO_PLUGIN_GENERATE_PTRS(corsaro_report),
-#endif
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
 
@@ -2106,35 +2102,3 @@ int corsaro_report_process_packet(corsaro_t *corsaro,
 
   return 0;
 }
-
-#ifdef WITH_PLUGIN_SIXT
-int corsaro_report_process_flowtuple(corsaro_t *corsaro,
-				     corsaro_flowtuple_t *flowtuple,
-				     corsaro_packet_state_t *state)
-{
-  if(process_generic(corsaro, state,
-		     corsaro_flowtuple_get_source_ip(flowtuple),
-		     corsaro_flowtuple_get_destination_ip(flowtuple),
-		     ntohs(flowtuple->src_port), ntohs(flowtuple->dst_port),
-		     ntohs(flowtuple->ip_len), flowtuple->protocol,
-		     ntohl(flowtuple->packet_cnt)) != 0)
-    {
-      return -1;
-    }
-  return 0;
-}
-
-int corsaro_report_process_flowtuple_class_start(corsaro_t *corsaro,
-				   corsaro_flowtuple_class_start_t *class)
-{
-  /* we dont care about these */
-  return 0;
-}
-
-int corsaro_report_process_flowtuple_class_end(corsaro_t *corsaro,
-				   corsaro_flowtuple_class_end_t *class)
-{
-  /* dont care */
-  return 0;
-}
-#endif
