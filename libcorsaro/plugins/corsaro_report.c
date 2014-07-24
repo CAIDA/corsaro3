@@ -130,7 +130,9 @@ enum submetric_id {
 
   SUBMETRIC_ID_PORT                  = 7,
 
-  SUBMETRIC_ID_CNT                   = 8,
+  SUBMETRIC_ID_FILTER                = 8,
+
+  SUBMETRIC_ID_CNT                   = 9,
 };
 
 enum tree_id {
@@ -145,6 +147,8 @@ const char *tree_names[] = {
   "non-spoofed",
   "non-erratic",
 };
+
+#define UNFILTERED_TAG_NAME "all-pkts"
 
 /* for each tree/submetric combo, list the leafmetrics */
 const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
@@ -185,6 +189,12 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT,
+
+    /* Filter */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
   },
 
   /** Non-spoofed */
@@ -228,6 +238,12 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT |
     LEAFMETRIC_FLAG_IP_LEN,
+
+    /* Filter */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
   },
 
   /** Non-erratic */
@@ -255,6 +271,12 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
 
     /* Port */
     0,
+
+    /* Filter */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
   },
 };
 
@@ -268,6 +290,10 @@ typedef struct leafmetric_package {
   uint64_t pkt_cnt;
   uint64_t ip_len;
 } leafmetric_package_t;
+
+/* ---------- FILTER CRITERIA METRIC SETTINGS ---------- */
+
+#define METRIC_PATH_FILTER ".filter-criteria"
 
 /* ---------- MAXMIND METRIC SETTINGS ---------- */
 const char *continent_strings[] = {
@@ -495,6 +521,15 @@ typedef struct metric_tree {
   /** Array of port metrics */
   leafmetric_package_t *port_metrics[METRIC_PORT_PROTOCOL_MAX+1]	\
   [METRIC_PORT_DIRECTION_MAX+1][METRIC_PORT_VAL_CNT];
+
+  /** Array of filter metrics
+   * This will have the same number of elements, and be in the same order, as
+   * the array of tags returned by corsaro_tag_group_get_tags
+   */
+  leafmetric_package_t **filter_metrics;
+
+  /** number of elements in the filter metrics array */
+  int filter_metrics_cnt;
 } metric_tree_t;
 
 /** Holds the state for an instance of this plugin */
@@ -748,6 +783,9 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
   ipmeta_provider_t *provider;
 
+  corsaro_tag_t **tags;
+  int tags_cnt;
+
   int i;
   khiter_t khiter;
   int khret;
@@ -798,6 +836,35 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
     }
 
   /* initialize only the submetrics that this tree needs */
+
+  SM_IF(SUBMETRIC_ID_FILTER)
+  {
+    /* get the tags for this tree */
+    if((tags_cnt = corsaro_tag_group_get_tags(tree->group, &tags)) < 0)
+      {
+	corsaro_log(__func__, corsaro, "could not get tags for tree group");
+	return NULL;
+      }
+
+    /* malloc enough space to hold the leaf packages */
+    if((tree->filter_metrics =
+	malloc_zero(sizeof(leafmetric_package_t*)*(tags_cnt))) == NULL)
+      {
+	return NULL;
+      }
+
+    tree->filter_metrics_cnt = tags_cnt;
+
+    /* add a metric package for each tag */
+    for(i=0; i<tags_cnt; i++)
+      {
+	METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_FILTER,
+			   tree->filter_metrics[i],
+			   METRIC_PATH_FILTER,
+			   "%s", tags[i]->name);
+      }
+  }
+
   SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
   {
     /* add a metric package for all possible continents */
@@ -1111,6 +1178,19 @@ static void metric_tree_destroy(metric_tree_t *tree)
   khiter_t khiter;
   int proto, dir, port;
 
+  SM_IF(SUBMETRIC_ID_FILTER)
+  {
+    for(i = 0; i < tree->filter_metrics_cnt; i++)
+      {
+	if(tree->filter_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->filter_metrics[i]);
+	    tree->filter_metrics[i] = NULL;
+	  }
+      }
+    tree->filter_metrics_cnt = 0;
+  }
+
   SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
   {
     for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
@@ -1232,6 +1312,17 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
   int proto, dir, port;
 
   metric_tree_t *tree = state->trees[tree_id];
+
+  SM_IF(SUBMETRIC_ID_FILTER)
+  {
+    for(i = 0; i < tree->filter_metrics_cnt; i++)
+      {
+	if(tree->filter_metrics[i] != NULL)
+	  {
+	    metric_package_dump(state, tree->filter_metrics[i]);
+	}
+      }
+  }
 
   SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
   {
@@ -1371,7 +1462,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 			   uint16_t ip_len, uint8_t protocol, uint64_t pkt_cnt)
 {
   struct corsaro_report_state_t *plugin_state = STATE(corsaro);
-  int i;
+  int i,j;
   metric_tree_t *tree = NULL;
   int proto;
   uint16_t maxmind_cont;
@@ -1381,6 +1472,9 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
   uint16_t netacq_rc = 0;
   khiter_t khiter;
   ipmeta_record_t *record;
+
+  corsaro_tag_t **tags;
+  int tags_cnt;
 
   assert(plugin_state != NULL);
 
@@ -1412,6 +1506,22 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	{
 	  /* process this packet for this tree */
 	  assert(tree != NULL);
+
+	  SM_IF(SUBMETRIC_ID_FILTER)
+	  {
+	    tags_cnt = corsaro_tag_group_get_tags(tree->group, &tags);
+	    assert(tags_cnt >= 0);
+
+	    for(j=0; j<tags_cnt; j++)
+	      {
+		assert(tree->filter_metrics[j] != NULL);
+		if(corsaro_tag_is_match(state, tags[j]) > 0)
+		  {
+		    metric_package_update(tree->filter_metrics[j],
+					  src_ip, dst_ip, ip_len, pkt_cnt);
+		  }
+	      }
+	  }
 
 	  SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
 	  {
@@ -1739,7 +1849,7 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       goto err;
     }
   if((state->unfiltered_tag =
-      corsaro_tag_init(corsaro, tree_names[TREE_ID_UNFILTERED], NULL))
+      corsaro_tag_init(corsaro, UNFILTERED_TAG_NAME, NULL))
      == NULL)
     {
       corsaro_log(__func__, corsaro,
