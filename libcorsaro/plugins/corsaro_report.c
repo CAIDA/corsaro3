@@ -193,10 +193,7 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_PKT_CNT,
 
     /* Filter */
-    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
-    LEAFMETRIC_FLAG_UNIQ_DST_IP |
-    LEAFMETRIC_FLAG_PKT_CNT |
-    LEAFMETRIC_FLAG_IP_LEN,
+    0,
 
     /* Tree */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP |
@@ -313,7 +310,7 @@ typedef struct leafmetric_package {
 
 /* ---------- TREE METRIC SETTINGS ---------- */
 
-#define METRIC_PATH_TREE ""
+#define METRIC_PATH_TREE ".overall"
 
 /* ---------- FILTER CRITERIA METRIC SETTINGS ---------- */
 
@@ -863,7 +860,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   SM_IF(SUBMETRIC_ID_TREE)
   {
     char key_buffer[KEY_BUFFER_LEN];
-    snprintf(key_buffer, KEY_BUFFER_LEN, METRIC_PREFIX METRIC_PATH_TREE ".%s",
+    snprintf(key_buffer, KEY_BUFFER_LEN, METRIC_PREFIX ".%s" METRIC_PATH_TREE,
 	     tree->group->name);
     if((tree->tree_metrics = leafmetric_package_new(state,
 						    tree_id,
