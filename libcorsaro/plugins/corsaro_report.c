@@ -132,7 +132,9 @@ enum submetric_id {
 
   SUBMETRIC_ID_FILTER                = 8,
 
-  SUBMETRIC_ID_CNT                   = 9,
+  SUBMETRIC_ID_TREE                  = 9,
+
+  SUBMETRIC_ID_CNT                   = 10,
 };
 
 enum tree_id {
@@ -195,6 +197,12 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT |
     LEAFMETRIC_FLAG_IP_LEN,
+
+    /* Tree */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
   },
 
   /** Non-spoofed */
@@ -244,6 +252,12 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT |
     LEAFMETRIC_FLAG_IP_LEN,
+
+    /* Tree */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
   },
 
   /** Non-erratic */
@@ -277,6 +291,12 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_UNIQ_DST_IP |
     LEAFMETRIC_FLAG_PKT_CNT |
     LEAFMETRIC_FLAG_IP_LEN,
+
+    /* Tree */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
   },
 };
 
@@ -290,6 +310,10 @@ typedef struct leafmetric_package {
   uint64_t pkt_cnt;
   uint64_t ip_len;
 } leafmetric_package_t;
+
+/* ---------- TREE METRIC SETTINGS ---------- */
+
+#define METRIC_PATH_TREE ""
 
 /* ---------- FILTER CRITERIA METRIC SETTINGS ---------- */
 
@@ -530,6 +554,9 @@ typedef struct metric_tree {
 
   /** number of elements in the filter metrics array */
   int filter_metrics_cnt;
+
+  /** Overall stats for a tree */
+  leafmetric_package_t *tree_metrics;
 } metric_tree_t;
 
 /** Holds the state for an instance of this plugin */
@@ -836,6 +863,21 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
     }
 
   /* initialize only the submetrics that this tree needs */
+
+  SM_IF(SUBMETRIC_ID_TREE)
+  {
+    char key_buffer[KEY_BUFFER_LEN];
+    snprintf(key_buffer, KEY_BUFFER_LEN, METRIC_PREFIX METRIC_PATH_TREE ".%s",
+	     tree->group->name);
+    if((tree->tree_metrics = leafmetric_package_new(state,
+						    tree_id,
+						    SUBMETRIC_ID_TREE,
+						    key_buffer,
+						    &key_id)) == NULL)
+      {
+	goto err;
+      }
+  }
 
   SM_IF(SUBMETRIC_ID_FILTER)
   {
@@ -1178,6 +1220,15 @@ static void metric_tree_destroy(metric_tree_t *tree)
   khiter_t khiter;
   int proto, dir, port;
 
+  SM_IF(SUBMETRIC_ID_TREE)
+  {
+    if(tree->tree_metrics != NULL)
+      {
+	    metric_package_destroy(tree->tree_metrics);
+	    tree->tree_metrics = NULL;
+      }
+  }
+
   SM_IF(SUBMETRIC_ID_FILTER)
   {
     for(i = 0; i < tree->filter_metrics_cnt; i++)
@@ -1312,6 +1363,11 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
   int proto, dir, port;
 
   metric_tree_t *tree = state->trees[tree_id];
+
+  SM_IF(SUBMETRIC_ID_TREE)
+  {
+    metric_package_dump(state, tree->tree_metrics);
+  }
 
   SM_IF(SUBMETRIC_ID_FILTER)
   {
@@ -1506,6 +1562,12 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	{
 	  /* process this packet for this tree */
 	  assert(tree != NULL);
+
+	  SM_IF(SUBMETRIC_ID_TREE)
+	  {
+	    metric_package_update(tree->tree_metrics,
+				  src_ip, dst_ip, ip_len, pkt_cnt);
+	  }
 
 	  SM_IF(SUBMETRIC_ID_FILTER)
 	  {
