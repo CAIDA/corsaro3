@@ -72,7 +72,7 @@ AM_CPPFLAGS += -I$(top_srcdir)/libcorsaro/plugins/libp0f
 PLUGIN_SRC+=corsaro_p0f.c corsaro_p0f.h 
 endif
 if WITH_PLUGIN_REPORT
-PLUGIN_SRC+=corsaro_report.c corsaro_report.h 
+PLUGIN_SRC+=corsaro_report.c corsaro_report.h corsaro_report_config.h
 endif
 if WITH_PLUGIN_FILTERGEO
 PLUGIN_SRC+=corsaro_filtergeo.c corsaro_filtergeo.h 
