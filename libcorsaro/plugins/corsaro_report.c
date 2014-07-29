@@ -850,7 +850,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
      == NULL)
     {
       corsaro_log(__func__, corsaro,
-		  "Required tag group '%' missing. Check your config",
+		  "Required tag group '%s' missing. Check your config",
 		  tree_names[tree->id]);
       return NULL;
     }
