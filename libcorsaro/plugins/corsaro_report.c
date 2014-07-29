@@ -1551,6 +1551,9 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
     {
       tree = plugin_state->trees[i];
       assert(tree != NULL);
+      /** @note, the filters for report MUST identify packets that are
+	  allowed. That is, ALL tags for a group must match for the group to
+	  match */
       if(corsaro_tag_group_is_match(state, tree->group) != 0)
 	{
 	  /* process this packet for this tree */
