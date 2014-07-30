@@ -201,9 +201,11 @@ struct corsaro_report_state_t {
   /** array of metric trees that we are tracking */
   metric_tree_t *trees[TREE_ID_CNT];
 
-  /** shortcut to the unfiltered tag in the unfiltered group in the unfiltered
-      tree */
-  corsaro_tag_t *unfiltered_tag;
+  /** Array of tags that we are filtering packets with */
+  corsaro_tag_t *tags[ARR_CNT(tag_defs)];
+
+  /** Total number of tags that we are applying */
+  int tags_cnt;
 
   /** libtimeseries state */
   timeseries_t *timeseries;
@@ -489,14 +491,32 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
   tree->id = tree_id;
 
-  /* get the appropriate tag group for this tree */
-  if((tree->group = corsaro_tag_group_get(corsaro, tree_names[tree->id]))
-     == NULL)
+  /* create a tag group for this tree */
+  if((tree->group = corsaro_tag_group_init(corsaro,
+					   tree_names[tree_id],
+					   CORSARO_TAG_GROUP_MATCH_MODE_ALL,
+					   NULL)) == NULL)
     {
       corsaro_log(__func__, corsaro,
-		  "Required tag group '%s' missing. Check your config",
-		  tree_names[tree->id]);
-      return NULL;
+		  "could not create group for %s",
+		  tree_names[tree_id]);
+      goto err;
+    }
+
+  /* loop over all the tags and add appropriate ones to our group */
+  for(i=0; i<state->tags_cnt; i++)
+    {
+      assert(state->tags[i] != NULL);
+      if((tag_defs[i].tree_flags & tree_flags[tree_id]) != 0)
+	{
+	  if(corsaro_tag_group_add_tag(tree->group, state->tags[i]) != 0)
+	    {
+	      corsaro_log(__func__, corsaro,
+			  "could not add tag %s to group %s",
+			  state->tags[i]->name, tree_names[tree_id]);
+	      goto err;
+	    }
+	}
     }
 
   /* initialize only the submetrics that this tree needs */
@@ -1187,14 +1207,30 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
       netacq_rc = record->region_code;
     }
 
-  /* flip on the unfiltered tag */
-  corsaro_tag_set_match(state, plugin_state->unfiltered_tag, 1);
-
   /* now iterate over each tag and build the tree */
   for(i=0; i<TREE_ID_CNT; i++)
     {
       tree = plugin_state->trees[i];
       assert(tree != NULL);
+
+      /* regardless of whether our group matches, update the filter stats */
+      SM_IF(SUBMETRIC_ID_FILTER)
+      {
+	tags_cnt = corsaro_tag_group_get_tags(tree->group, &tags);
+	assert(tags_cnt >= 0);
+
+	for(j=0; j<tags_cnt; j++)
+	  {
+	    assert(tree->filter_metrics[j] != NULL);
+	    /* only update if the filter DID NOT MATCH */
+	    if(corsaro_tag_is_match(state, tags[j]) == 0)
+	      {
+		metric_package_update(tree->filter_metrics[j],
+				      src_ip, dst_ip, ip_len, pkt_cnt);
+	      }
+	  }
+      }
+
       /** @note, the filters for report MUST identify packets that are
 	  allowed. That is, ALL tags for a group must match for the group to
 	  match */
@@ -1207,22 +1243,6 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	  {
 	    metric_package_update(tree->tree_metrics,
 				  src_ip, dst_ip, ip_len, pkt_cnt);
-	  }
-
-	  SM_IF(SUBMETRIC_ID_FILTER)
-	  {
-	    tags_cnt = corsaro_tag_group_get_tags(tree->group, &tags);
-	    assert(tags_cnt >= 0);
-
-	    for(j=0; j<tags_cnt; j++)
-	      {
-		assert(tree->filter_metrics[j] != NULL);
-		if(corsaro_tag_is_match(state, tags[j]) > 0)
-		  {
-		    metric_package_update(tree->filter_metrics[j],
-					  src_ip, dst_ip, ip_len, pkt_cnt);
-		  }
-	      }
 	  }
 
 	  SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
@@ -1498,9 +1518,10 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 {
   struct corsaro_report_state_t *state;
   corsaro_plugin_t *plugin = PLUGIN(corsaro);
-  corsaro_tag_group_t *group;
 
   ipmeta_provider_t *provider;
+
+  libtrace_filter_t *bpf_filter = NULL;
 
   int i;
 
@@ -1541,28 +1562,31 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       goto err;
     }
 
-  /* create the unfiltered group and tag */
-  if((group = corsaro_tag_group_init(corsaro, tree_names[TREE_ID_UNFILTERED],
-				     CORSARO_TAG_GROUP_MATCH_MODE_ANY,
-				     NULL)) == NULL)
+  /* create all the tags that we need (the trees will add them to groups)*/
+  for(i=0; i<ARR_CNT(tag_defs); i++)
     {
-      corsaro_log(__func__, corsaro,
-		  "could not create group for unfiltered packets");
-      goto err;
+      if(tag_defs[i].bpf != NULL)
+	{
+	  /* first, create the appropriate bpf */
+	  corsaro_log(__func__, corsaro,
+		      "creating tag with name '%s' and bpf '%s'",
+		      tag_defs[i].name, tag_defs[i].bpf);
+
+	  bpf_filter = trace_create_filter(tag_defs[i].bpf);
+	  assert(bpf_filter != NULL);
+	}
+
+      if((state->tags[i] =
+	  corsaro_tag_init(corsaro, tag_defs[i].name, bpf_filter))
+	 == NULL)
+	{
+	  fprintf(stderr, "ERROR: could not allocate tag for %s.\n",
+		  tag_defs[i].bpf);
+	  return -1;
+	}
     }
-  if((state->unfiltered_tag =
-      corsaro_tag_init(corsaro, UNFILTERED_TAG_NAME, NULL))
-     == NULL)
-    {
-      corsaro_log(__func__, corsaro,
-		  "could not create tag for unfiltered packets");
-      goto err;
-    }
-  if(corsaro_tag_group_add_tag(group, state->unfiltered_tag) != 0)
-    {
-      corsaro_log(__func__, corsaro, "could not add tag to unfiltered group");
-      goto err;
-    }
+  /* just for convenience */
+  state->tags_cnt = ARR_CNT(tag_defs);
 
   /* grab the stuff we need for maxmind */
   if((provider =
@@ -1618,6 +1642,16 @@ int corsaro_report_close_output(corsaro_t *corsaro)
   if(state == NULL)
     {
       return 0;
+    }
+
+  /* free the bpf's in the tags */
+  for(i=0; i<state->tags_cnt; i++)
+    {
+      if(state->tags[i]->user != NULL)
+	{
+	  trace_destroy_filter(state->tags[i]->user);
+	  state->tags[i]->user = NULL;
+	}
     }
 
   /* free the key package */
@@ -1708,11 +1742,13 @@ int corsaro_report_end_interval(corsaro_t *corsaro,
 int corsaro_report_process_packet(corsaro_t *corsaro,
 				  corsaro_packet_t *packet)
 {
+  struct corsaro_report_state_t *state = STATE(corsaro);
   libtrace_packet_t *ltpacket = LT_PKT(packet);
   libtrace_ip_t  *ip_hdr  = NULL;
   libtrace_icmp_t *icmp_hdr = NULL;
   uint16_t src_port;
   uint16_t dst_port;
+  int rc, i;
 
   /* check for ipv4 */
   if((ip_hdr = trace_get_ip(ltpacket)) == NULL)
@@ -1731,6 +1767,36 @@ int corsaro_report_process_packet(corsaro_t *corsaro,
     {
       src_port = trace_get_source_port(ltpacket);
       dst_port = trace_get_destination_port(ltpacket);
+    }
+
+  /* run the bpf for each tag */
+  for(i=0; i<state->tags_cnt; i++)
+    {
+      assert(state->tags[i] != NULL);
+      if(state->tags[i]->user != NULL)
+	{
+	  rc = trace_apply_filter(
+				  (libtrace_filter_t*)(state->tags[i]->user),
+				  ltpacket
+				  );
+	  if(rc < 0)
+	    {
+	      corsaro_log(__func__, corsaro,
+			  "invalid bpf filter for tag '%s'",
+			  state->tags[i]->name);
+	      return -1;
+	    }
+	}
+      else /* the 'all-pkts' tag */
+	{
+	  rc = 1;
+	}
+
+      if(rc > 0)
+	{
+	  /* mark this filter as a match */
+	  corsaro_tag_set_match(&packet->state, state->tags[i], rc);
+	}
     }
 
   if(process_generic(corsaro, &packet->state,
