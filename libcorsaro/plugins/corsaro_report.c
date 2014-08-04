@@ -471,6 +471,9 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   ipmeta_provider_netacq_edge_region_t **regions = NULL;
   int regions_cnt = 0;
 
+  ipmeta_record_t **records;
+  int records_cnt = 0;
+
   char *cc_ptr;
   char *cc_cpy;
   khash_t(strstr) *country_hash = kh_init(strstr);
@@ -617,6 +620,15 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	  return NULL;
 	}
 
+      /* ensure there are actually some records */
+      if((records_cnt = ipmeta_provider_get_all_records(provider, &records)) == 0)
+	{
+	  corsaro_log(__func__, corsaro,
+		      "ERROR: Net Acuity is reporting no records loaded.");
+	  return NULL;
+	}
+      free(records); /* @todo add a simple record count func to ipmeta */
+
       netacq_countries_cnt =
 	ipmeta_provider_netacq_edge_get_countries(provider, &netacq_countries);
 
@@ -658,6 +670,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	  cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->iso2, 3);
 
 	  /* graphite dislikes metrics with *'s in them, replace with '-' */
+	  /* NOTE: this is only for the time series string */
 	  for(j=0; j<strnlen(cc_str, 5); j++)
 	    {
 	      if(cc_str[j] == '*')
@@ -1143,6 +1156,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 
 static inline uint16_t lookup_convert_cc(corsaro_packet_state_t *state,
 					 ipmeta_provider_id_t provider_id,
+					 uint16_t def,
 					 uint16_t *cont)
 {
   ipmeta_record_t *record;
@@ -1157,7 +1171,7 @@ static inline uint16_t lookup_convert_cc(corsaro_packet_state_t *state,
 	}
       else
 	{
-	  *cont = 0x2D2D; /* "--" */
+	  *cont = 0x2D2D;
 	}
       if(record->country_code != NULL)
 	{
@@ -1165,8 +1179,8 @@ static inline uint16_t lookup_convert_cc(corsaro_packet_state_t *state,
 	}
     }
 
-  *cont = 0x2D2D; /* "--" */
-  return 0x2D2D; /* "--" */
+  *cont = 0x2D2D;
+  return def;
 }
 
 static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
@@ -1195,9 +1209,11 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 
   /* maxmind country and continent code */
   maxmind_cc = lookup_convert_cc(state, IPMETA_PROVIDER_MAXMIND,
+				 0x2D2D, /* "--" */
 				 &maxmind_cont);
   /* netacq edge country code */
   netacq_cc = lookup_convert_cc(state, IPMETA_PROVIDER_NETACQ_EDGE,
+				0x3F00, /* "?" */
 				&netacq_cont);
   /* netacq edge region code */
   if((record =
