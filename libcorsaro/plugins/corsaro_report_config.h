@@ -81,25 +81,29 @@ enum tree_id {
   TREE_ID_UNFILTERED  = 0,
   TREE_ID_NONSPOOFED  = 1,
   TREE_ID_NONERRATIC  = 2,
-  TREE_ID_CNT         = 3,
+  TREE_ID_RFCCLEAN    = 3,
+  TREE_ID_CNT         = 4,
 };
 
 enum tree_flag {
   TREE_FLAG_UNFILTERED = 0x01,
   TREE_FLAG_NONSPOOFED = 0x02,
   TREE_FLAG_NONERRATIC = 0x04,
+  TREE_FLAG_RFCCLEAN = 0x08,
 };
 
 const uint8_t tree_flags[] = {
   TREE_FLAG_UNFILTERED,
   TREE_FLAG_NONSPOOFED,
   TREE_FLAG_NONERRATIC,
+  TREE_FLAG_RFCCLEAN,
 };
 
 const char *tree_names[] = {
   "unfiltered",
   "non-spoofed",
   "non-erratic",
+  "rfc5735-non-spoofed",
 };
 
 #define UNFILTERED_TAG_NAME "all-pkts"
@@ -228,6 +232,45 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
 
     /* pfx2as */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
+
+    /* Protocol */
+    0,
+
+    /* Port */
+    0,
+
+    /* Filter */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
+
+    /* Tree */
+    LEAFMETRIC_FLAG_UNIQ_SRC_IP |
+    LEAFMETRIC_FLAG_UNIQ_DST_IP |
+    LEAFMETRIC_FLAG_PKT_CNT |
+    LEAFMETRIC_FLAG_IP_LEN,
+  },
+
+  /* RFC 5735, Non-spoofed */
+  {
+    /* Maxmind continent */
+    0,
+
+    /* Maxmind country */
+    0,
+
+    /* Netacq continent */
+    0,
+
+    /* Netacq country */
+    0,
+
+    /* Netacq region */
+    0,
+
+    /* pfx2as */
+    0,
 
     /* Protocol */
     0,
@@ -400,43 +443,48 @@ const struct tag_def tag_defs[] = {
   /* non-spoofed and non-erratic tags */
   {
     "abnormal-protocol",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "(icmp or udp or proto 41 or (tcp and ((tcp[tcpflags] & 0x2f )= tcp-syn or (tcp[tcpflags] & 0x2f) = tcp-ack or (tcp[tcpflags] & 0x2f) = tcp-rst or (tcp[tcpflags] & 0x2f) = tcp-fin or (tcp[tcpflags] & 0x2f) = (tcp-syn|tcp-fin) or (tcp[tcpflags] & 0x2f) = (tcp-syn|tcp-ack) or (tcp[tcpflags] & 0x2f) = (tcp-fin|tcp-ack) or (tcp[tcpflags] & 0x2f) = (tcp-ack|tcp-push) or (tcp[tcpflags] & 0x2f) = (tcp-ack|tcp-push|tcp-fin))))"
   },
   {
     "ttl-200",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "((ip[8] < 200) or icmp)",
   },
   {
     "fragmented",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "((ip[6:2] & 0x9f)=0)",
   },
   {
     "last-byte-src-0",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "(ip[15:1] != 0)",
   },
   {
     "last-byte-src-255",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "(ip[15:1] != 255)",
   },
   {
     "same-src-dst",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "ip[12:4] != ip[16:4]",
   },
   {
     "udp-port-0",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "not (udp port 0)",
   },
   {
     "tcp-port-0",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
     "not (tcp port 0)",
+  },
+  {
+    "rfc5735",
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC,
+    "not (src net 0.0.0.0/8 or src net 10.0.0.0/8 or src net 127.0.0.0/8 or src net 169.254.0.0/16 or src net 172.16.0.0/12 or src net 192.0.0.0/24 or src net 192.0.2.0/24 or src net 192.88.99.0/24 or src net 192.168.0.0/16 or src net 198.18.0.0/15 or src net 198.51.100.0/24 or src net 203.0.113.0/24 or src net 224.0.0.0/4 or src net 240.0.0.0/4)",
   },
 
   /* non-erratic only tags */
@@ -479,6 +527,13 @@ const struct tag_def tag_defs[] = {
     "tcp-port-5000",
     TREE_FLAG_NONERRATIC,
     "not tcp port 5000",
+  },
+
+  /* rfcclean only tags */
+  {
+    "not-rfc5735",
+    TREE_FLAG_RFCCLEAN,
+    "(src net 0.0.0.0/8 or src net 10.0.0.0/8 or src net 127.0.0.0/8 or src net 169.254.0.0/16 or src net 172.16.0.0/12 or src net 192.0.0.0/24 or src net 192.0.2.0/24 or src net 192.88.99.0/24 or src net 192.168.0.0/16 or src net 198.18.0.0/15 or src net 198.51.100.0/24 or src net 203.0.113.0/24 or src net 224.0.0.0/4 or src net 240.0.0.0/4)",
   },
 
 };
