@@ -667,7 +667,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	  cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->continent, 3);
 	  *cc_ptr = '.';
 	  cc_ptr++;
-	  cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->iso2, 3);
+	  stpncpy(cc_ptr, netacq_countries[i]->iso2, 3);
 
 	  /* graphite dislikes metrics with *'s in them, replace with '-' */
 	  /* NOTE: this is only for the time series string */
