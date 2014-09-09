@@ -334,6 +334,19 @@ const char *continent_strings[] = {
 
 
 /* ---------- NETACQ EDGE METRIC SETTINGS ---------- */
+
+/* mapping from netacuity continent code to our string array */
+const int netacq_cont_map[] = {
+  0, /* 0: '**' => '--' */
+  1, /* 1: 'af' => 'AF' */
+  2, /* 2: 'an' => 'AN' */
+  6, /* 3: 'au' => 'OC' */
+  3, /* 4: 'as' => 'AS' */
+  4, /* 5: 'eu' => 'EU' */
+  5, /* 6: 'na' => 'NA' */
+  7, /* 7: 'sa' => 'SA' */
+};
+
 #define METRIC_PATH_NETACQ_EDGE_CONTINENT     \
   ".geo.netacuity.edge"
 

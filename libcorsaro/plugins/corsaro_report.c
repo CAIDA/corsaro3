@@ -654,12 +654,12 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	for(i=0; i < ARR_CNT(continent_strings); i++)
 	  {
 	    /* what is the index of this continent in the array? */
-	    continent_idx = CC_16(continent_strings[i]);
+	    continent_idx = CC_16(continent_strings[netacq_cont_map[i]]);
 
 	    METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_NETACQ_EDGE_CONTINENT,
 			       tree->netacq_continent_metrics[continent_idx],
 			       METRIC_PATH_NETACQ_EDGE_CONTINENT,
-			       "%s", continent_strings[i]);
+			       "%s", continent_strings[netacq_cont_map[i]]);
 	  }
       }
 
@@ -672,7 +672,9 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
 	  /* build a string which contains the continent and country code*/
 	  cc_ptr = cc_str;
-	  cc_ptr = stpncpy(cc_ptr, netacq_countries[i]->continent, 3);
+	  cc_ptr = stpncpy(cc_ptr,
+			   continent_strings[netacq_cont_map[netacq_countries[i]->continent_code]],
+			   3);
 	  *cc_ptr = '.';
 	  cc_ptr++;
 	  stpncpy(cc_ptr, netacq_countries[i]->iso2, 3);
