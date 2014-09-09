@@ -169,6 +169,12 @@ typedef struct metric_tree {
    */
   leafmetric_package_t *netacq_region_metrics[METRIC_NETACQ_EDGE_ASCII_MAX];
 
+  /** Array of polygon ids (specific to vasco) that point to metrics.
+   *
+   * Note that many of these will be NULL
+   */
+  leafmetric_package_t *netacq_poly_metrics[METRIC_NETACQ_EDGE_ASCII_MAX];
+
   /** The minimum number of IPs that an ASN can have before it is considered for
       reporting (based on smallest the top METRIC_PFX2AS_VAL_MAX ASes) */
   int pfx2as_min_ip_cnt;
@@ -470,6 +476,8 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   int netacq_countries_cnt = 0;
   ipmeta_provider_netacq_edge_region_t **regions = NULL;
   int regions_cnt = 0;
+  ipmeta_provider_netacq_edge_polygon_t **polygons = NULL;
+  int polygons_cnt = 0;
 
   ipmeta_record_t **records;
   int records_cnt = 0;
@@ -748,6 +756,38 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	    }
 	}
 
+      SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION_POLY)
+	{
+	  polygons_cnt = ipmeta_provider_netacq_edge_get_polygons(provider,
+								&polygons);
+	  if(polygons == NULL || polygons_cnt == 0)
+	    {
+	      corsaro_log(__func__, corsaro,
+			  "ERROR: Net Acuity Edge provider must be used with "
+			  "the -p and -P options to load polygon information");
+	      return NULL;
+	    }
+
+	  for(i=0; i < polygons_cnt; i++)
+	    {
+	      assert(polygons[i] != NULL);
+	      /* if vasco starts to allocate polygon codes > 2**16 we probably
+	       * need to switch to using a hash here. Cannot use an assert
+	       * because we disable those in production */
+	      if(polygons[i]->id > METRIC_NETACQ_EDGE_ASCII_MAX)
+		{
+		  corsaro_log(__func__, corsaro,
+			      "ERROR: Net Acuity Edge polygon id > 2^16 found");
+		  return NULL;
+		}
+
+	      METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_NETACQ_EDGE_REGION_POLY,
+				 tree->netacq_poly_metrics[polygons[i]->id],
+				 METRIC_PATH_NETACQ_EDGE_REGION_POLY,
+				 "%s", polygons[i]->fqid);
+	    }
+	}
+
       kh_free_vals(strstr, country_hash, str_free);
       kh_destroy(strstr, country_hash);
     }
@@ -972,6 +1012,18 @@ static void metric_tree_destroy(metric_tree_t *tree)
       }
   }
 
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION_POLY)
+  {
+    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
+      {
+	if(tree->netacq_poly_metrics[i] != NULL)
+	  {
+	    metric_package_destroy(tree->netacq_poly_metrics[i]);
+	    tree->netacq_poly_metrics[i] = NULL;
+	  }
+      }
+  }
+
   SM_IF(SUBMETRIC_ID_PFX2AS)
   {
     if(tree->pfx2as_metrics != NULL)
@@ -1025,6 +1077,15 @@ static void metric_tree_destroy(metric_tree_t *tree)
   return;
 }
 
+#define DUMP_ARRAY(array, length)					\
+  for(i = 0; i < length; i++)						\
+    {									\
+      if(array[i] != NULL)						\
+	{								\
+	  metric_package_dump(state, array[i]);				\
+	}								\
+    }
+
 static int metric_tree_dump(struct corsaro_report_state_t *state,
 			    enum tree_id tree_id)
 {
@@ -1041,73 +1102,37 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 
   SM_IF(SUBMETRIC_ID_FILTER)
   {
-    for(i = 0; i < tree->filter_metrics_cnt; i++)
-      {
-	if(tree->filter_metrics[i] != NULL)
-	  {
-	    metric_package_dump(state, tree->filter_metrics[i]);
-	}
-      }
+    DUMP_ARRAY(tree->filter_metrics, tree->filter_metrics_cnt)
   }
 
   SM_IF(SUBMETRIC_ID_MAXMIND_CONTINENT)
   {
-    for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
-      {
-	/* NOTE: most of these will be NULL! */
-	if(tree->maxmind_continent_metrics[i] != NULL)
-	  {
-	    metric_package_dump(state, tree->maxmind_continent_metrics[i]);
-	}
-      }
+    DUMP_ARRAY(tree->maxmind_continent_metrics, METRIC_MAXMIND_ASCII_MAX)
   }
 
   SM_IF(SUBMETRIC_ID_MAXMIND_COUNTRY)
   {
-    for(i = 0; i < METRIC_MAXMIND_ASCII_MAX; i++)
-      {
-	/* NOTE: most of these will be NULL! */
-	if(tree->maxmind_country_metrics[i] != NULL)
-	  {
-	    metric_package_dump(state, tree->maxmind_country_metrics[i]);
-	}
-      }
+    DUMP_ARRAY(tree->maxmind_country_metrics, METRIC_MAXMIND_ASCII_MAX)
   }
 
   SM_IF(SUBMETRIC_ID_NETACQ_EDGE_CONTINENT)
   {
-    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
-      {
-	/* NOTE: most of these will be NULL! */
-	if(tree->netacq_continent_metrics[i] != NULL)
-	  {
-	    metric_package_dump(state, tree->netacq_continent_metrics[i]);
-	  }
-      }
+    DUMP_ARRAY(tree->netacq_continent_metrics, METRIC_NETACQ_EDGE_ASCII_MAX)
   }
 
   SM_IF(SUBMETRIC_ID_NETACQ_EDGE_COUNTRY)
   {
-    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
-      {
-	/* NOTE: most of these will be NULL! */
-	if(tree->netacq_country_metrics[i] != NULL)
-	  {
-	    metric_package_dump(state, tree->netacq_country_metrics[i]);
-	  }
-      }
+    DUMP_ARRAY(tree->netacq_country_metrics, METRIC_NETACQ_EDGE_ASCII_MAX)
   }
 
   SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION)
   {
-    for(i = 0; i < METRIC_NETACQ_EDGE_ASCII_MAX; i++)
-      {
-	/* NOTE: most of these will be NULL! */
-	if(tree->netacq_region_metrics[i] != NULL)
-	  {
-	    metric_package_dump(state, tree->netacq_region_metrics[i]);
-	  }
-      }
+    DUMP_ARRAY(tree->netacq_region_metrics, METRIC_NETACQ_EDGE_ASCII_MAX)
+  }
+
+  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION_POLY)
+  {
+    DUMP_ARRAY(tree->netacq_poly_metrics, METRIC_NETACQ_EDGE_ASCII_MAX)
   }
 
   SM_IF(SUBMETRIC_ID_PFX2AS)
@@ -1126,11 +1151,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 
   SM_IF(SUBMETRIC_ID_PROTOCOL)
   {
-    /* dump the protocol metrics */
-    for(i = 0; i < METRIC_PROTOCOL_VAL_MAX; i++)
-      {
-	metric_package_dump(state, tree->protocol_metrics[i]);
-      }
+    DUMP_ARRAY(tree->protocol_metrics, METRIC_PROTOCOL_VAL_MAX)
   }
 
   SM_IF(SUBMETRIC_ID_PORT)
@@ -1194,9 +1215,11 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
   int proto;
   uint16_t maxmind_cont;
   uint16_t maxmind_cc;
+
   uint16_t netacq_cont;
   uint16_t netacq_cc;
   uint16_t netacq_rc = 0;
+  uint16_t netacq_poly = 0;
   khiter_t khiter;
   ipmeta_record_t *record;
 
@@ -1221,6 +1244,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
      != NULL)
     {
       netacq_rc = record->region_code;
+      netacq_poly = record->polygon_id;
     }
 
   /* now iterate over each tag and build the tree */
@@ -1304,6 +1328,23 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 		    return -1;
 		  }
 		metric_package_update(tree->netacq_region_metrics[netacq_rc],
+				      src_ip, dst_ip, ip_len, pkt_cnt);
+	      }
+	  }
+
+	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_REGION_POLY)
+	  {
+	    if(netacq_poly != 0)
+	      {
+		if(tree->netacq_poly_metrics[netacq_poly] == NULL)
+		  {
+		    corsaro_log(__func__, corsaro,
+				"Missing region polygon %d. ",
+				netacq_poly);
+		    assert(0); /* in case we have asserts on */
+		    return -1;
+		  }
+		metric_package_update(tree->netacq_poly_metrics[netacq_poly],
 				      src_ip, dst_ip, ip_len, pkt_cnt);
 	      }
 	  }

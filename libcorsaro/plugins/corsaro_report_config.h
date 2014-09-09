@@ -57,24 +57,25 @@ enum leafmetric_flag {
 };
 
 enum submetric_id {
-  SUBMETRIC_ID_MAXMIND_CONTINENT     = 0,
-  SUBMETRIC_ID_MAXMIND_COUNTRY       = 1,
+  SUBMETRIC_ID_MAXMIND_CONTINENT       = 0,
+  SUBMETRIC_ID_MAXMIND_COUNTRY         = 1,
 
-  SUBMETRIC_ID_NETACQ_EDGE_CONTINENT = 2,
-  SUBMETRIC_ID_NETACQ_EDGE_COUNTRY   = 3,
-  SUBMETRIC_ID_NETACQ_EDGE_REGION    = 4,
+  SUBMETRIC_ID_NETACQ_EDGE_CONTINENT   = 2,
+  SUBMETRIC_ID_NETACQ_EDGE_COUNTRY     = 3,
+  SUBMETRIC_ID_NETACQ_EDGE_REGION      = 4,
+  SUBMETRIC_ID_NETACQ_EDGE_REGION_POLY = 5,
 
-  SUBMETRIC_ID_PFX2AS                = 5,
+  SUBMETRIC_ID_PFX2AS                  = 6,
 
-  SUBMETRIC_ID_PROTOCOL              = 6,
+  SUBMETRIC_ID_PROTOCOL                = 7,
 
-  SUBMETRIC_ID_PORT                  = 7,
+  SUBMETRIC_ID_PORT                    = 8,
 
-  SUBMETRIC_ID_FILTER                = 8,
+  SUBMETRIC_ID_FILTER                  = 9,
 
-  SUBMETRIC_ID_TREE                  = 9,
+  SUBMETRIC_ID_TREE                    = 10,
 
-  SUBMETRIC_ID_CNT                   = 10,
+  SUBMETRIC_ID_CNT                     = 11,
 };
 
 enum tree_id {
@@ -135,6 +136,9 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     /* Netacq region */
     0,
 
+    /* Netacq region poly */
+    0,
+
     /* pfx2as */
     0,
 
@@ -181,6 +185,9 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_PKT_CNT,
 
     /* Netacq region */
+    0,
+
+    /* Netacq region poly */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
 
     /* pfx2as */
@@ -228,6 +235,9 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
 
     /* Netacq region */
+    0,
+
+    /* Netacq region poly */
     LEAFMETRIC_FLAG_UNIQ_SRC_IP,
 
     /* pfx2as */
@@ -267,6 +277,9 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
     0,
 
     /* Netacq region */
+    0,
+
+    /* Netacq region poly */
     0,
 
     /* pfx2as */
@@ -328,6 +341,9 @@ const char *continent_strings[] = {
   ".geo.netacuity.edge"
 
 #define METRIC_PATH_NETACQ_EDGE_REGION     \
+  ".geo.netacuity.edge.native" /* deprecated netacuity regions */
+
+#define METRIC_PATH_NETACQ_EDGE_REGION_POLY     \
   ".geo.netacuity.edge"
 
 /** The max region code value (currently the actual max is 30,404, but this
