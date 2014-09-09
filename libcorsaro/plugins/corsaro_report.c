@@ -204,6 +204,9 @@ typedef struct metric_tree {
 
 /** Holds the state for an instance of this plugin */
 struct corsaro_report_state_t {
+  /** which tree(s) are we actually tracking (run-time config) */
+  int trees_enabled;
+
   /** array of metric trees that we are tracking */
   metric_tree_t *trees[TREE_ID_CNT];
 
@@ -1252,6 +1255,13 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
   /* now iterate over each tag and build the tree */
   for(i=0; i<TREE_ID_CNT; i++)
     {
+      /* skip this tree if it is not enabled (run-time config) */
+      if(plugin_state->trees_enabled != 0 &&
+	 (plugin_state->trees_enabled & tree_flags[i]) == 0)
+	{
+	  continue;
+	}
+
       tree = plugin_state->trees[i];
       assert(tree != NULL);
 
@@ -1433,7 +1443,9 @@ static void usage(corsaro_t *corsaro)
 	  "usage: %s -b backend [-b backend]\n"
 	  "       -b <backend> enable the given timeseries backend,\n"
 	  "                     -b can be used multiple times\n"
-	  "                     available backends:\n",
+	  "                     available backends:\n"
+	  "       -t <tree>    process the given tree,\n"
+	  "                     -t can be used multiple times\n",
 	  PLUGIN(corsaro)->argv[0]);
   /* get the available backends from libtimeseries */
   backends = timeseries_get_all_backends(STATE(corsaro)->timeseries);
@@ -1460,11 +1472,16 @@ static int parse_args(corsaro_t *corsaro)
   struct corsaro_report_state_t *state = STATE(corsaro);
   int opt;
 
-  int i;
+  int i, j;
   char *backends[TIMESERIES_BACKEND_ID_LAST];
   int backends_cnt = 0;
   char *backend_arg_ptr = NULL;
   timeseries_backend_t *backend = NULL;
+
+  char *trees[TREE_ID_CNT];
+  int trees_cnt = 0;
+  int tree_valid = 0;
+  int tree_id = 0;
 
   if(plugin->argc <= 0)
     {
@@ -1474,13 +1491,18 @@ static int parse_args(corsaro_t *corsaro)
   /* NB: remember to reset optind to 1 before using getopt! */
   optind = 1;
 
-  while((opt = getopt(plugin->argc, plugin->argv, ":b:?")) >= 0)
+  while((opt = getopt(plugin->argc, plugin->argv, ":b:t:?")) >= 0)
     {
       switch(opt)
 	{
 	case 'b':
 	  backends[backends_cnt++] = strdup(optarg);
 	  break;
+
+	case 't':
+	  trees[trees_cnt++] = strdup(optarg);
+	  break;
+
 
 	case '?':
 	case ':':
@@ -1541,6 +1563,36 @@ static int parse_args(corsaro_t *corsaro)
       backends[i] = NULL;
     }
 
+  /* enable the trees that were requested */
+  for(i=0; i<trees_cnt; i++)
+    {
+      /* look for this tree name */
+      tree_valid = 0;
+      for(j=0; j<TREE_ID_CNT; j++)
+	{
+	  if(strcmp(trees[i], tree_names[j]) == 0)
+	    {
+	      tree_valid = 1;
+	      tree_id = j;
+	    }
+	}
+      if(tree_valid != 0)
+	{
+	  corsaro_log(__func__, corsaro, "enabling tree (%s)", trees[i]);
+	  state->trees_enabled |= tree_flags[tree_id];
+	}
+      else
+	{
+	  fprintf(stderr, "ERROR: No tree found with name %s\n", trees[i]);
+	  usage(corsaro);
+	  goto err;
+	}
+
+      /* free the string we dup'd */
+      free(trees[i]);
+      trees[i] = NULL;
+    }
+
   return 0;
 
  err:
@@ -1549,6 +1601,13 @@ static int parse_args(corsaro_t *corsaro)
       if(backends[i] != NULL)
 	{
 	  free(backends[i]);
+	}
+    }
+  for(i=0; i<trees_cnt; i++)
+    {
+      if(trees[i] != NULL)
+	{
+	  free(trees[i]);
 	}
     }
   return -1;
@@ -1667,7 +1726,9 @@ int corsaro_report_init_output(corsaro_t *corsaro)
 
   for(i=0; i<TREE_ID_CNT; i++)
     {
-      if((state->trees[i] = metric_tree_new(corsaro, i, &key_id))
+      if((state->trees_enabled == 0 ||
+	  (state->trees_enabled & tree_flags[i]) != 0) &&
+	 (state->trees[i] = metric_tree_new(corsaro, i, &key_id))
 	 == NULL)
 	{
 	  goto err;
@@ -1782,10 +1843,14 @@ int corsaro_report_end_interval(corsaro_t *corsaro,
 
   for(i=0; i<TREE_ID_CNT; i++)
     {
-      assert(state->trees[i] != NULL);
-      if(metric_tree_dump(state, i) != 0)
+      if(state->trees_enabled == 0 ||
+	 (state->trees_enabled & tree_flags[i]) != 0)
 	{
-	  return -1;
+	  assert(state->trees[i] != NULL);
+	  if(metric_tree_dump(state, i) != 0)
+	    {
+	      return -1;
+	    }
 	}
     }
 
