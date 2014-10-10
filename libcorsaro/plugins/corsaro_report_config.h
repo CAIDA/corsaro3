@@ -63,7 +63,7 @@ enum submetric_id {
   SUBMETRIC_ID_NETACQ_EDGE_CONTINENT   = 2,
   SUBMETRIC_ID_NETACQ_EDGE_COUNTRY     = 3,
   SUBMETRIC_ID_NETACQ_EDGE_REGION      = 4,
-  SUBMETRIC_ID_NETACQ_EDGE_REGION_POLY = 5,
+  SUBMETRIC_ID_NETACQ_EDGE_POLYS = 5,
 
   SUBMETRIC_ID_PFX2AS                  = 6,
 
@@ -356,14 +356,15 @@ const int netacq_cont_map[] = {
 #define METRIC_PATH_NETACQ_EDGE_REGION     \
   ".geo.netacuity.edge.native" /* deprecated netacuity regions */
 
-#define METRIC_PATH_NETACQ_EDGE_REGION_POLY     \
+#define METRIC_PATH_NETACQ_EDGE_POLYS     \
   ".geo.netacuity.edge"
 
 /** The max region code value (currently the actual max is 30,404, but this
  * could easily go higher. be careful) */
 #define METRIC_NETACQ_EDGE_ASCII_MAX UINT16_MAX
 
-
+/** The number of polygon tables that we are currently supporting */
+#define METRIC_NETACQ_EDGE_POLYS_TBL_CNT 2
 
 /* ---------- PFX2AS METRIC SETTINGS ---------- */
 #define METRIC_PATH_PFX2AS             ".routing.pfx2as.asn"
