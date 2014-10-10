@@ -348,16 +348,16 @@ const int netacq_cont_map[] = {
 };
 
 #define METRIC_PATH_NETACQ_EDGE_CONTINENT     \
-  ".geo.netacuity.edge"
+  ".geo.netacuity"
 
 #define METRIC_PATH_NETACQ_EDGE_COUNTRY     \
-  ".geo.netacuity.edge"
+  ".geo.netacuity"
 
 #define METRIC_PATH_NETACQ_EDGE_REGION     \
-  ".geo.netacuity.edge.native" /* deprecated netacuity regions */
+  ".geo.netacuity.native" /* deprecated netacuity regions */
 
 #define METRIC_PATH_NETACQ_EDGE_POLYS     \
-  ".geo.netacuity.edge"
+  ".geo.netacuity"
 
 /** The max region code value (currently the actual max is 30,404, but this
  * could easily go higher. be careful) */
