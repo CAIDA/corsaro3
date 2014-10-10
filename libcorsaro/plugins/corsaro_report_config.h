@@ -367,7 +367,7 @@ const int netacq_cont_map[] = {
 #define METRIC_NETACQ_EDGE_POLYS_TBL_CNT 2
 
 /* ---------- PFX2AS METRIC SETTINGS ---------- */
-#define METRIC_PATH_PFX2AS             ".routing.pfx2as.asn"
+#define METRIC_PATH_PFX2AS             ".routing.asn"
 
 uint32_t tree_pfx2as_max[] = {
   /** unfiltered */
