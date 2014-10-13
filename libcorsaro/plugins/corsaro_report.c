@@ -1264,11 +1264,11 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 
   /* maxmind country and continent code */
   maxmind_cc = lookup_convert_cc(state, IPMETA_PROVIDER_MAXMIND,
-				 0x2D2D, /* "--" */
+				 0x3F3F, /* "??" */
 				 &maxmind_cont);
   /* netacq edge country code */
   netacq_cc = lookup_convert_cc(state, IPMETA_PROVIDER_NETACQ_EDGE,
-				0x3F00, /* "?" */
+				0x3F3F, /* "??" */
 				&netacq_cont);
   /* netacq edge region code */
   if((record =

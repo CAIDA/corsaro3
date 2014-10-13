@@ -315,7 +315,7 @@ const uint8_t tree_submetric_leafmetrics[TREE_ID_CNT][SUBMETRIC_ID_CNT] = {
 
 /* ---------- MAXMIND METRIC SETTINGS ---------- */
 const char *continent_strings[] = {
-  "--",
+  "??",
   "AF",
   "AN",
   "AS",
@@ -337,7 +337,7 @@ const char *continent_strings[] = {
 
 /* mapping from netacuity continent code to our string array */
 const int netacq_cont_map[] = {
-  0, /* 0: '**' => '--' */
+  0, /* 0: '**' => '??' */
   1, /* 1: 'af' => 'AF' */
   2, /* 2: 'an' => 'AN' */
   6, /* 3: 'au' => 'OC' */
