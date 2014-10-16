@@ -558,6 +558,16 @@ const struct tag_def tag_defs[] = {
     TREE_FLAG_NONERRATIC,
     "not tcp port 5000",
   },
+  {
+    "dns-resp-non-standard",
+    TREE_FLAG_NONERRATIC,
+    "not (udp and ip[2:2]> 0x2a and udp[10:2] & 0xfff0=0x8180 and udp[12:2]=0001 and udp[14:4]=0x00000000 and udp[18:2]=0x0000)",
+  },
+  {
+    "netbios-query-name"
+    TREE_FLAG_NONERRATIC,
+    "not (udp and src port 137 and dst port 137 and ip[2:2]> 0x30 and udp[20:2]=0x2043 and udp[22:2]=0x4b41 and udp[24:4]=0x41414141)",
+  },
 
   /* rfcclean only tags */
   {
