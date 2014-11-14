@@ -85,7 +85,7 @@ enum tree_id {
   TREE_ID_RFCCLEAN    = 3,
   TREE_ID_CNT         = 4,
 };
-strsep
+
 enum tree_flag {
   TREE_FLAG_UNFILTERED = 0x01,
   TREE_FLAG_NONSPOOFED = 0x02,
@@ -559,7 +559,7 @@ const struct tag_def tag_defs[] = {
     "not tcp port 5000",
   },
   {
-    "dns-resp-non-standard", /** DISABLED **/
+    "dns-resp-non-standard", /* DISABLED */
     0,
     "not (udp and ip[2:2]> 0x2a and udp[10:2] & 0xfff0=0x8180 and udp[12:2]=0001 and udp[14:4]=0x00000000 and udp[18:2]=0x0000)",
   },
