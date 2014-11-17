@@ -34,7 +34,7 @@
 #include <unistd.h>
 
 #include <libipmeta.h>
-#include <libtimeseries.h>
+#include <timeseries.h>
 #include <libtrace.h>
 
 #include "khash.h"
@@ -218,12 +218,6 @@ struct corsaro_report_state_t {
 
   /** libtimeseries state */
   timeseries_t *timeseries;
-
-  /** The libtimeseries backend(s) we will write to */
-  timeseries_backend_t *enabled_backends[TIMESERIES_BACKEND_ID_LAST];
-
-  /** The number of libtimeseries backends that are enabled */
-  int enabled_backends_cnt;
 
   /** The libtimeseries key package that we are updating */
   timeseries_kp_t *kp;
@@ -1489,9 +1483,9 @@ static void usage(corsaro_t *corsaro)
 	  continue;
 	}
 
-      assert(timeseries_get_backend_name(backends[i]));
+      assert(timeseries_backend_get_name(backends[i]));
       fprintf(stderr, "                      - %s\n",
-	      timeseries_get_backend_name(backends[i]));
+	      timeseries_backend_get_name(backends[i]));
     }
 }
 
@@ -1578,16 +1572,13 @@ static int parse_args(corsaro_t *corsaro)
 	  goto err;
 	}
 
-      if(timeseries_enable_backend(state->timeseries, backend,
-				   backend_arg_ptr) != 0)
+      if(timeseries_enable_backend(backend, backend_arg_ptr) != 0)
 	{
 	  fprintf(stderr, "ERROR: Failed to initialized backend (%s)",
 		  backends[i]);
 	  usage(corsaro);
 	  goto err;
 	}
-
-      state->enabled_backends[state->enabled_backends_cnt++] = backend;
 
       /* free the string we dup'd */
       free(backends[i]);
@@ -1704,7 +1695,8 @@ int corsaro_report_init_output(corsaro_t *corsaro)
       goto err;
     }
 
-  if((state->kp = timeseries_kp_init(0)) == NULL)
+  assert(state->timeseries != NULL);
+  if((state->kp = timeseries_kp_init(state->timeseries, 0)) == NULL)
     {
       corsaro_log(__func__, corsaro,
 		  "could not create key package");
@@ -1809,25 +1801,10 @@ int corsaro_report_close_output(corsaro_t *corsaro)
     }
 
   /* free the key package */
-  if(state->kp != NULL)
-    {
-      timeseries_kp_free(state->kp);
-      state->kp = NULL;
-    }
+  timeseries_kp_free(&state->kp);
 
   /* free the timeseries framework */
-  if(state->timeseries != NULL)
-    {
-      timeseries_free(state->timeseries);
-      state->timeseries = NULL;
-    }
-
-  /* the backends themselves should have been free'd by timeseries_free */
-  for(i=0; i<state->enabled_backends_cnt; i++)
-    {
-      state->enabled_backends[i] = NULL;
-    }
-  state->enabled_backends_cnt = 0;
+  timeseries_free(&state->timeseries);
 
   if(state->trees != NULL)
     {
@@ -1889,10 +1866,7 @@ int corsaro_report_end_interval(corsaro_t *corsaro,
     }
 
   /* now flush to each backend */
-  for(i=0; i<state->enabled_backends_cnt; i++)
-    {
-      timeseries_kp_flush(state->enabled_backends[i], state->kp, state->time);
-    }
+  timeseries_kp_flush(state->kp, state->time);
 
   return 0;
 }
