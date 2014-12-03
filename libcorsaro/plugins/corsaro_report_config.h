@@ -482,9 +482,14 @@ const struct tag_def tag_defs[] = {
     "((ip[8] < 200) or icmp)",
   },
   {
-    "fragmented",
-    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
+    "fragmented", /* DISABLED, BUGGY */
+    0,
     "((ip[6:2] & 0x9f)=0)",
+  },
+  {
+    "fragmented-v2",
+    TREE_FLAG_NONSPOOFED | TREE_FLAG_NONERRATIC | TREE_FLAG_RFCCLEAN,
+    "((ip[6:2] & 0x9fff)=0)",
   },
   {
     "last-byte-src-0",
