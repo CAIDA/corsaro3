@@ -169,11 +169,16 @@ typedef struct metric_tree {
    */
   leafmetric_package_t *netacq_region_metrics[METRIC_NETACQ_EDGE_ASCII_MAX];
 
-  /** Array of polygon ids (specific to vasco) that point to metrics.
+  /** Array of polygon ids (specific to vasco) (for each polygon table) that
+   * point to metrics.
    *
-   * Note that many of these will be NULL
+   * Each table (netacq_poly_metrics[i]) is a dynamically allocated array of
+   * length netacq_poly_metrics_cnt[i].
    */
-  leafmetric_package_t *netacq_poly_metrics[METRIC_NETACQ_EDGE_POLYS_TBL_CNT][METRIC_NETACQ_EDGE_ASCII_MAX];
+  leafmetric_package_t **netacq_poly_metrics[METRIC_NETACQ_EDGE_POLYS_TBL_CNT];
+
+  /** Array of table sizes (for each polygon table) */
+  int netacq_poly_metrics_cnt[METRIC_NETACQ_EDGE_POLYS_TBL_CNT];
 
   /** The minimum number of IPs that an ASN can have before it is considered for
       reporting (based on smallest the top METRIC_PFX2AS_VAL_MAX ASes) */
@@ -781,18 +786,32 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
           for(i=0; i<poly_tbls_cnt; i++)
             {
               table = poly_tbls[i];
+
+	      tree->netacq_poly_metrics_cnt[i] = 0;
+	      /* sneaky check to find the largest polygon id */
+	      for(j=0; j<table->polygons_cnt; j++)
+		{
+		  if(table->polygons[j]->id >
+		     (tree->netacq_poly_metrics_cnt[i]-1))
+		    {
+		      tree->netacq_poly_metrics_cnt[i] =
+			table->polygons[j]->id+1;
+		    }
+		}
+
+	      /* allocate an array of metric packages of len
+		 max(id)+1 */
+	      if((tree->netacq_poly_metrics[i] =
+		  malloc_zero(sizeof(leafmetric_package_t*)*
+			      tree->netacq_poly_metrics_cnt[i])) == NULL)
+		{
+		  corsaro_log(__func__, corsaro,
+			      "ERROR: Could not allocate polygon metric array");
+		}
+
               for(j=0; j<table->polygons_cnt; j++)
                 {
                   assert(table->polygons[j] != NULL);
-                  /* if vasco starts to allocate polygon codes > 2**16 we
-                   * probably need to switch to using a hash here. Cannot use an
-                   * assert because we disable those in production */
-                  if(table->polygons[j]->id > METRIC_NETACQ_EDGE_ASCII_MAX)
-                    {
-                      corsaro_log(__func__, corsaro,
-			      "ERROR: Net Acuity Edge polygon id > 2^16 found");
-                      return NULL;
-                    }
 
                   METRIC_PREFIX_INIT(tree_id, SUBMETRIC_ID_NETACQ_EDGE_POLYS,
                                      tree->netacq_poly_metrics[i][
@@ -1031,7 +1050,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
   {
     for(i=0; i<METRIC_NETACQ_EDGE_POLYS_TBL_CNT; i++)
       {
-        for(j=0; j<METRIC_NETACQ_EDGE_ASCII_MAX; j++)
+        for(j=0; j<tree->netacq_poly_metrics_cnt[i]; j++)
           {
             if(tree->netacq_poly_metrics[i][j] != NULL)
               {
@@ -1039,6 +1058,9 @@ static void metric_tree_destroy(metric_tree_t *tree)
                 tree->netacq_poly_metrics[i][j] = NULL;
               }
           }
+	free(tree->netacq_poly_metrics[i]);
+	tree->netacq_poly_metrics[i] = NULL;
+	tree->netacq_poly_metrics_cnt[i] = 0;
       }
   }
 
@@ -1152,7 +1174,8 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
   {
     for(j=0; j<METRIC_NETACQ_EDGE_POLYS_TBL_CNT; j++)
       {
-        DUMP_ARRAY(tree->netacq_poly_metrics[j], METRIC_NETACQ_EDGE_ASCII_MAX)
+        DUMP_ARRAY(tree->netacq_poly_metrics[j],
+		   tree->netacq_poly_metrics_cnt[j])
       }
   }
 
