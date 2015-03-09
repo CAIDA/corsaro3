@@ -180,6 +180,9 @@ typedef struct metric_tree {
   /** Array of table sizes (for each polygon table) */
   int netacq_poly_metrics_cnt[METRIC_NETACQ_EDGE_POLYS_TBL_CNT];
 
+  /** Number of tables in netacq_poly_metrics */
+  int netacq_poly_tbl_cnt;
+
   /** The minimum number of IPs that an ASN can have before it is considered for
       reporting (based on smallest the top METRIC_PFX2AS_VAL_MAX ASes) */
   int pfx2as_min_ip_cnt;
@@ -479,7 +482,6 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
   ipmeta_provider_netacq_edge_region_t **regions = NULL;
   int regions_cnt = 0;
   ipmeta_polygon_table_t **poly_tbls = NULL;
-  int poly_tbls_cnt = 0;
   ipmeta_polygon_table_t *table = NULL;
 
   ipmeta_record_t **records;
@@ -763,10 +765,10 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 
       SM_IF(SUBMETRIC_ID_NETACQ_EDGE_POLYS)
 	{
-	  poly_tbls_cnt =
+	  tree->netacq_poly_tbl_cnt =
             ipmeta_provider_netacq_edge_get_polygon_tables(provider,
                                                            &poly_tbls);
-	  if(poly_tbls == NULL || poly_tbls_cnt == 0)
+	  if(poly_tbls == NULL || tree->netacq_poly_tbl_cnt == 0)
 	    {
 	      corsaro_log(__func__, corsaro,
 			  "ERROR: Net Acuity Edge provider must be used with "
@@ -774,16 +776,7 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	      return NULL;
 	    }
 
-          if(poly_tbls_cnt != METRIC_NETACQ_EDGE_POLYS_TBL_CNT)
-            {
-              corsaro_log(__func__, corsaro,
-                          "ERROR: Exactly %d polygon tables required, %d found",
-                          METRIC_NETACQ_EDGE_POLYS_TBL_CNT,
-                          poly_tbls_cnt);
-              return NULL;
-            }
-
-          for(i=0; i<poly_tbls_cnt; i++)
+          for(i=0; i<tree->netacq_poly_tbl_cnt; i++)
             {
               table = poly_tbls[i];
 
@@ -1048,7 +1041,7 @@ static void metric_tree_destroy(metric_tree_t *tree)
 
   SM_IF(SUBMETRIC_ID_NETACQ_EDGE_POLYS)
   {
-    for(i=0; i<METRIC_NETACQ_EDGE_POLYS_TBL_CNT; i++)
+    for(i=0; i<tree->netacq_poly_tbl_cnt; i++)
       {
         for(j=0; j<tree->netacq_poly_metrics_cnt[i]; j++)
           {
@@ -1172,7 +1165,7 @@ static int metric_tree_dump(struct corsaro_report_state_t *state,
 
   SM_IF(SUBMETRIC_ID_NETACQ_EDGE_POLYS)
   {
-    for(j=0; j<METRIC_NETACQ_EDGE_POLYS_TBL_CNT; j++)
+    for(j=0; j<tree->netacq_poly_tbl_cnt; j++)
       {
         DUMP_ARRAY(tree->netacq_poly_metrics[j],
 		   tree->netacq_poly_metrics_cnt[j])
@@ -1293,7 +1286,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
      != NULL)
     {
       netacq_rc = record->region_code;
-      assert(record->polygon_ids_cnt == METRIC_NETACQ_EDGE_POLYS_TBL_CNT);
+      assert(record->polygon_ids_cnt == tree->netacq_poly_tbl_cnt);
       for(i=0; i<record->polygon_ids_cnt; i++)
         {
           netacq_poly_ids[i] = record->polygon_ids[i];
@@ -1394,7 +1387,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 
 	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_POLYS)
 	  {
-            for(j=0; j<METRIC_NETACQ_EDGE_POLYS_TBL_CNT; j++)
+            for(j=0; j<tree->netacq_poly_tbl_cnt; j++)
               {
 		if(tree->netacq_poly_metrics[j][netacq_poly_ids[j]] == NULL)
 		  {
