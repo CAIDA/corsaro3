@@ -1262,7 +1262,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
   uint16_t netacq_cont;
   uint16_t netacq_cc;
   uint16_t netacq_rc = 0;
-  uint16_t netacq_poly_ids[METRIC_NETACQ_EDGE_POLYS_TBL_CNT];
+  uint32_t netacq_poly_ids[METRIC_NETACQ_EDGE_POLYS_TBL_CNT];
   int netacq_poly_ids_cnt = 0;
 
   khiter_t khiter;
