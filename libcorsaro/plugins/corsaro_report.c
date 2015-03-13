@@ -621,7 +621,9 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
      ||
      tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_COUNTRY] != 0
      ||
-     tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_REGION] != 0)
+     tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_REGION] != 0
+     ||
+     tree_submetric_leafmetrics[tree_id][SUBMETRIC_ID_NETACQ_EDGE_POLYS] != 0)
     {
       /* get the netacq edge provider */
       if((provider =
@@ -784,8 +786,8 @@ static metric_tree_t *metric_tree_new(corsaro_t *corsaro, int tree_id,
 	      /* sneaky check to find the largest polygon id */
 	      for(j=0; j<table->polygons_cnt; j++)
 		{
-		  if(table->polygons[j]->id >
-		     (tree->netacq_poly_metrics_cnt[i]-1))
+		  if(table->polygons[j]->id+1 >
+		     tree->netacq_poly_metrics_cnt[i])
 		    {
 		      tree->netacq_poly_metrics_cnt[i] =
 			table->polygons[j]->id+1;
@@ -1261,6 +1263,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
   uint16_t netacq_cc;
   uint16_t netacq_rc = 0;
   uint16_t netacq_poly_ids[METRIC_NETACQ_EDGE_POLYS_TBL_CNT];
+  int netacq_poly_ids_cnt = 0;
 
   khiter_t khiter;
   ipmeta_record_t *record;
@@ -1286,7 +1289,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
      != NULL)
     {
       netacq_rc = record->region_code;
-      assert(record->polygon_ids_cnt == tree->netacq_poly_tbl_cnt);
+      netacq_poly_ids_cnt = record->polygon_ids_cnt;
       for(i=0; i<record->polygon_ids_cnt; i++)
         {
           netacq_poly_ids[i] = record->polygon_ids[i];
@@ -1387,6 +1390,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 
 	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_POLYS)
 	  {
+            assert(netacq_poly_ids_cnt == tree->netacq_poly_tbl_cnt);
             for(j=0; j<tree->netacq_poly_tbl_cnt; j++)
               {
 		if(tree->netacq_poly_metrics[j][netacq_poly_ids[j]] == NULL)
@@ -1748,33 +1752,33 @@ int corsaro_report_init_output(corsaro_t *corsaro)
   /* grab the stuff we need for maxmind */
   if((provider =
       corsaro_ipmeta_get_provider(corsaro, IPMETA_PROVIDER_MAXMIND))
-     == NULL || ipmeta_is_provider_enabled(provider) == 0)
+     != NULL && ipmeta_is_provider_enabled(provider) != 0)
     {
-      corsaro_log(__func__, corsaro,
-		  "ERROR: Maxmind provider must be enabled");
-      goto err;
+      /* get a list of all the continents */
+      state->maxmind_continents_cnt =
+        ipmeta_provider_maxmind_get_country_continent_list(
+                                                    &state->maxmind_continents);
+      /* get a list of all the countries */
+      state->maxmind_countries_cnt =
+        ipmeta_provider_maxmind_get_iso2_list(&state->maxmind_countries);
+      assert(state->maxmind_countries_cnt == state->maxmind_continents_cnt);
     }
-  /* get a list of all the continents */
-  state->maxmind_continents_cnt =
-    ipmeta_provider_maxmind_get_country_continent_list(
-						&state->maxmind_continents);
-  /* get a list of all the countries */
-  state->maxmind_countries_cnt =
-    ipmeta_provider_maxmind_get_iso2_list(&state->maxmind_countries);
-  assert(state->maxmind_countries_cnt == state->maxmind_continents_cnt);
 
   for(i=0; i<TREE_ID_CNT; i++)
     {
-      if((state->trees_enabled == 0 ||
-	  (state->trees_enabled & tree_flags[i]) != 0) &&
-	 (state->trees[i] = metric_tree_new(corsaro, i, &key_id))
-	 == NULL)
-	{
-	  goto err;
-	}
+      if(state->trees_enabled == 0 ||
+         (state->trees_enabled & tree_flags[i]) != 0)
+        {
 
-      corsaro_log(__func__, corsaro, "Created metric tree (%d)",
-                  state->trees[i]->id);
+          if((state->trees[i] = metric_tree_new(corsaro, i, &key_id))
+             == NULL)
+            {
+              goto err;
+            }
+
+          corsaro_log(__func__, corsaro, "Created metric tree (%d)",
+                      state->trees[i]->id);
+        }
     }
 
   return 0;
