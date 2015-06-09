@@ -1391,7 +1391,7 @@ static int process_generic(corsaro_t *corsaro, corsaro_packet_state_t *state,
 	  SM_IF(SUBMETRIC_ID_NETACQ_EDGE_POLYS)
 	  {
             assert(netacq_poly_ids_cnt == tree->netacq_poly_tbl_cnt);
-            for(j=0; j<tree->netacq_poly_tbl_cnt; j++)
+            for(j=0; j<netacq_poly_ids_cnt; j++)
               {
 		if(tree->netacq_poly_metrics[j][netacq_poly_ids[j]] == NULL)
 		  {
