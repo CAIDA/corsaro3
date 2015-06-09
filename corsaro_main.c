@@ -191,6 +191,7 @@ static int process_trace(char *traceuri)
 {
   double this_time = 0;
   double last_time = 0;
+  double diff = 0;
 
   if(init_trace(traceuri) != 0)
     {
@@ -205,10 +206,11 @@ static int process_trace(char *traceuri)
 
   while (corsaro_shutdown == 0 && trace_read_packet(trace, packet)>0) {
     this_time = trace_get_seconds(packet);
+    diff = this_time - last_time;
     if(gap_limit > 0 && /* gap limit is enabled */
        last_time > 0 && /* this is not the first packet */
-       ((this_time-last_time) > 0) && /* packet doesn't go backward */
-       (this_time - last_time) > gap_limit) /* packet exceeds gap */
+       ((diff > 0 && diff > gap_limit) || /* packet exceeds gap */
+        (diff < 0 && -diff > gap_limit))) /* exceeds backward */
       {
         corsaro_log(__func__, corsaro,
                     "gap limit exceeded (prev: %f this: %f diff: %f)",
