@@ -89,6 +89,11 @@ static int legacy_intervals = 0;
 /** Maximum allowed packet inter-arrival time */
 static int gap_limit = GAP_LIMIT_DEFAULT;
 
+/** Represents a time interval to process (all other packets will be skipped) */
+static uint32_t window_start;
+static uint32_t window_end;
+static int use_window = 0;
+
 /** Handles SIGINT gracefully and shuts down */
 static void catch_sigint(int sig)
 {
@@ -206,6 +211,24 @@ static int process_trace(char *traceuri)
 
   while (corsaro_shutdown == 0 && trace_read_packet(trace, packet)>0) {
     this_time = trace_get_seconds(packet);
+
+    /* are we filtering to a specific time range? */
+    if(use_window != 0)
+      {
+        /* if the packet falls before our window, keep going */
+        if(this_time < window_start)
+          {
+            continue;
+          }
+
+        /* if the packet is after the window, then we're done */
+        if(window_end != UINT32_MAX && this_time >= window_end)
+          {
+            break;
+          }
+      }
+
+    /* check if the packet exceeds our gap limit */
     diff = this_time - last_time;
     if(gap_limit > 0 && /* gap limit is enabled */
        last_time > 0 && /* this is not the first packet */
@@ -218,6 +241,7 @@ static int process_trace(char *traceuri)
         return -1;
       }
     last_time = this_time;
+
     if((filter == NULL || trace_apply_filter(filter, packet) > 0) &&
        corsaro_per_packet(corsaro, packet) != 0)
       {
@@ -388,6 +412,8 @@ static void usage(const char *name)
 	  " (if supported)\n"
 	  "       -r            rotate output files after n intervals\n"
 	  "       -R            rotate corsaro meta files after n intervals\n"
+          "       -w <start>[,<end>]\n"
+          "                     process packets within the given time window\n"
 	  );
 
   corsaro_free_plugin_names(plugin_names, plugin_cnt);
@@ -417,10 +443,12 @@ int main(int argc, char *argv[])
   int logfile_disable = 0;
   int global_file_disable = 0;
 
+  char *endp;
+
   signal(SIGINT, catch_sigint);
 
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":f:g:i:m:n:o:p:r:R:aGlLPv?")) >= 0)
+	(opt = getopt(argc, argv, ":f:g:i:m:n:o:p:r:w:R:aGlLPv?")) >= 0)
     {
       if (optind == prevoptind + 2 && *optarg == '-' ) {
         opt = ':';
@@ -498,6 +526,27 @@ int main(int argc, char *argv[])
 	case 'R':
 	  meta_rotate = atoi(optarg);
 	  break;
+
+        case 'w':
+          if(use_window != 0)
+            {
+              fprintf(stderr,
+                      "WARN: -w may only be used once. Using last value\n");
+            }
+          /* split the window into a start and end */
+	  if((endp = strchr(optarg, ',')) == NULL)
+	    {
+              window_end = UINT32_MAX;
+	    }
+          else
+            {
+              *endp = '\0';
+              endp++;
+              window_end =  atoi(endp);
+            }
+	  window_start = atoi(optarg);
+          use_window = 1;
+          break;
 
 	case ':':
 	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
