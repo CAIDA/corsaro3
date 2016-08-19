@@ -227,6 +227,7 @@ ED_WITH_PLUGIN([corsaro_p0f],[p0f],[P0F],[no])
 ED_WITH_PLUGIN([corsaro_filtergeo],[filtergeo],[FILTERGEO],[no])
 ED_WITH_PLUGIN([corsaro_filterpfx],[filterpfx],[FILTERPFX],[no])
 ED_WITH_PLUGIN([corsaro_filterbpf],[filterbpf],[FILTERBPF],[no])
+ED_WITH_PLUGIN([corsaro_filterdark],[filterdark],[FILTERDARK],[no])
 
 #pass-through pcap plugin
 # the pcap plugin only makes sense in live mode, so disable it by default

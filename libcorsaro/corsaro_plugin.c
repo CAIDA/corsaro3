@@ -82,6 +82,10 @@
 #include "corsaro_filterbpf.h"
 #endif
 
+#ifdef WITH_PLUGIN_FILTERDARK
+#include "corsaro_filterdark.h"
+#endif
+
 #ifdef WITH_PLUGIN_TAGSTATS
 #include "corsaro_tagstats.h"
 #endif

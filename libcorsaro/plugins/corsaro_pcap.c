@@ -249,7 +249,10 @@ int corsaro_pcap_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_end)
 int corsaro_pcap_process_packet(corsaro_t *corsaro,
 				corsaro_packet_t *packet)
 {
-  if(corsaro_file_write_packet(corsaro, STATE(corsaro)->outfile,
+    /* no point carrying on if a previous plugin has already decided we should
+     ignore this tuple */
+  if((packet->state.flags & CORSARO_PACKET_STATE_FLAG_IGNORE) == 0 &&
+     corsaro_file_write_packet(corsaro, STATE(corsaro)->outfile,
 			       LT_PKT(packet)) <= 0)
     {
       corsaro_log(__func__, corsaro, "could not write packet");
