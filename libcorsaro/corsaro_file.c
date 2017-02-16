@@ -273,7 +273,7 @@ corsaro_file_in_t *corsaro_file_ropen(const char *filename)
   /* we need to try and guess the mode... */
   /* if there is a : in the uri, we guess it is a libtrace file */
   /* this should be refined to do something more intelligent */
-  if(strchr(filename, ':') != NULL)
+  if(strchr(filename, ':') != NULL && strncmp("http", filename, 4) != 0)
     {
       f->mode = CORSARO_FILE_MODE_TRACE;
 
