@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -22,7 +22,6 @@
  * along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
-
 
 #ifndef __CORSARO_ANON_H
 #define __CORSARO_ANON_H

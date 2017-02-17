@@ -23,8 +23,8 @@
  *
  */
 
-#include "config.h"
 #include "corsaro_int.h"
+#include "config.h"
 
 #include <assert.h>
 #include <inttypes.h>
@@ -78,11 +78,11 @@
 
 /** Common plugin information across all instances */
 static corsaro_plugin_t corsaro_anon_plugin = {
-  PLUGIN_NAME,                                 /* name */
-  CORSARO_PLUGIN_ID_ANON,                      /* id */
-  CORSARO_ANON_MAGIC,                          /* magic */
+  PLUGIN_NAME,            /* name */
+  CORSARO_PLUGIN_ID_ANON, /* id */
+  CORSARO_ANON_MAGIC,     /* magic */
 #ifdef WITH_PLUGIN_SIXT
-  CORSARO_PLUGIN_GENERATE_PTRS_FT(corsaro_anon),  /* func ptrs */
+  CORSARO_PLUGIN_GENERATE_PTRS_FT(corsaro_anon), /* func ptrs */
 #else
   CORSARO_PLUGIN_GENERATE_PTRS(corsaro_anon),
 #endif
@@ -102,26 +102,23 @@ struct corsaro_anon_state_t {
 };
 
 /** Extends the generic plugin state convenience macro in corsaro_plugin.h */
-#define STATE(corsaro)						\
+#define STATE(corsaro)                                                         \
   (CORSARO_PLUGIN_STATE(corsaro, anon, CORSARO_PLUGIN_ID_ANON))
 
 /** Extends the generic plugin plugin convenience macro in corsaro_plugin.h */
-#define PLUGIN(corsaro)						\
-  (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_ANON))
+#define PLUGIN(corsaro) (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_ANON))
 
 /** Print usage information to stderr */
 static void usage(corsaro_plugin_t *plugin)
 {
   fprintf(stderr,
-	  "plugin usage: %s [-sd] [-t encryption_type] encryption_key[prefix]\n"
-	  "       -d            enable destination address encryption\n"
-	  "       -s            enable source address encryption\n"
-	  "       -t            encryption type (default: %s)\n"
-	  "                     must be either '%s', or '%s'\n",
-	  plugin->argv[0],
-	  ENC_TYPE_CRYPTOPAN,
-	  ENC_TYPE_CRYPTOPAN,
-	  ENC_TYPE_PREFIX);
+          "plugin usage: %s [-sd] [-t encryption_type] encryption_key[prefix]\n"
+          "       -d            enable destination address encryption\n"
+          "       -s            enable source address encryption\n"
+          "       -t            encryption type (default: %s)\n"
+          "                     must be either '%s', or '%s'\n",
+          plugin->argv[0], ENC_TYPE_CRYPTOPAN, ENC_TYPE_CRYPTOPAN,
+          ENC_TYPE_PREFIX);
 }
 
 /** Parse the arguments given to the plugin */
@@ -134,59 +131,48 @@ static int parse_args(corsaro_t *corsaro)
   /* NB: remember to reset optind to 1 before using getopt! */
   optind = 1;
 
-  while((opt = getopt(plugin->argc, plugin->argv, ":dst:?")) >= 0)
-    {
-      switch(opt)
-	{
-	case 'd':
-	  state->encrypt_destination = 1;
-	  break;
+  while ((opt = getopt(plugin->argc, plugin->argv, ":dst:?")) >= 0) {
+    switch (opt) {
+    case 'd':
+      state->encrypt_destination = 1;
+      break;
 
-	case 's':
-	  state->encrypt_source = 1;
-	  break;
+    case 's':
+      state->encrypt_source = 1;
+      break;
 
-	case 't':
-	  if(strcasecmp(optarg, ENC_TYPE_CRYPTOPAN) == 0)
-	    {
-	      state->encryption_type = CORSARO_ANON_ENC_CRYPTOPAN;
-	    }
-	  else if(strcasecmp(optarg, ENC_TYPE_PREFIX) == 0)
-	    {
-	      state->encryption_type = CORSARO_ANON_ENC_PREFIX_SUBSTITUTION;
-	    }
-	  else
-	    {
-	      fprintf(stderr, "ERROR: invalid encryption type (%s)\n",
-		      optarg);
-	      usage(plugin);
-	      return -1;
-	    }
-	  break;
+    case 't':
+      if (strcasecmp(optarg, ENC_TYPE_CRYPTOPAN) == 0) {
+        state->encryption_type = CORSARO_ANON_ENC_CRYPTOPAN;
+      } else if (strcasecmp(optarg, ENC_TYPE_PREFIX) == 0) {
+        state->encryption_type = CORSARO_ANON_ENC_PREFIX_SUBSTITUTION;
+      } else {
+        fprintf(stderr, "ERROR: invalid encryption type (%s)\n", optarg);
+        usage(plugin);
+        return -1;
+      }
+      break;
 
-	case '?':
-	case ':':
-	default:
-	  usage(plugin);
-	  return -1;
-	}
-    }
-
-  /* the last (and only required argument) must be the key */
-  if(optind != (plugin->argc - 1))
-    {
-      fprintf(stderr, "ERROR: missing encryption key\n");
+    case '?':
+    case ':':
+    default:
       usage(plugin);
       return -1;
     }
+  }
+
+  /* the last (and only required argument) must be the key */
+  if (optind != (plugin->argc - 1)) {
+    fprintf(stderr, "ERROR: missing encryption key\n");
+    usage(plugin);
+    return -1;
+  }
 
   state->encryption_key = plugin->argv[optind];
 
-  if(state->encrypt_source == 0 && state->encrypt_destination == 0)
-    {
-      fprintf(stderr,
-	      "WARNING: anon plugin is encrypting nothing\n");
-    }
+  if (state->encrypt_source == 0 && state->encrypt_destination == 0) {
+    fprintf(stderr, "WARNING: anon plugin is encrypting nothing\n");
+  }
 
   return 0;
 }
@@ -221,12 +207,10 @@ int corsaro_anon_init_output(corsaro_t *corsaro)
 
   assert(plugin != NULL);
 
-  if((state = malloc_zero(sizeof(struct corsaro_anon_state_t))) == NULL)
-    {
-      corsaro_log(__func__, corsaro,
-		"could not malloc corsaro_anon_state_t");
-      goto err;
-    }
+  if ((state = malloc_zero(sizeof(struct corsaro_anon_state_t))) == NULL) {
+    corsaro_log(__func__, corsaro, "could not malloc corsaro_anon_state_t");
+    goto err;
+  }
   corsaro_plugin_register_state(corsaro->plugin_manager, plugin, state);
 
   /* set the defaults */
@@ -235,17 +219,16 @@ int corsaro_anon_init_output(corsaro_t *corsaro)
   state->encrypt_destination = ANON_DEST;
 
   /* parse the arguments */
-  if(parse_args(corsaro) != 0)
-    {
-      return -1;
-    }
+  if (parse_args(corsaro) != 0) {
+    return -1;
+  }
 
   assert(state->encryption_key != NULL);
 
   corsaro_anon_init(state->encryption_type, state->encryption_key);
   return 0;
 
- err:
+err:
   corsaro_anon_close_output(corsaro);
   return -1;
 }
@@ -272,17 +255,17 @@ int corsaro_anon_close_output(corsaro_t *corsaro)
 
 /** Implements the read_record function of the plugin API */
 off_t corsaro_anon_read_record(struct corsaro_in *corsaro,
-			       corsaro_in_record_type_t *record_type,
-			       corsaro_in_record_t *record)
+                               corsaro_in_record_type_t *record_type,
+                               corsaro_in_record_t *record)
 {
   assert(0);
   return -1;
 }
 
 /** Implements the read_global_data_record function of the plugin API */
-off_t corsaro_anon_read_global_data_record(struct corsaro_in *corsaro,
-			      enum corsaro_in_record_type *record_type,
-			      struct corsaro_in_record *record)
+off_t corsaro_anon_read_global_data_record(
+  struct corsaro_in *corsaro, enum corsaro_in_record_type *record_type,
+  struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
   return -1;
@@ -290,32 +273,29 @@ off_t corsaro_anon_read_global_data_record(struct corsaro_in *corsaro,
 
 /** Implements the start_interval function of the plugin API */
 int corsaro_anon_start_interval(corsaro_t *corsaro,
-				corsaro_interval_t *int_start)
+                                corsaro_interval_t *int_start)
 {
   /* we don't care */
   return 0;
 }
 
 /** Implements the end_interval function of the plugin API */
-int corsaro_anon_end_interval(corsaro_t *corsaro,
-			      corsaro_interval_t *int_end)
+int corsaro_anon_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_end)
 {
   /* we don't care */
   return 0;
 }
 
 /** Implements the process_packet function of the plugin API */
-int corsaro_anon_process_packet(corsaro_t *corsaro,
-				corsaro_packet_t *packet)
+int corsaro_anon_process_packet(corsaro_t *corsaro, corsaro_packet_t *packet)
 {
   struct corsaro_anon_state_t *state = STATE(corsaro);
   libtrace_ip_t *iphdr = trace_get_ip(LT_PKT(packet));
 
-  if(iphdr != NULL && (state->encrypt_source || state->encrypt_destination))
-    {
-      corsaro_anon_ip_header(iphdr, state->encrypt_source,
-			     state->encrypt_destination);
-    }
+  if (iphdr != NULL && (state->encrypt_source || state->encrypt_destination)) {
+    corsaro_anon_ip_header(iphdr, state->encrypt_source,
+                           state->encrypt_destination);
+  }
 
   return 0;
 }
@@ -323,8 +303,8 @@ int corsaro_anon_process_packet(corsaro_t *corsaro,
 #ifdef WITH_PLUGIN_SIXT
 /** Implements the process_flowtuple function of the plugin API */
 int corsaro_anon_process_flowtuple(corsaro_t *corsaro,
-				   corsaro_flowtuple_t *flowtuple,
-				   corsaro_packet_state_t *state)
+                                   corsaro_flowtuple_t *flowtuple,
+                                   corsaro_packet_state_t *state)
 {
   uint32_t src_ip = corsaro_flowtuple_get_source_ip(flowtuple);
   uint32_t dst_ip = corsaro_flowtuple_get_destination_ip(flowtuple);
@@ -339,16 +319,16 @@ int corsaro_anon_process_flowtuple(corsaro_t *corsaro,
 }
 
 /** Implements the process_flowtuple_class_start function of the plugin API */
-int corsaro_anon_process_flowtuple_class_start(corsaro_t *corsaro,
-				   corsaro_flowtuple_class_start_t *class)
+int corsaro_anon_process_flowtuple_class_start(
+  corsaro_t *corsaro, corsaro_flowtuple_class_start_t *class)
 {
   /* we dont care about these */
   return 0;
 }
 
 /** Implements the process_flowtuple_class_end function of the plugin API */
-int corsaro_anon_process_flowtuple_class_end(corsaro_t *corsaro,
-				   corsaro_flowtuple_class_end_t *class)
+int corsaro_anon_process_flowtuple_class_end(
+  corsaro_t *corsaro, corsaro_flowtuple_class_end_t *class)
 {
   /* dont care */
   return 0;

@@ -11,57 +11,57 @@
 #define _GNU_SOURCE
 #define _FROM_P0F
 
+#include <dirent.h>
+#include <errno.h>
+#include <getopt.h>
+#include <grp.h>
+#include <locale.h>
+#include <poll.h>
+#include <pwd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <signal.h>
-#include <getopt.h>
-#include <errno.h>
-#include <dirent.h>
-#include <pwd.h>
-#include <grp.h>
-#include <poll.h>
 #include <time.h>
-#include <locale.h>
+#include <unistd.h>
 
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <arpa/inet.h>
-#include <sys/un.h>
-#include <sys/fcntl.h>
-#include <sys/stat.h>
-#include <sys/file.h>
-#include <sys/wait.h>
 #include <netinet/in.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <sys/wait.h>
 
 #include <pcap.h>
 
 #ifdef NET_BPF
-#  include <net/bpf.h>
+#include <net/bpf.h>
 #else
-#  include <pcap-bpf.h>
+#include <pcap-bpf.h>
 #endif /* !NET_BPF */
 
-#include "types.h"
-#include "debug.h"
 #include "alloc-inl.h"
-#include "process.h"
-#include "readfp.h"
 #include "api.h"
-#include "tcp.h"
+#include "debug.h"
 #include "fp_http.h"
 #include "p0f.h"
+#include "process.h"
+#include "readfp.h"
+#include "tcp.h"
+#include "types.h"
 
 #ifndef PF_INET6
-#  define PF_INET6          10
+#define PF_INET6 10
 #endif /* !PF_INET6 */
 
 #ifndef O_NOFOLLOW
-#  define O_NOFOLLOW 0
+#define O_NOFOLLOW 0
 #endif /* !O_NOFOLLOW */
 
 #ifndef O_LARGEFILE
-#  define O_LARGEFILE 0
+#define O_LARGEFILE 0
 #endif /* !O_LARGEFILE */
 
 static u8
@@ -70,7 +70,7 @@ static u8
           *orig_rule,                   /* Original filter rule               */
           *switch_user,                 /* Target username                    */
 #endif
-  *log_file;                    /* Binary log file name               */
+  *log_file; /* Binary log file name               */
 #if 0
 /* ak acomments */
   *api_sock;                    /* API socket file name               */
@@ -83,11 +83,10 @@ static u32
   api_max_conn    = API_MAX_CONN;       /* Maximum number of API connections  */
 #endif
 
-u32
-  max_conn        = MAX_CONN,           /* Connection entry count limit       */
-  max_hosts       = MAX_HOSTS,          /* Host cache entry count limit       */
-  conn_max_age    = CONN_MAX_AGE,       /* Maximum age of a connection entry  */
-  host_idle_limit = HOST_IDLE_LIMIT;    /* Host cache idle timeout            */
+u32 max_conn = MAX_CONN,             /* Connection entry count limit       */
+  max_hosts = MAX_HOSTS,             /* Host cache entry count limit       */
+  conn_max_age = CONN_MAX_AGE,       /* Maximum age of a connection entry  */
+  host_idle_limit = HOST_IDLE_LIMIT; /* Host cache idle timeout            */
 
 #if 0
 static struct api_client *api_cl;       /* Array with API client state        */
@@ -99,13 +98,13 @@ null_fd = -1,                /* File descriptor of /dev/null       */
            api_fd = -1;                 /* API socket descriptor              */
 #endif
 
-static FILE* lf;                        /* Log file stream                    */
+static FILE *lf; /* Log file stream                    */
 
 #if 0 /* ak comments */
 static u8 stop_soon;                    /* Ctrl-C or so pressed?              */
 #endif
 
-u8 daemon_mode;                         /* Running in daemon mode?            */
+u8 daemon_mode; /* Running in daemon mode?            */
 
 #if 0
 static u8 set_promisc;                  /* Use promiscuous mode?              */
@@ -115,16 +114,16 @@ static u8 set_promisc;                  /* Use promiscuous mode?              */
 static pcap_t *pt;                      /* PCAP capture thingy                */
 #endif
 
-s32 link_type;                          /* PCAP link type                     */
+s32 link_type; /* PCAP link type                     */
 
-u32 hash_seed;                          /* Hash seed                          */
+u32 hash_seed; /* Hash seed                          */
 
-static u8 obs_fields;                   /* No of pending observation fields   */
+static u8 obs_fields; /* No of pending observation fields   */
 
 /* Memory allocator data: */
 
 #ifdef P0F_DEBUG_BUILD
-struct TRK_obj* TRK[ALLOC_BUCKETS];
+struct TRK_obj *TRK[ALLOC_BUCKETS];
 u32 TRK_cnt[ALLOC_BUCKETS];
 #endif /* P0F_DEBUG_BUILD */
 
@@ -326,10 +325,12 @@ static void open_api(void) {
 
 /* Open log entry. */
 
-void start_observation(char* keyword, u8 field_cnt, u8 to_srv,
-                       struct packet_flow* f) {
+void start_observation(char *keyword, u8 field_cnt, u8 to_srv,
+                       struct packet_flow *f)
+{
 
-  if (obs_fields) FATAL("Premature end of observation.");
+  if (obs_fields)
+    FATAL("Premature end of observation.");
 
   if (!daemon_mode) {
 
@@ -339,10 +340,9 @@ void start_observation(char* keyword, u8 field_cnt, u8 to_srv,
          f->srv_port, keyword);
 
     SAYF("| %-8s = %s/%u\n", to_srv ? "client" : "server",
-         addr_to_str(to_srv ? f->client->addr :
-         f->server->addr, f->client->ip_ver),
+         addr_to_str(to_srv ? f->client->addr : f->server->addr,
+                     f->client->ip_ver),
          to_srv ? f->cli_port : f->srv_port);
-
   }
 
   if (log_file) {
@@ -350,46 +350,45 @@ void start_observation(char* keyword, u8 field_cnt, u8 to_srv,
     u8 tmp[64];
 
     time_t ut = get_unix_time();
-    struct tm* lt = localtime(&ut);
+    struct tm *lt = localtime(&ut);
 
-    strftime((char*)tmp, 64, "%Y/%m/%d %H:%M:%S", lt);
+    strftime((char *)tmp, 64, "%Y/%m/%d %H:%M:%S", lt);
 
-    LOGF("[%s] mod=%s|cli=%s/%u|",tmp, keyword, addr_to_str(f->client->addr,
-         f->client->ip_ver), f->cli_port);
+    LOGF("[%s] mod=%s|cli=%s/%u|", tmp, keyword,
+         addr_to_str(f->client->addr, f->client->ip_ver), f->cli_port);
 
     LOGF("srv=%s/%u|subj=%s", addr_to_str(f->server->addr, f->server->ip_ver),
          f->srv_port, to_srv ? "cli" : "srv");
-
   }
 
   obs_fields = field_cnt;
-
 }
-
 
 /* Add log item. */
 
-void add_observation_field(char* key, u8* value) {
+void add_observation_field(char *key, u8 *value)
+{
 
-  if (!obs_fields) FATAL("Unexpected observation field ('%s').", key);
+  if (!obs_fields)
+    FATAL("Unexpected observation field ('%s').", key);
 
   if (!daemon_mode)
-    SAYF("| %-8s = %s\n", key, value ? value : (u8*)"???");
+    SAYF("| %-8s = %s\n", key, value ? value : (u8 *)"???");
 
-  if (log_file) LOGF("|%s=%s", key, value ? value : (u8*)"???");
+  if (log_file)
+    LOGF("|%s=%s", key, value ? value : (u8 *)"???");
 
   obs_fields--;
 
   if (!obs_fields) {
 
-    if (!daemon_mode) SAYF("|\n`----\n\n");
+    if (!daemon_mode)
+      SAYF("|\n`----\n\n");
 
-    if (log_file) LOGF("\n");
-
+    if (log_file)
+      LOGF("\n");
   }
-
 }
-
 
 #if 0
 /* ak comments */
@@ -450,7 +449,8 @@ static void list_interfaces(void) {
 
 /* List PCAP-recognized interfaces */
 
-static u8* find_interface(int num) {
+static u8 *find_interface(int num)
+{
 
   char pcap_err[PCAP_ERRBUF_SIZE];
   pcap_if_t *dev;
@@ -461,7 +461,7 @@ static u8* find_interface(int num) {
   do {
 
     if (!num--) {
-      u8* ret = DFL_ck_strdup((char*)dev->name);
+      u8 *ret = DFL_ck_strdup((char *)dev->name);
       pcap_freealldevs(dev);
       return ret;
     }
@@ -469,11 +469,9 @@ static u8* find_interface(int num) {
   } while ((dev = dev->next));
 
   FATAL("Interface not found (use -L to list all).");
-
 }
 
 #endif /* __CYGWIN__ */
-
 
 #if 0
 /* Initialize PCAP capture */

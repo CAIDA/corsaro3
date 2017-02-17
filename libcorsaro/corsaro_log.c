@@ -26,12 +26,12 @@
  *
  */
 
-#include "config.h"
 #include "corsaro_int.h"
+#include "config.h"
 
 #include <assert.h>
-#include <stdarg.h>
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,29 +51,30 @@
 
 static char *timestamp_str(char *buf, const size_t len)
 {
-  struct timeval  tv;
-  struct tm      *tm;
-  int             ms;
-  time_t          t;
+  struct timeval tv;
+  struct tm *tm;
+  int ms;
+  time_t t;
 
   buf[0] = '\0';
   gettimeofday_wrap(&tv);
   t = tv.tv_sec;
-  if((tm = localtime(&t)) == NULL) return buf;
+  if ((tm = localtime(&t)) == NULL)
+    return buf;
 
   ms = tv.tv_usec / 1000;
-  snprintf(buf, len, "[%02d:%02d:%02d:%03d] ",
-	   tm->tm_hour, tm->tm_min, tm->tm_sec, ms);
+  snprintf(buf, len, "[%02d:%02d:%02d:%03d] ", tm->tm_hour, tm->tm_min,
+           tm->tm_sec, ms);
 
   return buf;
 }
 
 void generic_log(const char *func, corsaro_file_t *logfile, const char *format,
-		 va_list ap)
+                 va_list ap)
 {
-  char     message[512];
-  char     ts[16];
-  char     fs[64];
+  char message[512];
+  char ts[16];
+  char fs[64];
 
   assert(format != NULL);
 
@@ -81,30 +82,29 @@ void generic_log(const char *func, corsaro_file_t *logfile, const char *format,
 
   timestamp_str(ts, sizeof(ts));
 
-  if(func != NULL) snprintf(fs, sizeof(fs), "%s: ", func);
-  else             fs[0] = '\0';
-
-  if(logfile == NULL)
-    {
-      fprintf(stderr, "%s%s%s\n", ts, fs, message);
-      fflush(stderr);
-    }
+  if (func != NULL)
+    snprintf(fs, sizeof(fs), "%s: ", func);
   else
-    {
-      /* we're special. we know that corsaro_file_printf can do without corsaro */
-      corsaro_file_printf(NULL, logfile, "%s%s%s\n", ts, fs, message);
-      corsaro_file_flush(NULL, logfile);
+    fs[0] = '\0';
+
+  if (logfile == NULL) {
+    fprintf(stderr, "%s%s%s\n", ts, fs, message);
+    fflush(stderr);
+  } else {
+    /* we're special. we know that corsaro_file_printf can do without corsaro */
+    corsaro_file_printf(NULL, logfile, "%s%s%s\n", ts, fs, message);
+    corsaro_file_flush(NULL, logfile);
 
 #ifdef DEBUG
-      /* we've been asked to dump debugging information */
-      fprintf(stderr, "%s%s%s\n", ts, fs, message);
-      fflush(stderr);
+    /* we've been asked to dump debugging information */
+    fprintf(stderr, "%s%s%s\n", ts, fs, message);
+    fflush(stderr);
 #endif
-    }
+  }
 }
 
-void corsaro_log_va(const char *func, corsaro_t *corsaro,
-		  const char *format, va_list args)
+void corsaro_log_va(const char *func, corsaro_t *corsaro, const char *format,
+                    va_list args)
 {
   corsaro_file_t *lf = (corsaro == NULL) ? NULL : corsaro->logfile;
   generic_log(func, lf, format, args);
@@ -118,8 +118,8 @@ void corsaro_log(const char *func, corsaro_t *corsaro, const char *format, ...)
   va_end(ap);
 }
 
-void corsaro_log_in(const char *func, corsaro_in_t *corsaro,
-		    const char *format, ...)
+void corsaro_log_in(const char *func, corsaro_in_t *corsaro, const char *format,
+                    ...)
 {
 #ifdef DEBUG
   va_list ap;
@@ -130,7 +130,7 @@ void corsaro_log_in(const char *func, corsaro_in_t *corsaro,
 }
 
 void corsaro_log_file(const char *func, corsaro_file_t *logfile,
-		      const char *format, ...)
+                      const char *format, ...)
 {
   va_list ap;
   va_start(ap, format);
@@ -140,16 +140,13 @@ void corsaro_log_file(const char *func, corsaro_file_t *logfile,
 
 int corsaro_log_init(corsaro_t *corsaro)
 {
-  if((corsaro->logfile = corsaro_io_prepare_file_full(corsaro,
-				    CORSARO_IO_LOG_NAME,
-				    &corsaro->interval_start,
-				    CORSARO_FILE_MODE_ASCII,
-				    CORSARO_FILE_COMPRESS_NONE,
-				    0, O_CREAT)) == NULL)
-    {
-      fprintf(stderr, "could not open log for writing\n");
-      return -1;
-    }
+  if ((corsaro->logfile = corsaro_io_prepare_file_full(
+         corsaro, CORSARO_IO_LOG_NAME, &corsaro->interval_start,
+         CORSARO_FILE_MODE_ASCII, CORSARO_FILE_COMPRESS_NONE, 0, O_CREAT)) ==
+      NULL) {
+    fprintf(stderr, "could not open log for writing\n");
+    return -1;
+  }
   return 0;
 }
 
@@ -162,16 +159,13 @@ int corsaro_log_in_init(corsaro_in_t *corsaro)
 
 void corsaro_log_close(corsaro_t *corsaro)
 {
-  if(corsaro->logfile != NULL)
-    {
-      corsaro_file_close(NULL, corsaro->logfile);
-      corsaro->logfile = NULL;
-    }
+  if (corsaro->logfile != NULL) {
+    corsaro_file_close(NULL, corsaro->logfile);
+    corsaro->logfile = NULL;
+  }
 }
 
 void corsaro_log_in_close(corsaro_in_t *corsaro)
 {
   /* nothing to be done */
 }
-
-

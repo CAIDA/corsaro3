@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -40,10 +40,9 @@ CORSARO_PLUGIN_GENERATE_PROTOS(corsaro_dos)
  *
  * All values are in HOST byte order
  */
-typedef struct corsaro_dos_global_header
-{
-  /** The number of packets which had mismatched IP addresses in the header 
-   * 
+typedef struct corsaro_dos_global_header {
+  /** The number of packets which had mismatched IP addresses in the header
+   *
    * This is specific to ICMP packets which have a quoted source IP address
    * which does not match the destination address.
    */
@@ -51,7 +50,7 @@ typedef struct corsaro_dos_global_header
 
   /** The number of attack vectors in this interval */
   uint32_t attack_vector_cnt;
-  
+
   /** The number of potential attack vectors which were not classified as being
    * part of an attack
    */
@@ -62,8 +61,7 @@ typedef struct corsaro_dos_global_header
  *
  * All values are in HOST byte order
  */
-typedef struct corsaro_dos_header
-{
+typedef struct corsaro_dos_header {
   /** The number of attack vectors in this interval */
   uint32_t attack_vector_cnt;
 } PACKED corsaro_dos_header_t;
@@ -76,8 +74,7 @@ typedef struct corsaro_dos_header
  *
  * All values are in HOST byte order.
  */
-typedef struct corsaro_dos_attack_vector_in
-{
+typedef struct corsaro_dos_attack_vector_in {
   /** The IP address of the alleged target of the attack */
   uint32_t target_ip;
 
@@ -124,7 +121,7 @@ typedef struct corsaro_dos_attack_vector_in
   /** The length of the initial packet (bytes) */
   uint32_t initial_packet_len;
 
-  /** A copy of the packet that caused the vector to be created 
+  /** A copy of the packet that caused the vector to be created
    *
    * Can be reconstituted into a libtrace packet buffer using
    * corsaro_dos_attack_vector_get_packet
@@ -148,8 +145,7 @@ typedef struct corsaro_dos_attack_vector_in
  */
 
 void corsaro_dos_attack_vector_get_packet(
-			    corsaro_dos_attack_vector_in_t *attack_vector, 
-			    libtrace_packet_t *packet);
+  corsaro_dos_attack_vector_in_t *attack_vector, libtrace_packet_t *packet);
 
 /** Write a global dos header record to the given corsaro file in ascii
  *
@@ -158,9 +154,8 @@ void corsaro_dos_attack_vector_get_packet(
  * @param header      The global header record to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_dos_global_header_fprint(corsaro_t *corsaro, 
-				       corsaro_file_t *file, 
-				       corsaro_dos_global_header_t *header);
+off_t corsaro_dos_global_header_fprint(corsaro_t *corsaro, corsaro_file_t *file,
+                                       corsaro_dos_global_header_t *header);
 
 /** Write a global dos header record to stdout in ascii format
  *
@@ -175,9 +170,8 @@ void corsaro_dos_global_header_print(corsaro_dos_global_header_t *header);
  * @param av           The attack vector to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_dos_attack_vector_fprint(corsaro_t *corsaro, 
-				       corsaro_file_t *file, 
-				       corsaro_dos_attack_vector_in_t *av);
+off_t corsaro_dos_attack_vector_fprint(corsaro_t *corsaro, corsaro_file_t *file,
+                                       corsaro_dos_attack_vector_in_t *av);
 
 /** Write a dos attack vector to stdout in ascii format
  *
@@ -192,9 +186,8 @@ void corsaro_dos_attack_vector_print(corsaro_dos_attack_vector_in_t *av);
  * @param header      The header record to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_dos_header_fprint(corsaro_t *corsaro, 
-				corsaro_file_t *file, 
-				corsaro_dos_header_t *header);
+off_t corsaro_dos_header_fprint(corsaro_t *corsaro, corsaro_file_t *file,
+                                corsaro_dos_header_t *header);
 
 /** Write a dos header record to stdout in ascii format
  *
@@ -202,7 +195,7 @@ off_t corsaro_dos_header_fprint(corsaro_t *corsaro,
  */
 void corsaro_dos_header_print(corsaro_dos_header_t *header);
 
-/** Write a generic dos record to the given corsaro file in 
+/** Write a generic dos record to the given corsaro file in
  *  ascii
  *
  * @param corsaro      The corsaro object associated with the file
@@ -211,10 +204,9 @@ void corsaro_dos_header_print(corsaro_dos_header_t *header);
  * @param record       The record to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_dos_record_fprint(corsaro_t *corsaro, 
-				corsaro_file_t *file, 
-				corsaro_in_record_type_t record_type,
-				corsaro_in_record_t *record);
+off_t corsaro_dos_record_fprint(corsaro_t *corsaro, corsaro_file_t *file,
+                                corsaro_in_record_type_t record_type,
+                                corsaro_in_record_t *record);
 
 /** Write a generic dos record to stdout in ascii format
  *
@@ -223,7 +215,7 @@ off_t corsaro_dos_record_fprint(corsaro_t *corsaro,
  * @return 0 if successful, -1 if an error occurs
  */
 int corsaro_dos_record_print(corsaro_in_record_type_t record_type,
-			     corsaro_in_record_t *record);
+                             corsaro_in_record_t *record);
 
 /** @} */
 

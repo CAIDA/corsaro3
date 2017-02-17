@@ -44,21 +44,19 @@
  */
 
 /** Modes for determining if a packet matches a group of tags */
-typedef enum corsaro_tag_group_match_mode
-  {
-    /** A packet matches this group if ANY of the tags match */
-    CORSARO_TAG_GROUP_MATCH_MODE_ANY = 0,
+typedef enum corsaro_tag_group_match_mode {
+  /** A packet matches this group if ANY of the tags match */
+  CORSARO_TAG_GROUP_MATCH_MODE_ANY = 0,
 
-    /** A packet matches this group if ALL of the tags match */
-    CORSARO_TAG_GROUP_MATCH_MODE_ALL = 1,
+  /** A packet matches this group if ALL of the tags match */
+  CORSARO_TAG_GROUP_MATCH_MODE_ALL = 1,
 
-    /** Default matching mode for a group (ANY tag matches) */
-    CORSARO_TAG_GROUP_MATCH_MODE_DEFAULT = CORSARO_TAG_GROUP_MATCH_MODE_ANY,
-  } corsaro_tag_group_match_mode_t;
+  /** Default matching mode for a group (ANY tag matches) */
+  CORSARO_TAG_GROUP_MATCH_MODE_DEFAULT = CORSARO_TAG_GROUP_MATCH_MODE_ANY,
+} corsaro_tag_group_match_mode_t;
 
 /** Instance of a single tag */
-typedef struct corsaro_tag
-{
+typedef struct corsaro_tag {
   /** Name of the tag */
   char *name;
 
@@ -77,8 +75,7 @@ typedef struct corsaro_tag
 } corsaro_tag_t;
 
 /** Instance of a tag group */
-typedef struct corsaro_tag_group
-{
+typedef struct corsaro_tag_group {
   /** Name of the group */
   char *name;
 
@@ -103,8 +100,7 @@ typedef struct corsaro_tag_group
 } corsaro_tag_group_t;
 
 /** State for the tag manager */
-typedef struct corsaro_tag_manager
-{
+typedef struct corsaro_tag_manager {
   /** Array of currently allocated tags */
   corsaro_tag_t **tags;
 
@@ -120,8 +116,7 @@ typedef struct corsaro_tag_manager
 } corsaro_tag_manager_t;
 
 /** State information for a specific packet */
-typedef struct corsaro_tag_state
-{
+typedef struct corsaro_tag_state {
   /** Array of boolean values indicating which tags have been matched by this
       packet.  corsaro_tag is responsible for dynamically allocating tag IDs
       based on requests by plugins */
@@ -137,7 +132,8 @@ typedef struct corsaro_tag_state
   int tag_matches_set_cnt;
 } corsaro_tag_state_t;
 
-/** Create a tag manager instance and associate it with the given corsaro instance
+/** Create a tag manager instance and associate it with the given corsaro
+ * instance
  *
  * @param corsaro       corsaro instance to associate the tag manager with
  * @return pointer to the tag manager created, NULL if an error occurred.
@@ -176,7 +172,7 @@ void corsaro_tag_state_free(corsaro_packet_state_t *state);
  * returned (and the user pointer will **not** be updated).
  */
 corsaro_tag_t *corsaro_tag_init(corsaro_t *corsaro, const char *name,
-				      void *user);
+                                void *user);
 
 /** Free the given tag
  *
@@ -215,8 +211,7 @@ int corsaro_tag_get_all(corsaro_t *corsaro, corsaro_tag_t ***tags);
  * @note this function **does not** actually apply the tag, it simply checks
  * the result of a previous call to corsaro_tag_set_match.
  */
-int corsaro_tag_is_match(corsaro_packet_state_t *state,
-			 corsaro_tag_t *tag);
+int corsaro_tag_is_match(corsaro_packet_state_t *state, corsaro_tag_t *tag);
 
 /** Check if a packet matches any current tag
  *
@@ -236,9 +231,8 @@ int corsaro_tag_is_match_any(corsaro_packet_state_t *state);
  *
  * @return 0 if the packet was successfully updated, -1 otherwise
  */
-void corsaro_tag_set_match(corsaro_packet_state_t *state,
-			   corsaro_tag_t *tag,
-			   int match);
+void corsaro_tag_set_match(corsaro_packet_state_t *state, corsaro_tag_t *tag,
+                           int match);
 
 /** Create a new tag group with the given name
  *
@@ -254,9 +248,9 @@ void corsaro_tag_set_match(corsaro_packet_state_t *state,
  * returned (and the user pointer will **not** be updated).
  */
 corsaro_tag_group_t *corsaro_tag_group_init(corsaro_t *corsaro,
-					    const char *name,
-					    corsaro_tag_group_match_mode_t mode,
-					    void *user);
+                                            const char *name,
+                                            corsaro_tag_group_match_mode_t mode,
+                                            void *user);
 
 /** Free the given tag group
  *
@@ -273,9 +267,11 @@ void corsaro_tag_group_free(corsaro_tag_group_t *group);
  * @return the group that matches the name given, NULL if there were no matches
  *
  * @note this function searches a list of groups, so it should not be run on a
- * per-packet basis. i.e. keep a pointer to the group that you are interested in.
+ * per-packet basis. i.e. keep a pointer to the group that you are interested
+ * in.
  */
-corsaro_tag_group_t *corsaro_tag_group_get(corsaro_t *corsaro, const char *name);
+corsaro_tag_group_t *corsaro_tag_group_get(corsaro_t *corsaro,
+                                           const char *name);
 
 /** Get the tag that matches the given name
  *
@@ -283,7 +279,8 @@ corsaro_tag_group_t *corsaro_tag_group_get(corsaro_t *corsaro, const char *name)
  * @param[out] groups   filled with a pointer to an array of tag groups
  * @return the number of groups in the returned array
  */
-int corsaro_tag_group_get_all(corsaro_t *corsaro, corsaro_tag_group_t ***groups);
+int corsaro_tag_group_get_all(corsaro_t *corsaro,
+                              corsaro_tag_group_t ***groups);
 
 /** Add a tag to a group
  *
@@ -291,8 +288,7 @@ int corsaro_tag_group_get_all(corsaro_t *corsaro, corsaro_tag_group_t ***groups)
  * @param tag           pointer to the tag to add
  * @return 0 if the tag was added successfully, -1 otherwise
  */
-int corsaro_tag_group_add_tag(corsaro_tag_group_t *group,
-			      corsaro_tag_t *tag);
+int corsaro_tag_group_add_tag(corsaro_tag_group_t *group, corsaro_tag_t *tag);
 
 /** Get the tags that are part of the given group
  *
@@ -301,7 +297,7 @@ int corsaro_tag_group_add_tag(corsaro_tag_group_t *group,
  * @return the number of tags in the returned array
  */
 int corsaro_tag_group_get_tags(corsaro_tag_group_t *group,
-			       corsaro_tag_t ***tags);
+                               corsaro_tag_t ***tags);
 
 /** Check if a packet matches the given tag group
  *
@@ -314,7 +310,6 @@ int corsaro_tag_group_get_tags(corsaro_tag_group_t *group,
  * group. The result is dependent on the match mode of the group.
  */
 int corsaro_tag_group_is_match(corsaro_packet_state_t *state,
-			       corsaro_tag_group_t *group);
-
+                               corsaro_tag_group_t *group);
 
 #endif /* __CORSARO_TAG_H */

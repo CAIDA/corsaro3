@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -21,7 +21,7 @@
  * You should have received a copy of the GNU General Public License
  * along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
  *
- * This file is a modified version of the 'ipanon.h' file included with 
+ * This file is a modified version of the 'ipanon.h' file included with
  * libtrace (http://research.wand.net.nz/software/libtrace.php)
  *
  */
@@ -33,12 +33,12 @@
 
 /** The encryption algorithm used */
 typedef enum corsaro_anon_enc_type {
-	CORSARO_ANON_ENC_NONE,			         /**< No encryption */
-	CORSARO_ANON_ENC_PREFIX_SUBSTITUTION,	   /**< Substitute a prefix */
-	CORSARO_ANON_ENC_CRYPTOPAN	  /**< Prefix preserving encryption */
+  CORSARO_ANON_ENC_NONE,                /**< No encryption */
+  CORSARO_ANON_ENC_PREFIX_SUBSTITUTION, /**< Substitute a prefix */
+  CORSARO_ANON_ENC_CRYPTOPAN            /**< Prefix preserving encryption */
 } corsaro_anon_enc_type_t;
 
-/** Initialize the anonymization module 
+/** Initialize the anonymization module
  *
  * @param type      The encryption type to use
  * @param key       The encryption key to use
@@ -62,8 +62,7 @@ uint32_t corsaro_anon_ip(uint32_t orig_addr);
  * This function will attempt to anonymize addresses in returned ICMP packets
  * also. It will also update the checksums.
  */
-void corsaro_anon_ip_header(struct libtrace_ip *ip, 
-			    int enc_source,
-			    int enc_dest);
+void corsaro_anon_ip_header(struct libtrace_ip *ip, int enc_source,
+                            int enc_dest);
 
 #endif /* __CORSARO_LIBANON_H */

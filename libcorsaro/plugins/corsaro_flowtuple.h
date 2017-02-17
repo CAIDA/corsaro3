@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -67,15 +67,13 @@ CORSARO_PLUGIN_GENERATE_FT_PROTO(corsaro_flowtuple)
  *
  * @todo make the /8 optimizations generic for any darknet size
  */
-struct corsaro_flowtuple
-{
+struct corsaro_flowtuple {
   /** The source IP */
   uint32_t src_ip;
 
-  /** A Structure which represents the 3 useful bytes of the destination ip */
+/** A Structure which represents the 3 useful bytes of the destination ip */
 #ifdef CORSARO_SLASH_EIGHT
-  struct
-  {
+  struct {
     /** Bits 8-15 */
     uint8_t b;
     /** Bits 16-23 */
@@ -92,15 +90,15 @@ struct corsaro_flowtuple
 
   /** The destination port (or ICMP code) */
   uint16_t dst_port;
-  
+
   /** The protocol */
-  uint8_t  protocol;
+  uint8_t protocol;
 
   /** The TTL */
-  uint8_t  ttl;
-  
+  uint8_t ttl;
+
   /** TCP Flags (excluding NS) */
-  uint8_t  tcp_flags;
+  uint8_t tcp_flags;
 
   /** Length of the IP packet (from the IP header) */
   uint16_t ip_len;
@@ -111,28 +109,26 @@ struct corsaro_flowtuple
 } PACKED;
 
 /** Possible classification types for a flowtuple */
-typedef enum corsaro_flowtuple_class_type
-  {
-    /** This packet is a backscatter packet */
-    CORSARO_FLOWTUPLE_CLASS_BACKSCATTER = 0,
-    
-    /** This packet is an ICMP Request packet */
-    CORSARO_FLOWTUPLE_CLASS_ICMPREQ     = 1,
+typedef enum corsaro_flowtuple_class_type {
+  /** This packet is a backscatter packet */
+  CORSARO_FLOWTUPLE_CLASS_BACKSCATTER = 0,
 
-    /** The packet is not backscatter, not ICMP Request */
-    CORSARO_FLOWTUPLE_CLASS_OTHER       = 2,
+  /** This packet is an ICMP Request packet */
+  CORSARO_FLOWTUPLE_CLASS_ICMPREQ = 1,
 
-    /** The highest class value currently in use */
-    CORSARO_FLOWTUPLE_CLASS_MAX         =  CORSARO_FLOWTUPLE_CLASS_OTHER,
+  /** The packet is not backscatter, not ICMP Request */
+  CORSARO_FLOWTUPLE_CLASS_OTHER = 2,
 
-  } corsaro_flowtuple_class_type_t;
+  /** The highest class value currently in use */
+  CORSARO_FLOWTUPLE_CLASS_MAX = CORSARO_FLOWTUPLE_CLASS_OTHER,
 
-/** Represents the start record of a flowtuple class 
+} corsaro_flowtuple_class_type_t;
+
+/** Represents the start record of a flowtuple class
  *
  * All values will be in HOST byte order
  */
-struct corsaro_flowtuple_class_start
-{
+struct corsaro_flowtuple_class_start {
   /** The flowtuple magic number 'SIXT' (or 'SIXU' if not using /8 opts) */
   uint32_t magic;
   /** The type of class (of type corsaro_flowtuple_class_type_t) */
@@ -141,12 +137,11 @@ struct corsaro_flowtuple_class_start
   uint32_t count;
 } PACKED;
 
-/** Represents the end record of a flowtuple class 
+/** Represents the end record of a flowtuple class
  *
  * All values will be in HOST byte order
  */
-struct corsaro_flowtuple_class_end
-{
+struct corsaro_flowtuple_class_end {
   /** The flowtuple magic number 'SIXT' */
   uint32_t magic;
   /** The type of class (of type corsaro_flowtuple_class_type_t) */
@@ -187,7 +182,8 @@ uint32_t corsaro_flowtuple_get_source_ip(struct corsaro_flowtuple *flowtuple);
  * @param flowtuple      The flowtuple record to extract the IP from
  * @return the destination IP of the flowtuple
  */
-uint32_t corsaro_flowtuple_get_destination_ip(struct corsaro_flowtuple *flowtuple);
+uint32_t
+corsaro_flowtuple_get_destination_ip(struct corsaro_flowtuple *flowtuple);
 
 /** Write a flowtuple to the given corsaro file in ascii
  *
@@ -196,8 +192,8 @@ uint32_t corsaro_flowtuple_get_destination_ip(struct corsaro_flowtuple *flowtupl
  * @param flowtuple     The flowtuple to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_flowtuple_fprint(corsaro_t *corsaro, corsaro_file_t *file, 
-			   struct corsaro_flowtuple *flowtuple);
+off_t corsaro_flowtuple_fprint(corsaro_t *corsaro, corsaro_file_t *file,
+                               struct corsaro_flowtuple *flowtuple);
 
 /** Write a flowtuple to stdout in ascii format
  *
@@ -212,14 +208,16 @@ void corsaro_flowtuple_print(struct corsaro_flowtuple *flowtuple);
  * @param class       The class start record to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_flowtuple_class_start_fprint(corsaro_t *corsaro, corsaro_file_t *file, 
-					corsaro_flowtuple_class_start_t *class);
+off_t corsaro_flowtuple_class_start_fprint(
+  corsaro_t *corsaro, corsaro_file_t *file,
+  corsaro_flowtuple_class_start_t *class);
 
 /** Write a flowtuple class start record to stdout in ascii format
  *
  * @param class     The class start record to write out
  */
-void corsaro_flowtuple_class_start_print(corsaro_flowtuple_class_start_t *class);
+void corsaro_flowtuple_class_start_print(
+  corsaro_flowtuple_class_start_t *class);
 
 /** Write a flowtuple class end record to the given corsaro file in ascii
  *
@@ -228,9 +226,9 @@ void corsaro_flowtuple_class_start_print(corsaro_flowtuple_class_start_t *class)
  * @param class       The class end record to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_flowtuple_class_end_fprint(corsaro_t *corsaro, 
-					 corsaro_file_t *file, 
-					 corsaro_flowtuple_class_end_t *class);
+off_t corsaro_flowtuple_class_end_fprint(corsaro_t *corsaro,
+                                         corsaro_file_t *file,
+                                         corsaro_flowtuple_class_end_t *class);
 
 /** Write a flowtuple class end record to stdout in ascii format
  *
@@ -246,9 +244,9 @@ void corsaro_flowtuple_class_end_print(corsaro_flowtuple_class_end_t *class);
  * @param record       The record to write out
  * @return the number of bytes written, -1 if an error occurs
  */
-off_t corsaro_flowtuple_record_fprint(corsaro_t *corsaro, corsaro_file_t *file, 
-				   corsaro_in_record_type_t record_type,
-				   corsaro_in_record_t *record);
+off_t corsaro_flowtuple_record_fprint(corsaro_t *corsaro, corsaro_file_t *file,
+                                      corsaro_in_record_type_t record_type,
+                                      corsaro_in_record_t *record);
 
 /** Write a generic flowtuple record to stdout in ascii format
  *
@@ -257,7 +255,7 @@ off_t corsaro_flowtuple_record_fprint(corsaro_t *corsaro, corsaro_file_t *file,
  * @return 0 if successful, -1 if an error occurs
  */
 int corsaro_flowtuple_record_print(corsaro_in_record_type_t record_type,
-				corsaro_in_record_t *record);
+                                   corsaro_in_record_t *record);
 
 /** @} */
 
@@ -268,60 +266,57 @@ int corsaro_flowtuple_record_print(corsaro_in_record_type_t record_type,
  * to efficiently store eight tuple records in a hash table.
  */
 
-/** 
+/**
  * Used to give the length of the binary representation of a flowtuple
- * 
+ *
  * These values correspond to:
  *<pre>
  *     0                              32                              64
  *     ----------------------------------------------------------------
- *     |            src_ip             |      dst_ip >> 8      |  src_    
+ *     |            src_ip             |      dst_ip >> 8      |  src_
  *     ----------------------------------------------------------------
  *      port   |   dst_port    | proto |  ttl  |tcp_flg|    ip_len    |
  *     ----------------------------------------------------------------
- *     | value...     | 
+ *     | value...     |
  *     ---------------- </pre>
  *
  * DEPRECATED:
  * Note that the 'value' field is not considered part of the flowtuple
  * and as such, the total record length will be FLOWTUPLE_BITCNT + value_len
- * which, given the current implementation is FLOWTUPLE_BITCNT + 4 or 
+ * which, given the current implementation is FLOWTUPLE_BITCNT + 4 or
  * (4+3+2+2+1+1+1+2) + 4 or 160 bits (20 bytes)
  */
-#define CORSARO_FLOWTUPLE_BYTECNT (sizeof(struct corsaro_flowtuple)) /* (4+3+2+2+1+1+1+2)+4*/
+#define CORSARO_FLOWTUPLE_BYTECNT                                              \
+  (sizeof(struct corsaro_flowtuple)) /* (4+3+2+2+1+1+1+2)+4*/
 
 /** Convert a 32bit network order IP address into the 3 byte flowtuple format */
 /* is this platform independent? */
 #ifdef CORSARO_SLASH_EIGHT
-#define CORSARO_FLOWTUPLE_IP_TO_SIXT(n32, flowtuple)				\
-  {								\
-    (flowtuple)->dst_ip.b = ((n32 & htonl(0x00FF0000)) >> 8);	\
-    (flowtuple)->dst_ip.c = ((n32 & htonl(0x0000FF00)) >> 16);	\
-    (flowtuple)->dst_ip.d = ((n32 & htonl(0x000000FF)) >> 24);	\
-  }									
+#define CORSARO_FLOWTUPLE_IP_TO_SIXT(n32, flowtuple)                           \
+  {                                                                            \
+    (flowtuple)->dst_ip.b = ((n32 & htonl(0x00FF0000)) >> 8);                  \
+    (flowtuple)->dst_ip.c = ((n32 & htonl(0x0000FF00)) >> 16);                 \
+    (flowtuple)->dst_ip.d = ((n32 & htonl(0x000000FF)) >> 24);                 \
+  }
 #else
-#define CORSARO_FLOWTUPLE_IP_TO_SIXT(n32, flowtuple)			\
-  {									\
-    (flowtuple)->dst_ip = n32;						\
+#define CORSARO_FLOWTUPLE_IP_TO_SIXT(n32, flowtuple)                           \
+  {                                                                            \
+    (flowtuple)->dst_ip = n32;                                                 \
   }
 #endif
 
 /** Convert the 3byte flowtuple dest ip to 32bits of network ordered uint32 */
 #ifdef CORSARO_SLASH_EIGHT
-#define CORSARO_FLOWTUPLE_SIXT_TO_IP(flowtuple)			\
-  (								\
-   CORSARO_SLASH_EIGHT         |				\
-   (flowtuple)->dst_ip.b << 8  |				\
-   (flowtuple)->dst_ip.c << 16 |				\
-   (flowtuple)->dst_ip.d << 24					\
-								)
+#define CORSARO_FLOWTUPLE_SIXT_TO_IP(flowtuple)                                \
+  (CORSARO_SLASH_EIGHT | (flowtuple)->dst_ip.b << 8 |                          \
+   (flowtuple)->dst_ip.c << 16 | (flowtuple)->dst_ip.d << 24)
 #else
-#define CORSARO_FLOWTUPLE_SIXT_TO_IP(flowtuple)	\
-  ((flowtuple)->dst_ip)
+#define CORSARO_FLOWTUPLE_SIXT_TO_IP(flowtuple) ((flowtuple)->dst_ip)
 #endif
 
 /** Convenience macro to help with the hashing function */
-#define CORSARO_FLOWTUPLE_SHIFT_AND_XOR(value)  h ^= (h<<5) + (h>>27) + (value)
+#define CORSARO_FLOWTUPLE_SHIFT_AND_XOR(value)                                 \
+  h ^= (h << 5) + (h >> 27) + (value)
 
 /** Hash the given flowtuple into a 32bit value
  *
@@ -356,163 +351,87 @@ khint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
 
 /** Tests two flowtuples for equality */
 #ifdef CORSARO_SLASH_EIGHT
-#define corsaro_flowtuple_hash_equal(alpha, bravo) \
-  (									\
-   (alpha)->src_ip    == (bravo)->src_ip    &&				\
-   (alpha)->dst_ip.b  == (bravo)->dst_ip.b  &&				\
-   (alpha)->dst_ip.c  == (bravo)->dst_ip.c  &&				\
-   (alpha)->dst_ip.d  == (bravo)->dst_ip.d  &&				\
-   (alpha)->src_port  == (bravo)->src_port  &&				\
-   (alpha)->dst_port  == (bravo)->dst_port  &&				\
-   (alpha)->protocol  == (bravo)->protocol  &&				\
-   (alpha)->ttl       == (bravo)->ttl       &&				\
-   (alpha)->tcp_flags == (bravo)->tcp_flags &&				\
-   (alpha)->ip_len    == (bravo)->ip_len				\
-									)
+#define corsaro_flowtuple_hash_equal(alpha, bravo)                             \
+  ((alpha)->src_ip == (bravo)->src_ip &&                                       \
+   (alpha)->dst_ip.b == (bravo)->dst_ip.b &&                                   \
+   (alpha)->dst_ip.c == (bravo)->dst_ip.c &&                                   \
+   (alpha)->dst_ip.d == (bravo)->dst_ip.d &&                                   \
+   (alpha)->src_port == (bravo)->src_port &&                                   \
+   (alpha)->dst_port == (bravo)->dst_port &&                                   \
+   (alpha)->protocol == (bravo)->protocol && (alpha)->ttl == (bravo)->ttl &&   \
+   (alpha)->tcp_flags == (bravo)->tcp_flags &&                                 \
+   (alpha)->ip_len == (bravo)->ip_len)
 #else
-#define corsaro_flowtuple_hash_equal(alpha, bravo) \
-  (									\
-   (alpha)->src_ip    == (bravo)->src_ip    &&				\
-   (alpha)->dst_ip    == (bravo)->dst_ip    &&				\
-   (alpha)->src_port  == (bravo)->src_port  &&				\
-   (alpha)->dst_port  == (bravo)->dst_port  &&				\
-   (alpha)->protocol  == (bravo)->protocol  &&				\
-   (alpha)->ttl       == (bravo)->ttl       &&				\
-   (alpha)->tcp_flags == (bravo)->tcp_flags &&				\
-   (alpha)->ip_len    == (bravo)->ip_len				\
-									)
+#define corsaro_flowtuple_hash_equal(alpha, bravo)                             \
+  ((alpha)->src_ip == (bravo)->src_ip && (alpha)->dst_ip == (bravo)->dst_ip && \
+   (alpha)->src_port == (bravo)->src_port &&                                   \
+   (alpha)->dst_port == (bravo)->dst_port &&                                   \
+   (alpha)->protocol == (bravo)->protocol && (alpha)->ttl == (bravo)->ttl &&   \
+   (alpha)->tcp_flags == (bravo)->tcp_flags &&                                 \
+   (alpha)->ip_len == (bravo)->ip_len)
 #endif
 
-/** Tests if one flowtuple is less than another 
+/** Tests if one flowtuple is less than another
  *
  * This sort macro has been optimized to provide the best compression
  * when dumping the flowtuple to binary and using GZIP compression
  */
 #ifdef CORSARO_SLASH_EIGHT
-#define corsaro_flowtuple_lt(alpha, bravo) \
-  (									\
-   ((alpha)->protocol < (bravo)->protocol) ||				\
-   (									\
-    ((alpha)->protocol == (bravo)->protocol) &&				\
-    (									\
-     ((alpha)->ttl < (bravo)->ttl) ||					\
-     (									\
-      ((alpha)->ttl == (bravo)->ttl) &&					\
-      (									\
-       ((alpha)->tcp_flags < (bravo)->tcp_flags) ||			\
-       (								\
-	((alpha)->tcp_flags == (bravo)->tcp_flags) &&			\
-	(								\
-	 ((alpha)->src_ip < (bravo)->src_ip) ||				\
-	 (								\
-	  ((alpha)->src_ip == (bravo)->src_ip) &&			\
-	  (								\
-	   ((alpha)->dst_ip.d < (bravo)->dst_ip.d) ||			\
-	   (								\
-	    ((alpha)->dst_ip.d == (bravo)->dst_ip.d) &&			\
-	    (								\
-	     ((alpha)->dst_ip.c < (bravo)->dst_ip.c) ||			\
-	     (								\
-	      ((alpha)->dst_ip.c == (bravo)->dst_ip.c) &&		\
-	      (								\
-	       ((alpha)->dst_ip.b < (bravo)->dst_ip.b) ||		\
-	       (							\
-		((alpha)->dst_ip.b == (bravo)->dst_ip.b) &&		\
-		(							\
-		 ((alpha)->src_port < (bravo)->src_port) ||		\
-		 (							\
-		  ((alpha)->src_port == (bravo)->src_port) &&		\
-		  (							\
-		   ((alpha)->dst_port < (bravo)->dst_port) ||		\
-		   (							\
-		    ((alpha)->dst_port == (bravo)->dst_port) &&		\
-		    (							\
-		     ((alpha)->ip_len < (bravo)->ip_len)		\
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									)
+#define corsaro_flowtuple_lt(alpha, bravo)                                     \
+  (((alpha)->protocol < (bravo)->protocol) ||                                  \
+   (((alpha)->protocol == (bravo)->protocol) &&                                \
+    (((alpha)->ttl < (bravo)->ttl) ||                                          \
+     (((alpha)->ttl == (bravo)->ttl) &&                                        \
+      (((alpha)->tcp_flags < (bravo)->tcp_flags) ||                            \
+       (((alpha)->tcp_flags == (bravo)->tcp_flags) &&                          \
+        (((alpha)->src_ip < (bravo)->src_ip) ||                                \
+         (((alpha)->src_ip == (bravo)->src_ip) &&                              \
+          (((alpha)->dst_ip.d < (bravo)->dst_ip.d) ||                          \
+           (((alpha)->dst_ip.d == (bravo)->dst_ip.d) &&                        \
+            (((alpha)->dst_ip.c < (bravo)->dst_ip.c) ||                        \
+             (((alpha)->dst_ip.c == (bravo)->dst_ip.c) &&                      \
+              (((alpha)->dst_ip.b < (bravo)->dst_ip.b) ||                      \
+               (((alpha)->dst_ip.b == (bravo)->dst_ip.b) &&                    \
+                (((alpha)->src_port < (bravo)->src_port) ||                    \
+                 (((alpha)->src_port == (bravo)->src_port) &&                  \
+                  (((alpha)->dst_port < (bravo)->dst_port) ||                  \
+                   (((alpha)->dst_port == (bravo)->dst_port) &&                \
+                    (((alpha)->ip_len < (bravo)->ip_len))))))))))))))))))))
 #else
-#define corsaro_flowtuple_lt(alpha, bravo) \
-  (									\
-   ((alpha)->protocol < (bravo)->protocol) ||				\
-   (									\
-    ((alpha)->protocol == (bravo)->protocol) &&				\
-    (									\
-     ((alpha)->ttl < (bravo)->ttl) ||					\
-     (									\
-      ((alpha)->ttl == (bravo)->ttl) &&					\
-      (									\
-       ((alpha)->tcp_flags < (bravo)->tcp_flags) ||			\
-       (								\
-	((alpha)->tcp_flags == (bravo)->tcp_flags) &&			\
-	(								\
-	 ((alpha)->src_ip < (bravo)->src_ip) ||				\
-	 (								\
-	  ((alpha)->src_ip == (bravo)->src_ip) &&			\
-	  (								\
-	   ((alpha)->dst_ip < (bravo)->dst_ip) ||			\
-	   (								\
-	    ((alpha)->dst_ip == (bravo)->dst_ip) &&			\
-	    (								\
-	     ((alpha)->src_port < (bravo)->src_port) ||			\
-	     (								\
-	      ((alpha)->src_port == (bravo)->src_port) &&		\
-	      (								\
-	       ((alpha)->dst_port < (bravo)->dst_port) ||		\
-	       (							\
-		((alpha)->dst_port == (bravo)->dst_port) &&		\
-		(							\
-		 ((alpha)->ip_len < (bravo)->ip_len)			\
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) \
-									) 
+#define corsaro_flowtuple_lt(alpha, bravo)                                     \
+  (((alpha)->protocol < (bravo)->protocol) ||                                  \
+   (((alpha)->protocol == (bravo)->protocol) &&                                \
+    (((alpha)->ttl < (bravo)->ttl) ||                                          \
+     (((alpha)->ttl == (bravo)->ttl) &&                                        \
+      (((alpha)->tcp_flags < (bravo)->tcp_flags) ||                            \
+       (((alpha)->tcp_flags == (bravo)->tcp_flags) &&                          \
+        (((alpha)->src_ip < (bravo)->src_ip) ||                                \
+         (((alpha)->src_ip == (bravo)->src_ip) &&                              \
+          (((alpha)->dst_ip < (bravo)->dst_ip) ||                              \
+           (((alpha)->dst_ip == (bravo)->dst_ip) &&                            \
+            (((alpha)->src_port < (bravo)->src_port) ||                        \
+             (((alpha)->src_port == (bravo)->src_port) &&                      \
+              (((alpha)->dst_port < (bravo)->dst_port) ||                      \
+               (((alpha)->dst_port == (bravo)->dst_port) &&                    \
+                (((alpha)->ip_len < (bravo)->ip_len))))))))))))))))
 #endif
 
-/** Free memory allocated for a flowtuple structure 
+/** Free memory allocated for a flowtuple structure
  *
  * @param t     The flowtuple to free
  */
 void corsaro_flowtuple_free(struct corsaro_flowtuple *t);
 
-/** Either add the given flowtuple to the hash, or increment the current count 
+/** Either add the given flowtuple to the hash, or increment the current count
  *
- * @param hash           The hash to check/add to 
- * @param t              The flowtuple to look for 
+ * @param hash           The hash to check/add to
+ * @param t              The flowtuple to look for
  * @param increment      The amount to increment by
  * @return 0 if the operation completed successfully, -1 if an error occurs
  */
-int corsaro_flowtuple_add_inc(void *hash, struct corsaro_flowtuple *t, 
-			      uint32_t increment);
+int corsaro_flowtuple_add_inc(void *hash, struct corsaro_flowtuple *t,
+                              uint32_t increment);
 
 /** @} */
 
 #endif /* __CORSARO_FLOWTUPLE_H */
-

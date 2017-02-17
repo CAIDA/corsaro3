@@ -17,9 +17,8 @@
 
 struct mtu_sig_record {
 
-  u8* name;
+  u8 *name;
   u16 mtu;
-
 };
 
 #include "process.h"
@@ -27,8 +26,8 @@ struct mtu_sig_record {
 struct packet_data;
 struct packet_flow;
 
-void mtu_register_sig(u8* name, u8* val, u32 line_no);
+void mtu_register_sig(u8 *name, u8 *val, u32 line_no);
 
-void fingerprint_mtu(u8 to_srv, struct packet_data* pk, struct packet_flow* f);
+void fingerprint_mtu(u8 to_srv, struct packet_data *pk, struct packet_flow *f);
 
 #endif /* _HAVE_FP_MTU_H */

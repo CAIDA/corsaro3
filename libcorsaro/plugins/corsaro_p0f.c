@@ -23,8 +23,8 @@
  *
  */
 
-#include "config.h"
 #include "corsaro_int.h"
+#include "config.h"
 
 #include <assert.h>
 #include <inttypes.h>
@@ -32,26 +32,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 #include "libtrace.h"
 
 #include "utils.h"
 
-#include "corsaro_io.h"
 #include "corsaro_file.h"
+#include "corsaro_io.h"
 #include "corsaro_log.h"
 #include "corsaro_plugin.h"
 
 #include "corsaro_p0f.h"
 
 /*p0f includes */
-#include "libp0f/readfp.h"  /* to read in p0F rules */
-#include "libp0f/fp_tcp.h"  /* to call fingerprint_tcp */
-#include "libp0f/tcp.h"     /* for flags */
-#include "libp0f/alloc-inl.h"  /* so we can free the sig created by fingerprint_tcp */
+#include "libp0f/alloc-inl.h" /* so we can free the sig created by fingerprint_tcp */
+#include "libp0f/fp_tcp.h" /* to call fingerprint_tcp */
+#include "libp0f/readfp.h" /* to read in p0F rules */
+#include "libp0f/tcp.h"    /* for flags */
 
 /** @file
  *
@@ -73,10 +73,10 @@
 
 /** Common plugin information across all instances */
 static corsaro_plugin_t corsaro_p0f_plugin = {
-  PLUGIN_NAME,                                 /* name */
-  CORSARO_PLUGIN_ID_P0F,                         /* id */
-  CORSARO_P0F_MAGIC,                             /* magic */
-  CORSARO_PLUGIN_GENERATE_PTRS(corsaro_p0f),       /* func ptrs */
+  PLUGIN_NAME,                               /* name */
+  CORSARO_PLUGIN_ID_P0F,                     /* id */
+  CORSARO_P0F_MAGIC,                         /* magic */
+  CORSARO_PLUGIN_GENERATE_PTRS(corsaro_p0f), /* func ptrs */
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
 
@@ -86,13 +86,12 @@ struct corsaro_p0f_state_t {
 };
 
 /** Extends the generic plugin state convenience macro in corsaro_plugin.h */
-#define STATE(corsaro)						\
+#define STATE(corsaro)                                                         \
   (CORSARO_PLUGIN_STATE(corsaro, p0f, CORSARO_PLUGIN_ID_P0F))
 #endif
 
 /** Extends the generic plugin plugin convenience macro in corsaro_plugin.h */
-#define PLUGIN(corsaro)						\
-  (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_P0F))
+#define PLUGIN(corsaro) (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_P0F))
 
 /* == PUBLIC PLUGIN FUNCS BELOW HERE == */
 
@@ -121,7 +120,7 @@ int corsaro_p0f_init_output(corsaro_t *corsaro)
      malloc's memory which is never freed. Because the p0f plugin is shady at
      best, I'm not going to fix this, but note that if you use libcorsaro and
      p0f, it will leak each time it is init'd */
-  read_config((uint8_t*)&(FINGERPRINT_FILE));
+  read_config((uint8_t *)&(FINGERPRINT_FILE));
   return 0;
 }
 
@@ -141,22 +140,23 @@ int corsaro_p0f_close_output(corsaro_t *corsaro)
 }
 
 off_t corsaro_p0f_read_record(struct corsaro_in *corsaro,
-			  corsaro_in_record_type_t *record_type,
-			  corsaro_in_record_t *record)
+                              corsaro_in_record_type_t *record_type,
+                              corsaro_in_record_t *record)
 {
   /* This plugin wrote no data... */
   return -1;
 }
 
-off_t corsaro_p0f_read_global_data_record(struct corsaro_in *corsaro,
-			      enum corsaro_in_record_type *record_type,
-			      struct corsaro_in_record *record)
+off_t corsaro_p0f_read_global_data_record(
+  struct corsaro_in *corsaro, enum corsaro_in_record_type *record_type,
+  struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
   return -1;
 }
 
-int corsaro_p0f_start_interval(corsaro_t *corsaro, corsaro_interval_t *int_start)
+int corsaro_p0f_start_interval(corsaro_t *corsaro,
+                               corsaro_interval_t *int_start)
 {
   /* we don't care */
   return 0;
@@ -168,12 +168,11 @@ int corsaro_p0f_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_end)
   return 0;
 }
 
-int corsaro_p0f_process_packet(corsaro_t *corsaro,
-			     corsaro_packet_t *packet)
+int corsaro_p0f_process_packet(corsaro_t *corsaro, corsaro_packet_t *packet)
 {
   libtrace_packet_t *ltpacket = LT_PKT(packet);
 
-  libtrace_ip_t  *ip_hdr  = NULL;
+  libtrace_ip_t *ip_hdr = NULL;
   u8 *ip_hdr_u8 = NULL;
 
   struct pcap_pkthdr hdr;
@@ -183,72 +182,61 @@ int corsaro_p0f_process_packet(corsaro_t *corsaro,
   struct packet_data pk;
   memset(&pk, 0, sizeof(struct packet_data));
 
-  struct tcp_sig * sig;
-  struct tcp_sig_record * m;
+  struct tcp_sig *sig;
+  struct tcp_sig_record *m;
 
   /* TCP SYN PACKET?*/
 
   /* check for ipv4 */
-  if((ip_hdr = trace_get_ip(ltpacket)) == NULL)
-    {
-      /* not an ip packet */
-      return 0;
-    }
+  if ((ip_hdr = trace_get_ip(ltpacket)) == NULL) {
+    /* not an ip packet */
+    return 0;
+  }
 
-  if(ip_hdr->ip_p != TRACE_IPPROTO_TCP)
-    {
-      /* not a tcp packet */
-      return 0;
-    }
+  if (ip_hdr->ip_p != TRACE_IPPROTO_TCP) {
+    /* not a tcp packet */
+    return 0;
+  }
 
-  ip_hdr_u8 = (u8*)ip_hdr;
+  ip_hdr_u8 = (u8 *)ip_hdr;
 
   /* let p0f process the packet */
 
-  hdr.ts=trace_get_timeval(ltpacket);
-  hdr.len=trace_get_wire_length(ltpacket);
-  hdr.caplen=trace_get_capture_length(ltpacket);
-  parse_packet_helper(&pk, &hdr, ip_hdr_u8,0);
+  hdr.ts = trace_get_timeval(ltpacket);
+  hdr.len = trace_get_wire_length(ltpacket);
+  hdr.caplen = trace_get_capture_length(ltpacket);
+  parse_packet_helper(&pk, &hdr, ip_hdr_u8, 0);
 
   /* the syn and syn-ack packets are the ones with the signatures we are
    * interested in */
-  if (pk.tcp_type == TCP_SYN)
-    {
-      sig=fingerprint_tcp_simple(1, &pk);
-    }
-  else if (pk.tcp_type == (TCP_SYN|TCP_ACK))
-    {
-      sig=fingerprint_tcp_simple(0, &pk);
-    }
-  else
-    {
-      return 0;
+  if (pk.tcp_type == TCP_SYN) {
+    sig = fingerprint_tcp_simple(1, &pk);
+  } else if (pk.tcp_type == (TCP_SYN | TCP_ACK)) {
+    sig = fingerprint_tcp_simple(0, &pk);
+  } else {
+    return 0;
+  }
+
+  if ((m = sig->matched)) {
+
+    packet->state.os_class_id = m->class_id;
+    packet->state.os_name_id = m->name_id;
+    if (m->flavor != NULL) {
+      strncpy(packet->state.os_flavor, (char *)m->flavor,
+              CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN);
+      packet->state.os_flavor[CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN - 1] =
+        '\0';
     }
 
-  if ((m=sig->matched))
-    {
-
-      packet->state.os_class_id = m->class_id;
-      packet->state.os_name_id  = m->name_id;
-      if (m->flavor != NULL)
-	{
-	  strncpy (packet->state.os_flavor, (char*)m->flavor,
-		   CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN);
-	  packet->
-	    state.os_flavor[CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN -1] = '\0';
-	}
-
-      packet->state.flags |= CORSARO_PACKET_STATE_FLAG_P0F;
+    packet->state.flags |= CORSARO_PACKET_STATE_FLAG_P0F;
 
 #ifdef CORSARO_P0F_DEBUG
-      corsaro_log(__func__, corsaro, "FLAGS:%x   ip %s is %d %s %s",
-		  packet->state.flags, inet_ntoa(ip_hdr->ip_src),
-		  packet->state.os_class_id,
-		  fp_os_names[packet->state.os_name_id],
-		  packet->state.os_flavor);
+    corsaro_log(__func__, corsaro, "FLAGS:%x   ip %s is %d %s %s",
+                packet->state.flags, inet_ntoa(ip_hdr->ip_src),
+                packet->state.os_class_id,
+                fp_os_names[packet->state.os_name_id], packet->state.os_flavor);
 #endif
-
-    }
+  }
 
   ck_free(sig);
   return 0;

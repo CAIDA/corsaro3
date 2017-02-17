@@ -23,8 +23,8 @@
  *
  */
 
-#include "config.h"
 #include "corsaro_int.h"
+#include "config.h"
 
 #include <assert.h>
 #include <inttypes.h>
@@ -36,8 +36,8 @@
 
 #include "utils.h"
 
-#include "corsaro_io.h"
 #include "corsaro_file.h"
+#include "corsaro_io.h"
 #include "corsaro_log.h"
 #include "corsaro_plugin.h"
 
@@ -59,33 +59,32 @@
 
 /** Common plugin information across all instances */
 static corsaro_plugin_t corsaro_tagstats_plugin = {
-  PLUGIN_NAME,                                 /* name */
-  CORSARO_PLUGIN_ID_TAGSTATS,                      /* id */
-  CORSARO_TAGSTATS_MAGIC,                          /* magic */
-  CORSARO_PLUGIN_GENERATE_PTRS(corsaro_tagstats),  /* func ptrs */
+  PLUGIN_NAME,                                    /* name */
+  CORSARO_PLUGIN_ID_TAGSTATS,                     /* id */
+  CORSARO_TAGSTATS_MAGIC,                         /* magic */
+  CORSARO_PLUGIN_GENERATE_PTRS(corsaro_tagstats), /* func ptrs */
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
 
-  /* DELETE ME
-                 #pkts-matched   #pkts-unmatched
-    group-name
-      tag-name
-      tag-name
-      tag-name
+/* DELETE ME
+               #pkts-matched   #pkts-unmatched
+  group-name
+    tag-name
+    tag-name
+    tag-name
 
-      ...
+    ...
 
-    un-grouped
-      tag-name
-      tag-name
-      tag-name
-      TOTAL
+  un-grouped
+    tag-name
+    tag-name
+    tag-name
+    TOTAL
 
-    overall
-   */
+  overall
+ */
 
-typedef struct groupstat
-{
+typedef struct groupstat {
   /* group corresponding to the stats */
   corsaro_tag_group_t *group;
 
@@ -103,8 +102,7 @@ typedef struct groupstat
 
 } groupstat_t;
 
-typedef struct tagstat
-{
+typedef struct tagstat {
   /* tag corresponding to the stats */
   corsaro_tag_t *tag;
 
@@ -141,14 +139,13 @@ struct corsaro_tagstats_state_t {
 
   /** Overall count of packets that we processed over all time */
   uint64_t pkt_cnt_total;
-
 };
 
 /** Extends the generic plugin state convenience macro in corsaro_plugin.h */
-#define STATE(corsaro)						\
+#define STATE(corsaro)                                                         \
   (CORSARO_PLUGIN_STATE(corsaro, tagstats, CORSARO_PLUGIN_ID_TAGSTATS))
 /** Extends the generic plugin plugin convenience macro in corsaro_plugin.h */
-#define PLUGIN(corsaro)						\
+#define PLUGIN(corsaro)                                                        \
   (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_TAGSTATS))
 
 /* == PUBLIC PLUGIN FUNCS BELOW HERE == */
@@ -185,49 +182,43 @@ int corsaro_tagstats_init_output(corsaro_t *corsaro)
 
   assert(plugin != NULL);
 
-  if((state = malloc_zero(sizeof(struct corsaro_tagstats_state_t))) == NULL)
-    {
-      corsaro_log(__func__, corsaro,
-		"could not malloc corsaro_tagstats_state_t");
-      goto err;
-    }
+  if ((state = malloc_zero(sizeof(struct corsaro_tagstats_state_t))) == NULL) {
+    corsaro_log(__func__, corsaro, "could not malloc corsaro_tagstats_state_t");
+    goto err;
+  }
   corsaro_plugin_register_state(corsaro->plugin_manager, plugin, state);
 
   /* get all the groups that are registered */
-  if((state->groups_cnt = corsaro_tag_group_get_all(corsaro, &groups)) < 0)
-    {
-      fprintf(stderr, "ERROR: Could not retrieve tag groups\n");
-      goto err;
-    }
-  if((state->groups = malloc_zero(sizeof(groupstat_t)*state->groups_cnt)) == NULL)
-    {
-      corsaro_log(__func__, corsaro, "could not malloc group stats");
-      goto err;
-    }
-  for(i=0; i<state->groups_cnt; i++)
-    {
-      state->groups[i].group = groups[i];
-    }
+  if ((state->groups_cnt = corsaro_tag_group_get_all(corsaro, &groups)) < 0) {
+    fprintf(stderr, "ERROR: Could not retrieve tag groups\n");
+    goto err;
+  }
+  if ((state->groups = malloc_zero(sizeof(groupstat_t) * state->groups_cnt)) ==
+      NULL) {
+    corsaro_log(__func__, corsaro, "could not malloc group stats");
+    goto err;
+  }
+  for (i = 0; i < state->groups_cnt; i++) {
+    state->groups[i].group = groups[i];
+  }
 
   /* get all the tags that are registered */
-  if((state->tags_cnt = corsaro_tag_get_all(corsaro, &tags)) <= 0)
-    {
-      fprintf(stderr, "ERROR: Could not retrieve tags\n");
-      goto err;
-    }
-  if((state->tags = malloc_zero(sizeof(tagstat_t)*state->tags_cnt)) == NULL)
-    {
-      corsaro_log(__func__, corsaro, "could not malloc tag stats");
-      goto err;
-    }
-  for(i=0; i<state->tags_cnt; i++)
-    {
-      state->tags[i].tag = tags[i];
-    }
+  if ((state->tags_cnt = corsaro_tag_get_all(corsaro, &tags)) <= 0) {
+    fprintf(stderr, "ERROR: Could not retrieve tags\n");
+    goto err;
+  }
+  if ((state->tags = malloc_zero(sizeof(tagstat_t) * state->tags_cnt)) ==
+      NULL) {
+    corsaro_log(__func__, corsaro, "could not malloc tag stats");
+    goto err;
+  }
+  for (i = 0; i < state->tags_cnt; i++) {
+    state->tags[i].tag = tags[i];
+  }
 
   return 0;
 
- err:
+err:
   corsaro_tagstats_close_output(corsaro);
   return -1;
 }
@@ -252,56 +243,49 @@ int corsaro_tagstats_close_output(corsaro_t *corsaro)
   groupstat_t *gs;
   tagstat_t *ts;
 
-  if(state == NULL)
-    {
-      return 0;
-    }
+  if (state == NULL) {
+    return 0;
+  }
 
   fprintf(stdout, "OVERALL STATS\n");
   fprintf(stdout, "\t\t#matched\t#un-matched\n");
   /* write out the group stats */
-  for(i=0; i<state->groups_cnt; i++)
-  {
+  for (i = 0; i < state->groups_cnt; i++) {
     gs = &state->groups[i];
-    fprintf(stdout, "%s\t\t%"PRIu64"\t%"PRIu64"\n",
-	    gs->group->name, gs->pkts_matched_total, gs->pkts_unmatched_total);
+    fprintf(stdout, "%s\t\t%" PRIu64 "\t%" PRIu64 "\n", gs->group->name,
+            gs->pkts_matched_total, gs->pkts_unmatched_total);
     /** now print all the tags in this group */
-    for(j=0; j<gs->group->tags_cnt; j++)
-      {
-	ts = &state->tags[gs->group->tags[j]->id];
-	assert(ts != NULL);
-	fprintf(stdout, "\t%s\t%"PRIu64"\t%"PRIu64"\n",
-		ts->tag->name, ts->pkts_matched_total, ts->pkts_unmatched_total);
-      }
+    for (j = 0; j < gs->group->tags_cnt; j++) {
+      ts = &state->tags[gs->group->tags[j]->id];
+      assert(ts != NULL);
+      fprintf(stdout, "\t%s\t%" PRIu64 "\t%" PRIu64 "\n", ts->tag->name,
+              ts->pkts_matched_total, ts->pkts_unmatched_total);
+    }
     fprintf(stdout, "\n");
   }
 
   fprintf(stdout, "un-grouped\n");
-  for(i=0; i<state->tags_cnt; i++)
-  {
+  for (i = 0; i < state->tags_cnt; i++) {
     ts = &state->tags[i];
     assert(ts != NULL);
-    if(ts->tag->groups_cnt == 0)
-      {
-	fprintf(stdout, "\t%s\t%"PRIu64"\t%"PRIu64"\n",
-		ts->tag->name, ts->pkts_matched_total, ts->pkts_unmatched_total);
-      }
+    if (ts->tag->groups_cnt == 0) {
+      fprintf(stdout, "\t%s\t%" PRIu64 "\t%" PRIu64 "\n", ts->tag->name,
+              ts->pkts_matched_total, ts->pkts_unmatched_total);
+    }
   }
   fprintf(stdout, "\n");
 
   /* now, clean up */
-  if(state->groups != NULL)
-    {
-      free(state->groups);
-      state->groups = NULL;
-    }
+  if (state->groups != NULL) {
+    free(state->groups);
+    state->groups = NULL;
+  }
   state->groups_cnt = 0;
 
-  if(state->tags != NULL)
-    {
-      free(state->tags);
-      state->tags = NULL;
-    }
+  if (state->tags != NULL) {
+    free(state->tags);
+    state->tags = NULL;
+  }
   state->tags_cnt = 0;
 
   corsaro_plugin_free_state(corsaro->plugin_manager, PLUGIN(corsaro));
@@ -311,46 +295,46 @@ int corsaro_tagstats_close_output(corsaro_t *corsaro)
 
 /** Implements the read_record function of the plugin API */
 off_t corsaro_tagstats_read_record(struct corsaro_in *corsaro,
-			       corsaro_in_record_type_t *record_type,
-			       corsaro_in_record_t *record)
+                                   corsaro_in_record_type_t *record_type,
+                                   corsaro_in_record_t *record)
 {
   return -1;
 }
 
 /** Implements the read_global_data_record function of the plugin API */
-off_t corsaro_tagstats_read_global_data_record(struct corsaro_in *corsaro,
-			      enum corsaro_in_record_type *record_type,
-			      struct corsaro_in_record *record)
+off_t corsaro_tagstats_read_global_data_record(
+  struct corsaro_in *corsaro, enum corsaro_in_record_type *record_type,
+  struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
   return -1;
 }
 
 /** Implements the start_interval function of the plugin API */
-int corsaro_tagstats_start_interval(corsaro_t *corsaro, corsaro_interval_t *int_start)
+int corsaro_tagstats_start_interval(corsaro_t *corsaro,
+                                    corsaro_interval_t *int_start)
 {
   int i;
   struct corsaro_tagstats_state_t *state = STATE(corsaro);
 
   /* zero out the stats */
-  for(i=0; i<state->groups_cnt; i++)
-    {
-      state->groups[i].pkts_matched = 0;
-      state->groups[i].pkts_unmatched = 0;
-    }
+  for (i = 0; i < state->groups_cnt; i++) {
+    state->groups[i].pkts_matched = 0;
+    state->groups[i].pkts_unmatched = 0;
+  }
 
-  for(i=0; i<state->tags_cnt; i++)
-    {
-      state->tags[i].pkts_matched = 0;
-      state->tags[i].pkts_unmatched = 0;
-    }
+  for (i = 0; i < state->tags_cnt; i++) {
+    state->tags[i].pkts_matched = 0;
+    state->tags[i].pkts_unmatched = 0;
+  }
 
   state->pkt_cnt = 0;
   return 0;
 }
 
 /** Implements the end_interval function of the plugin API */
-int corsaro_tagstats_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_end)
+int corsaro_tagstats_end_interval(corsaro_t *corsaro,
+                                  corsaro_interval_t *int_end)
 {
   int i, j;
   struct corsaro_tagstats_state_t *state = STATE(corsaro);
@@ -359,32 +343,28 @@ int corsaro_tagstats_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_en
 
   fprintf(stdout, "\t\t#matched\t#un-matched\n");
   /* write out the group stats */
-  for(i=0; i<state->groups_cnt; i++)
-  {
+  for (i = 0; i < state->groups_cnt; i++) {
     gs = &state->groups[i];
-    fprintf(stdout, "%s\t\t%"PRIu64"\t%"PRIu64"\n",
-	    gs->group->name, gs->pkts_matched, gs->pkts_unmatched);
+    fprintf(stdout, "%s\t\t%" PRIu64 "\t%" PRIu64 "\n", gs->group->name,
+            gs->pkts_matched, gs->pkts_unmatched);
     /** now print all the tags in this group */
-    for(j=0; j<gs->group->tags_cnt; j++)
-      {
-	ts = &state->tags[gs->group->tags[j]->id];
-	assert(ts != NULL);
-	fprintf(stdout, "\t%s\t%"PRIu64"\t%"PRIu64"\n",
-		ts->tag->name, ts->pkts_matched, ts->pkts_unmatched);
-      }
+    for (j = 0; j < gs->group->tags_cnt; j++) {
+      ts = &state->tags[gs->group->tags[j]->id];
+      assert(ts != NULL);
+      fprintf(stdout, "\t%s\t%" PRIu64 "\t%" PRIu64 "\n", ts->tag->name,
+              ts->pkts_matched, ts->pkts_unmatched);
+    }
     fprintf(stdout, "\n");
   }
 
   fprintf(stdout, "un-grouped\n");
-  for(i=0; i<state->tags_cnt; i++)
-  {
+  for (i = 0; i < state->tags_cnt; i++) {
     ts = &state->tags[i];
     assert(ts != NULL);
-    if(ts->tag->groups_cnt == 0)
-      {
-	fprintf(stdout, "\t%s\t%"PRIu64"\t%"PRIu64"\n",
-		ts->tag->name, ts->pkts_matched, ts->pkts_unmatched);
-      }
+    if (ts->tag->groups_cnt == 0) {
+      fprintf(stdout, "\t%s\t%" PRIu64 "\t%" PRIu64 "\n", ts->tag->name,
+              ts->pkts_matched, ts->pkts_unmatched);
+    }
   }
   fprintf(stdout, "\n\n");
 
@@ -393,7 +373,7 @@ int corsaro_tagstats_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_en
 
 /** Implements the process_packet function of the plugin API */
 int corsaro_tagstats_process_packet(corsaro_t *corsaro,
-				    corsaro_packet_t *packet)
+                                    corsaro_packet_t *packet)
 {
   int i;
   struct corsaro_tagstats_state_t *state = STATE(corsaro);
@@ -401,38 +381,27 @@ int corsaro_tagstats_process_packet(corsaro_t *corsaro,
   tagstat_t *ts;
 
   /* look at each group */
-  for(i=0; i<state->groups_cnt; i++)
-  {
+  for (i = 0; i < state->groups_cnt; i++) {
     gs = &state->groups[i];
-    if(corsaro_tag_group_is_match(&packet->state, gs->group) > 0)
-      {
-	gs->pkts_matched++;
-	gs->pkts_matched_total++;
-      }
-    else
-      {
-	gs->pkts_unmatched++;
-	gs->pkts_unmatched_total++;
-      }
+    if (corsaro_tag_group_is_match(&packet->state, gs->group) > 0) {
+      gs->pkts_matched++;
+      gs->pkts_matched_total++;
+    } else {
+      gs->pkts_unmatched++;
+      gs->pkts_unmatched_total++;
+    }
   }
 
   /* look at each tag */
-  for(i=0; i<state->tags_cnt; i++)
-  {
+  for (i = 0; i < state->tags_cnt; i++) {
     ts = &state->tags[i];
-    if(corsaro_tag_is_match(&packet->state, ts->tag) > 0)
-      {
-	ts->pkts_matched++;
-	ts->pkts_matched_total++;
-      }
-    else
-      {
-	ts->pkts_unmatched++;
-	ts->pkts_unmatched_total++;
-      }
+    if (corsaro_tag_is_match(&packet->state, ts->tag) > 0) {
+      ts->pkts_matched++;
+      ts->pkts_matched_total++;
+    } else {
+      ts->pkts_unmatched++;
+      ts->pkts_unmatched_total++;
+    }
   }
   return 0;
 }
-
-
-

@@ -28,10 +28,10 @@
 
 #include "config.h"
 
-#include <stdio.h>
 #include <assert.h>
-#include <unistd.h>
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <libtrace.h>
 
@@ -43,10 +43,10 @@
 static size_t strlcpy(char *dest, const char *src, size_t size)
 {
   size_t ret;
-  for(ret=0;src[ret] && ret<size; ret++) {
-    dest[ret]=src[ret];
+  for (ret = 0; src[ret] && ret < size; ret++) {
+    dest[ret] = src[ret];
   }
-  dest[ret++]='\0';
+  dest[ret++] = '\0';
   return ret;
 }
 #endif
@@ -55,12 +55,11 @@ static size_t strlcpy(char *dest, const char *src, size_t size)
 static corsaro_anon_enc_type_t enc_type = CORSARO_ANON_ENC_NONE;
 
 static uint32_t masks[33] = {
-  0x00000000, 0x80000000, 0xC0000000, 0xe0000000, 0xf0000000,
-  0xf8000000, 0xfC000000, 0xfe000000, 0xff000000, 0xff800000,
-  0xffC00000, 0xffe00000, 0xfff00000, 0xfff80000, 0xfffC0000,
-  0xfffe0000, 0xffff0000, 0xffff8000, 0xffffC000, 0xffffe000,
-  0xfffff000, 0xfffff800, 0xfffffC00, 0xfffffe00, 0xffffff00,
-  0xffffff80, 0xffffffC0, 0xffffffe0, 0xfffffff0, 0xfffffff8,
+  0x00000000, 0x80000000, 0xC0000000, 0xe0000000, 0xf0000000, 0xf8000000,
+  0xfC000000, 0xfe000000, 0xff000000, 0xff800000, 0xffC00000, 0xffe00000,
+  0xfff00000, 0xfff80000, 0xfffC0000, 0xfffe0000, 0xffff0000, 0xffff8000,
+  0xffffC000, 0xffffe000, 0xfffff000, 0xfffff800, 0xfffffC00, 0xfffffe00,
+  0xffffff00, 0xffffff80, 0xffffffC0, 0xffffffe0, 0xfffffff0, 0xfffffff8,
   0xfffffffC, 0xfffffffe, 0xffffffff,
 };
 
@@ -70,12 +69,11 @@ static uint32_t netmask;
 /** @todo change to detect invalid prefixes */
 static void init_prefix(const char *key)
 {
-  int a,b,c,d;
+  int a, b, c, d;
   int bits;
-  sscanf(key,"%i.%i.%i.%i/%i",
-	 &a, &b, &c, &d, &bits);
-  prefix=(a<<24) + (b<<16) + (c<<8) + d;
-  assert(bits>=0 && bits<=32);
+  sscanf(key, "%i.%i.%i.%i/%i", &a, &b, &c, &d, &bits);
+  prefix = (a << 24) + (b << 16) + (c << 8) + d;
+  assert(bits >= 0 && bits <= 32);
   netmask = masks[bits];
 }
 
@@ -87,23 +85,21 @@ static uint32_t prefix_substitute(uint32_t ip)
 /* Incrementally update a checksum */
 static void update_in_cksum(uint16_t *csum, uint16_t old, uint16_t new)
 {
-  uint32_t sum = (~htons(*csum) & 0xFFFF)
-    + (~htons(old) & 0xFFFF)
-    + htons(new);
+  uint32_t sum = (~htons(*csum) & 0xFFFF) + (~htons(old) & 0xFFFF) + htons(new);
   sum = (sum & 0xFFFF) + (sum >> 16);
   *csum = htons(~(sum + (sum >> 16)));
 }
 
 static void update_in_cksum32(uint16_t *csum, uint32_t old, uint32_t new)
 {
-  update_in_cksum(csum,(uint16_t)(old>>16),(uint16_t)(new>>16));
-  update_in_cksum(csum,(uint16_t)(old&0xFFFF),(uint16_t)(new&0xFFFF));
+  update_in_cksum(csum, (uint16_t)(old >> 16), (uint16_t)(new >> 16));
+  update_in_cksum(csum, (uint16_t)(old & 0xFFFF), (uint16_t)(new & 0xFFFF));
 }
 
 void corsaro_anon_init(corsaro_anon_enc_type_t type, char *key)
 {
   char cryptopan_key[32];
-  memset(cryptopan_key,0,sizeof(cryptopan_key));
+  memset(cryptopan_key, 0, sizeof(cryptopan_key));
   enc_type = type;
   switch (enc_type) {
   case CORSARO_ANON_ENC_NONE:
@@ -112,7 +108,7 @@ void corsaro_anon_init(corsaro_anon_enc_type_t type, char *key)
     init_prefix(key);
     break;
   case CORSARO_ANON_ENC_CRYPTOPAN:
-    strlcpy(cryptopan_key,key,sizeof(cryptopan_key));
+    strlcpy(cryptopan_key, key, sizeof(cryptopan_key));
     panon_init(cryptopan_key);
     break;
   default:
@@ -147,37 +143,36 @@ uint32_t corsaro_anon_ip(uint32_t orig_addr)
  * the opposite direction so we need to encrypt the destination and
  * source instead of the source and destination!
  */
-void corsaro_anon_ip_header(struct libtrace_ip *ip,
-			    int enc_source,
-			    int enc_dest)
+void corsaro_anon_ip_header(struct libtrace_ip *ip, int enc_source,
+                            int enc_dest)
 {
   struct libtrace_tcp *tcp;
   struct libtrace_udp *udp;
   struct libtrace_icmp *icmp;
 
-  tcp=trace_get_tcp_from_ip(ip,NULL);
-  udp=trace_get_udp_from_ip(ip,NULL);
-  icmp=trace_get_icmp_from_ip(ip,NULL);
+  tcp = trace_get_tcp_from_ip(ip, NULL);
+  udp = trace_get_udp_from_ip(ip, NULL);
+  icmp = trace_get_icmp_from_ip(ip, NULL);
 
   if (enc_source) {
-    uint32_t old_ip=ip->ip_src.s_addr;
-    uint32_t new_ip=htonl(corsaro_anon_ip(
-					  htonl(ip->ip_src.s_addr)
-					  ));
-    update_in_cksum32(&ip->ip_sum,old_ip,new_ip);
-    if (tcp) update_in_cksum32(&tcp->check,old_ip,new_ip);
-    if (udp) update_in_cksum32(&udp->check,old_ip,new_ip);
+    uint32_t old_ip = ip->ip_src.s_addr;
+    uint32_t new_ip = htonl(corsaro_anon_ip(htonl(ip->ip_src.s_addr)));
+    update_in_cksum32(&ip->ip_sum, old_ip, new_ip);
+    if (tcp)
+      update_in_cksum32(&tcp->check, old_ip, new_ip);
+    if (udp)
+      update_in_cksum32(&udp->check, old_ip, new_ip);
     ip->ip_src.s_addr = new_ip;
   }
 
   if (enc_dest) {
-    uint32_t old_ip=ip->ip_dst.s_addr;
-    uint32_t new_ip=htonl(corsaro_anon_ip(
-				 htonl(ip->ip_dst.s_addr)
-				 ));
-    update_in_cksum32(&ip->ip_sum,old_ip,new_ip);
-    if (tcp) update_in_cksum32(&tcp->check,old_ip,new_ip);
-    if (udp) update_in_cksum32(&udp->check,old_ip,new_ip);
+    uint32_t old_ip = ip->ip_dst.s_addr;
+    uint32_t new_ip = htonl(corsaro_anon_ip(htonl(ip->ip_dst.s_addr)));
+    update_in_cksum32(&ip->ip_sum, old_ip, new_ip);
+    if (tcp)
+      update_in_cksum32(&tcp->check, old_ip, new_ip);
+    if (udp)
+      update_in_cksum32(&udp->check, old_ip, new_ip);
     ip->ip_dst.s_addr = new_ip;
   }
 
@@ -185,13 +180,10 @@ void corsaro_anon_ip_header(struct libtrace_ip *ip,
     /* These are error codes that return the IP packet
      * internally
      */
-    if (icmp->type == 3
-	|| icmp->type == 5
-	|| icmp->type == 11) {
-      corsaro_anon_ip_header((struct libtrace_ip*)icmp+
-			     sizeof(struct libtrace_icmp),
-			     enc_dest,
-			     enc_source);
+    if (icmp->type == 3 || icmp->type == 5 || icmp->type == 11) {
+      corsaro_anon_ip_header((struct libtrace_ip *)icmp +
+                               sizeof(struct libtrace_icmp),
+                             enc_dest, enc_source);
     }
   }
 }

@@ -23,8 +23,8 @@
  *
  */
 
-#include "config.h"
 #include "corsaro_int.h"
+#include "config.h"
 
 #include <assert.h>
 #include <inttypes.h>
@@ -33,10 +33,10 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include "libtrace.h"
 
@@ -67,13 +67,13 @@
 #define PLUGIN_NAME "filterdark"
 
 /* max number of /24s in a /8 darknet */
-#define EXCLUDE_LEN (1<<16)
+#define EXCLUDE_LEN (1 << 16)
 
 /** Common plugin information across all instances */
 static corsaro_plugin_t corsaro_filterdark_plugin = {
-  PLUGIN_NAME,                                 /* name */
-  CORSARO_PLUGIN_ID_FILTERDARK,                /* id */
-  CORSARO_DARK_MAGIC,                          /* magic */
+  PLUGIN_NAME,                  /* name */
+  CORSARO_PLUGIN_ID_FILTERDARK, /* id */
+  CORSARO_DARK_MAGIC,           /* magic */
   CORSARO_PLUGIN_GENERATE_PTRS(corsaro_filterdark),
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
@@ -88,14 +88,15 @@ struct corsaro_filterdark_state_t {
 };
 
 /** Extends the generic plugin state convenience macro in corsaro_plugin.h */
-#define STATE(corsaro)						\
+#define STATE(corsaro)                                                         \
   (CORSARO_PLUGIN_STATE(corsaro, filterdark, CORSARO_PLUGIN_ID_FILTERDARK))
 
 /** Extends the generic plugin plugin convenience macro in corsaro_plugin.h */
-#define PLUGIN(corsaro)						\
+#define PLUGIN(corsaro)                                                        \
   (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_FILTERDARK))
 
-static int parse_excl_file(corsaro_t *corsaro, const char *excl_file) {
+static int parse_excl_file(corsaro_t *corsaro, const char *excl_file)
+{
   struct corsaro_filterdark_state_t *state = STATE(corsaro);
   io_t *file;
   char buf[1024];
@@ -142,14 +143,14 @@ static int parse_excl_file(corsaro_t *corsaro, const char *excl_file) {
     // perhaps not the most efficient way to do this, but i've borrowed it from
     // other code that I'm sure actually works, and this only happens once at
     // startup, so whatevs ;)
-    first_addr = addr & (~0 << (32-mask));
-    last_addr = first_addr + (1<<(32-mask))-1;
+    first_addr = addr & (~0 << (32 - mask));
+    last_addr = first_addr + (1 << (32 - mask)) - 1;
 
-    first_slash24 = (first_addr/256)*256;
-    last_slash24 = (last_addr/256)*256;
+    first_slash24 = (first_addr / 256) * 256;
+    last_slash24 = (last_addr / 256) * 256;
 
-    for(x = first_slash24; x <= last_slash24; x += 256) {
-      idx = (x&0x00FFFF00)>>8;
+    for (x = first_slash24; x <= last_slash24; x += 256) {
+      idx = (x & 0x00FFFF00) >> 8;
       if (state->exclude[idx] == 0) {
         state->exclude[idx] = 1;
         cnt++;
@@ -166,22 +167,24 @@ static int parse_excl_file(corsaro_t *corsaro, const char *excl_file) {
 
   return 0;
 
- err:
+err:
   wandio_destroy(file);
   return -1;
 }
 
-
 /** Print usage information to stderr */
 static void usage(corsaro_plugin_t *plugin)
 {
-  fprintf(stderr,
-	  "plugin usage: %s -e <file> -s <value>\n"
-          "       -e <file>     specifies a list of prefixes to exclude.\n"
-          "                     all packets to these prefixes will be skipped.\n"
-          "       -s <value>    specifies the first octet of the destination address.\n"
-          "                     all packets with a different first octet will be skipped\n",
-	  plugin->argv[0]);
+  fprintf(
+    stderr,
+    "plugin usage: %s -e <file> -s <value>\n"
+    "       -e <file>     specifies a list of prefixes to exclude.\n"
+    "                     all packets to these prefixes will be skipped.\n"
+    "       -s <value>    specifies the first octet of the destination "
+    "address.\n"
+    "                     all packets with a different first octet will be "
+    "skipped\n",
+    plugin->argv[0]);
 }
 
 /** Parse the arguments given to the plugin */
@@ -199,27 +202,24 @@ static int parse_args(corsaro_t *corsaro)
   /* NB: remember to reset optind to 1 before using getopt! */
   optind = 1;
 
-  while((opt = getopt(plugin->argc, plugin->argv, ":e:s:?")) >= 0)
-    {
-      switch(opt)
-	{
+  while ((opt = getopt(plugin->argc, plugin->argv, ":e:s:?")) >= 0) {
+    switch (opt) {
 
-        case 'e':
-          excl_file = optarg;
-          break;
+    case 'e':
+      excl_file = optarg;
+      break;
 
-        case 's':
-          first_octet = atoi(optarg);
-          break;
+    case 's':
+      first_octet = atoi(optarg);
+      break;
 
-	case '?':
-	case ':':
-	default:
-	  usage(plugin);
-	  return -1;
-	}
+    case '?':
+    case ':':
+    default:
+      usage(plugin);
+      return -1;
     }
-
+  }
 
   if (first_octet == -1) {
     fprintf(stderr, "ERROR: First octet must be specified using -s\n");
@@ -259,7 +259,8 @@ int corsaro_filterdark_probe_filename(const char *fname)
 }
 
 /** Implements the probe_magic function of the plugin API */
-int corsaro_filterdark_probe_magic(corsaro_in_t *corsaro, corsaro_file_in_t *file)
+int corsaro_filterdark_probe_magic(corsaro_in_t *corsaro,
+                                   corsaro_file_in_t *file)
 {
   /* this does not write files */
   return 0;
@@ -273,12 +274,12 @@ int corsaro_filterdark_init_output(corsaro_t *corsaro)
 
   assert(plugin != NULL);
 
-  if((state = malloc_zero(sizeof(struct corsaro_filterdark_state_t))) == NULL)
-    {
-      corsaro_log(__func__, corsaro,
-		"could not malloc corsaro_filterdark_state_t");
-      goto err;
-    }
+  if ((state = malloc_zero(sizeof(struct corsaro_filterdark_state_t))) ==
+      NULL) {
+    corsaro_log(__func__, corsaro,
+                "could not malloc corsaro_filterdark_state_t");
+    goto err;
+  }
   corsaro_plugin_register_state(corsaro->plugin_manager, plugin, state);
 
   /* init the exclude list */
@@ -287,15 +288,14 @@ int corsaro_filterdark_init_output(corsaro_t *corsaro)
   }
 
   /* parse the arguments */
-  if(parse_args(corsaro) != 0)
-    {
-      /* parse args calls usage itself, so do not goto err here */
-      return -1;
-    }
+  if (parse_args(corsaro) != 0) {
+    /* parse args calls usage itself, so do not goto err here */
+    return -1;
+  }
 
   return 0;
 
- err:
+err:
   corsaro_filterdark_close_output(corsaro);
   return -1;
 }
@@ -319,10 +319,9 @@ int corsaro_filterdark_close_output(corsaro_t *corsaro)
 {
   struct corsaro_filterdark_state_t *state = STATE(corsaro);
 
-  if(state == NULL)
-    {
-      return 0;
-    }
+  if (state == NULL) {
+    return 0;
+  }
 
   free(state->exclude);
   state->exclude = NULL;
@@ -334,17 +333,17 @@ int corsaro_filterdark_close_output(corsaro_t *corsaro)
 
 /** Implements the read_record function of the plugin API */
 off_t corsaro_filterdark_read_record(struct corsaro_in *corsaro,
-			       corsaro_in_record_type_t *record_type,
-			       corsaro_in_record_t *record)
+                                     corsaro_in_record_type_t *record_type,
+                                     corsaro_in_record_t *record)
 {
   assert(0);
   return -1;
 }
 
 /** Implements the read_global_data_record function of the plugin API */
-off_t corsaro_filterdark_read_global_data_record(struct corsaro_in *corsaro,
-			      enum corsaro_in_record_type *record_type,
-			      struct corsaro_in_record *record)
+off_t corsaro_filterdark_read_global_data_record(
+  struct corsaro_in *corsaro, enum corsaro_in_record_type *record_type,
+  struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
   return -1;
@@ -352,7 +351,7 @@ off_t corsaro_filterdark_read_global_data_record(struct corsaro_in *corsaro,
 
 /** Implements the start_interval function of the plugin API */
 int corsaro_filterdark_start_interval(corsaro_t *corsaro,
-				corsaro_interval_t *int_start)
+                                      corsaro_interval_t *int_start)
 {
   /* we do not care */
   return 0;
@@ -360,7 +359,7 @@ int corsaro_filterdark_start_interval(corsaro_t *corsaro,
 
 /** Implements the end_interval function of the plugin API */
 int corsaro_filterdark_end_interval(corsaro_t *corsaro,
-				corsaro_interval_t *int_end)
+                                    corsaro_interval_t *int_end)
 {
   /* we do not care */
   return 0;
@@ -371,24 +370,24 @@ int corsaro_filterdark_process_packet(corsaro_t *corsaro,
                                       corsaro_packet_t *packet)
 {
   struct corsaro_filterdark_state_t *state = STATE(corsaro);
-  libtrace_ip_t  *ip_hdr  = NULL;
+  libtrace_ip_t *ip_hdr = NULL;
   uint32_t ip_addr;
 
   /* check for ipv4 */
-  if((ip_hdr = trace_get_ip(LT_PKT(packet))) == NULL) {
+  if ((ip_hdr = trace_get_ip(LT_PKT(packet))) == NULL) {
     /* not an ip packet */
     goto skip;
   }
   ip_addr = htonl(ip_hdr->ip_dst.s_addr);
 
-  if(((ip_addr & 0xFF000000) != state->darknet) ||
-     (state->exclude[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
+  if (((ip_addr & 0xFF000000) != state->darknet) ||
+      (state->exclude[(ip_addr & 0x00FFFF00) >> 8] != 0)) {
     goto skip;
   }
 
   return 0;
 
- skip:
+skip:
   /* flip on the ignore bit if any of the filters match */
   packet->state.flags |= CORSARO_PACKET_STATE_FLAG_IGNORE;
   return 0;
