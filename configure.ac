@@ -183,6 +183,26 @@ AS_IF([test "x$with_slash_eight" != xno],
 
 AC_MSG_RESULT([$with_slash_eight])
 
+# check if we can build the flowtuple2avro tool
+AC_MSG_CHECKING([whether to build flowtuple2avro])
+AC_ARG_WITH([avro],
+	[AS_HELP_STRING([--with-avro],
+	  [Build flowtuple2avro converter (defaults to no)])],
+	  [],
+	  [with_avro=no])
+AC_MSG_RESULT([$with_avro])
+AS_IF([test "x$with_avro" == xyes],
+	[
+	    AC_DEFINE_UNQUOTED([WITH_AVRO],[1],
+		[Build flowtuple2avro converter])
+            AC_CHECK_LIB([avro],
+                [avro_write_data],
+                [],
+                [AC_MSG_ERROR([libavro required (--without-avro to disable)])]
+                )
+	])
+AM_CONDITIONAL([WITH_AVRO], [test "x$with_avro" == xyes])
+
 # are we going to dump some plugin timing information? (useful for debugging
 # where corsaro spends its time given a complicated plugin chain)
 AC_MSG_CHECKING([whether to monitor plugin runtimes])

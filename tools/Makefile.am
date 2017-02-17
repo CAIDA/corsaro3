@@ -37,6 +37,14 @@ cors2ascii_SOURCES = \
 cors2ascii_LDADD = -lcorsaro
 cors2ascii_LDFLAGS = -L$(top_builddir)/libcorsaro
 
+# flowtuple2avro converter
+if WITH_AVRO
+bin_PROGRAMS += cors-flowtuple2avro
+cors_flowtuple2avro_SOURCES = cors-flowtuple2avro.c
+cors_flowtuple2avro_LDADD = -lcorsaro
+cors_flowtuple2avro_LDFLAGS = -L$(top_builddir)/libcorsaro
+endif
+
 # not really a part of corsaro, but lets call corsaro the caida telescope
 # toolset :)
 cors_trace2tuple_SOURCES = \
