@@ -24,19 +24,17 @@
  */
 
 #include "config.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
 #include "corsaro.h"
-#include "corsaro_log.h"
 #include "corsaro_io.h"
+#include "corsaro_log.h"
 
 /** @file
  *
- * @brief Code which uses libcorsaro to convert an corsaro output file to ascii
+ * @brief Code which uses libcorsaro and libavro to convert a binary FlowTuple file to Avro
  *
  * @author Alistair King
  *
@@ -51,29 +49,26 @@ static corsaro_in_record_t *record = NULL;
 /** Cleanup and free state */
 static void clean()
 {
-  if(record != NULL)
-    {
-      corsaro_in_free_record(record);
-      record = NULL;
-    }
+  if (record != NULL) {
+    corsaro_in_free_record(record);
+    record = NULL;
+  }
 
-  if(corsaro != NULL)
-    {
-      corsaro_finalize_input(corsaro);
-      corsaro = NULL;
-    }
+  if (corsaro != NULL) {
+    corsaro_finalize_input(corsaro);
+    corsaro = NULL;
+  }
 }
 
 /** Initialize a corsaro_in object for the given file name */
 static int init_corsaro(char *corsarouri)
 {
   /* get an corsaro_in object */
-  if((corsaro = corsaro_alloc_input(corsarouri)) == NULL)
-    {
-      fprintf(stderr, "could not alloc corsaro_in\n");
-      clean();
-      return -1;
-    }
+  if ((corsaro = corsaro_alloc_input(corsarouri)) == NULL) {
+    fprintf(stderr, "could not alloc corsaro_in\n");
+    clean();
+    return -1;
+  }
 
   /* get a record */
   if ((record = corsaro_in_alloc_record(corsaro)) == NULL) {
@@ -83,12 +78,11 @@ static int init_corsaro(char *corsarouri)
   }
 
   /* start corsaro */
-  if(corsaro_start_input(corsaro) != 0)
-    {
-      fprintf(stderr, "could not start corsaro\n");
-      clean();
-      return -1;
-    }
+  if (corsaro_start_input(corsaro) != 0) {
+    fprintf(stderr, "could not start corsaro\n");
+    clean();
+    return -1;
+  }
 
   return 0;
 }
@@ -96,8 +90,7 @@ static int init_corsaro(char *corsarouri)
 /** Print usage information to stderr */
 static void usage(const char *name)
 {
-  fprintf(stderr,
-	  "usage: %s [-n] avro-dir ft-file [ft-file ...]\n", name);
+  fprintf(stderr, "usage: %s [-n] avro-dir ft-file [ft-file ...]\n", name);
 }
 
 int main(int argc, char **argv)
@@ -107,29 +100,26 @@ int main(int argc, char **argv)
   corsaro_in_record_type_t type = CORSARO_IN_RECORD_TYPE_NULL;
   off_t len = 0;
 
-  if(argc != 2)
-    {
-      usage(argv[0]);
-      exit(-1);
-    }
+  if (argc != 2) {
+    usage(argv[0]);
+    exit(-1);
+  }
 
   /* argv[1] is the corsaro file */
   file = argv[1];
 
   /* this must be done before corsaro_init_output */
-  if(init_corsaro(file) != 0)
-    {
-      fprintf(stderr, "failed to init corsaro\n");
+  if (init_corsaro(file) != 0) {
+    fprintf(stderr, "failed to init corsaro\n");
+    clean();
+    return -1;
+  }
+
+  while ((len = corsaro_in_read_record(corsaro, &type, record)) > 0) {
+    if (type == CORSARO_IN_RECORD_TYPE_NULL) {
       clean();
       return -1;
     }
-
-  while ((len = corsaro_in_read_record(corsaro, &type, record)) > 0) {
-    if(type == CORSARO_IN_RECORD_TYPE_NULL)
-      {
-	clean();
-	return -1;
-      }
 
     corsaro_io_print_record(corsaro->plugin_manager, type, record);
 
@@ -137,12 +127,11 @@ int main(int argc, char **argv)
     type = CORSARO_IN_RECORD_TYPE_NULL;
   }
 
-  if(len < 0)
-    {
-      fprintf(stderr, "corsaro_in_read_record failed to read record\n");
-      clean();
-      return -1;
-    }
+  if (len < 0) {
+    fprintf(stderr, "corsaro_in_read_record failed to read record\n");
+    clean();
+    return -1;
+  }
 
   clean();
   return 0;
