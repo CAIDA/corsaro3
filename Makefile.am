@@ -41,3 +41,9 @@ EXTRA_DIST = libtrace-3.0.13-wandio_export.patch thirdparty/libsmee-2.2.2.tar.gz
 ACLOCAL_AMFLAGS = -I m4
 
 CLEANFILES = *~
+
+format:
+	find . -type f -name "*.[ch]" -not -path "./common/*" -exec \
+		clang-format -style=file -i {} \;
+
+.PHONY: format
