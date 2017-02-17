@@ -68,6 +68,26 @@
 /** The name to use for the log 'plugin' file */
 #define CORSARO_IO_LOG_NAME "log"
 
+/** Convenience function for generating a file name based on a the given
+ *  template string
+ *
+ * @param template      file name template
+ * @param plugin        name of the plugin (used if %P is in the template)
+ * @param monitorname   name of the monitor (used if %N is in the template)
+ * @param time          the current time (used for strftime formatting)
+ * @param compress      if set to CORSARO_FILE_COMPRESS_NONE then any .gz or
+ *                      .bz2 file extension will be removed
+ * @return pointer to a dynamically allocated string with the filename if
+ * successful, NULL otherwise
+ *
+ * Note: It is the caller's responsibility to free the returned string
+ */
+char *corsaro_generate_file_name(const char *template,
+                                 const char *plugin,
+                                 const char *monitorname,
+                                 uint32_t time,
+                                 corsaro_file_compress_t compress);
+
 /** Uses the given settings to open an corsaro file for the given plugin
  *
  * @param corsaro          The corsaro object associated with the file

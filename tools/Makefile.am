@@ -30,6 +30,8 @@ dist_bin_SCRIPTS = \
 	cors-ft-timeseries.pl
 
 bin_PROGRAMS = cors-trace2tuple cors2ascii
+BUILT_SOURCES =
+EXTRA_DIST =
 
 # corsaro2ascii program
 cors2ascii_SOURCES = \
@@ -43,6 +45,10 @@ bin_PROGRAMS += cors-flowtuple2avro
 cors_flowtuple2avro_SOURCES = cors-flowtuple2avro.c
 cors_flowtuple2avro_LDADD = -lcorsaro
 cors_flowtuple2avro_LDFLAGS = -L$(top_builddir)/libcorsaro
+EXTRA_DIST += flowtuple.avsc.json
+BUILT_SOURCES += flowtuple_avsc_json.inc
+flowtuple_avsc_json.inc: flowtuple.avsc.json
+	xxd -i flowtuple.avsc.json flowtuple_avsc_json.inc
 endif
 
 # not really a part of corsaro, but lets call corsaro the caida telescope

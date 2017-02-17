@@ -32,7 +32,10 @@ cors-ft-aggregate
 cors-ft-reports
 cors-trace2tuple
 cors-flowtuple2avro
+
+# Auto-generated files
 corsaro-*.tar.gz
+flowtuple_avsc_json.inc
 
 # doxygen files
 docs/doxygen/caida-html

@@ -459,9 +459,11 @@ static char *stradd(const char *str, char *bufp, char *buflim)
   return bufp;
 }
 
-static char *generate_file_name(corsaro_t *corsaro, const char *plugin,
-                                corsaro_interval_t *interval,
-                                corsaro_file_compress_t compress)
+char *corsaro_generate_file_name(const char *template,
+                                 const char *plugin,
+                                 const char *monitorname,
+                                 uint32_t time,
+                                 corsaro_file_compress_t compress)
 {
   /* some of the structure of this code is borrowed from the
      FreeBSD implementation of strftime */
@@ -474,7 +476,8 @@ static char *generate_file_name(corsaro_t *corsaro, const char *plugin,
   char *bufp = buf;
   char *buflim = buf + sizeof(buf);
 
-  char *tmpl = corsaro->template;
+  /* cast away const, but we don't modify the buffer */
+  char *tmpl = (char*)template;
   char secs[11]; /* length of UINT32_MAX +1 */
   struct timeval tv;
 
@@ -496,7 +499,7 @@ static char *generate_file_name(corsaro_t *corsaro, const char *plugin,
        * corsaro_io_template_has_timestamp */
 
       case CORSARO_IO_MONITOR_PATTERN:
-        bufp = stradd(corsaro->monitorname, bufp, buflim);
+        bufp = stradd(monitorname, bufp, buflim);
         continue;
 
       case CORSARO_IO_PLUGIN_PATTERN:
@@ -504,11 +507,9 @@ static char *generate_file_name(corsaro_t *corsaro, const char *plugin,
         continue;
 
       case 's':
-        if (interval != NULL) {
-          snprintf(secs, sizeof(secs), "%" PRIu32, interval->time);
-          bufp = stradd(secs, bufp, buflim);
-          continue;
-        }
+        snprintf(secs, sizeof(secs), "%" PRIu32, time);
+        bufp = stradd(secs, bufp, buflim);
+        continue;
       /* fall through */
       default:
         /* we want to be generous and leave non-recognized formats
@@ -524,13 +525,9 @@ static char *generate_file_name(corsaro_t *corsaro, const char *plugin,
   *bufp = '\0';
 
   /* now let strftime have a go */
-  if (interval != NULL) {
-    tv.tv_sec = interval->time;
-    strftime(tbuf, sizeof(tbuf), buf, gmtime(&tv.tv_sec));
-    return strdup(tbuf);
-  }
-
-  return strdup(buf);
+  tv.tv_sec = time;
+  strftime(tbuf, sizeof(tbuf), buf, gmtime(&tv.tv_sec));
+  return strdup(tbuf);
 }
 
 static int validate_header_static(corsaro_header_t *h)
@@ -647,8 +644,10 @@ corsaro_file_t *corsaro_io_prepare_file_full(corsaro_t *corsaro,
   char *outfileuri;
 
   /* generate a file name based on the plugin name */
-  if ((outfileuri = generate_file_name(corsaro, plugin_name, interval,
-                                       compress)) == NULL) {
+  if ((outfileuri = corsaro_generate_file_name(corsaro->template, plugin_name,
+                                               corsaro->monitorname,
+                                               interval->time,
+                                               compress)) == NULL) {
     corsaro_log(__func__, corsaro, "could not generate file name for %s",
                 plugin_name);
     return NULL;
