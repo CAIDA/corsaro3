@@ -46,7 +46,7 @@
 
 /* Rotate output files every 10M records, but note that we also force a rotate
    at the minute boundary. */
-#define DEFAULT_ROTATE_RECORD_CNT_COMPACT (10*1000000)
+#define DEFAULT_ROTATE_RECORD_CNT (10*1000000)
 
 /** The corsaro_in object for reading the input file */
 static corsaro_in_t *corsaro = NULL;
@@ -69,13 +69,15 @@ static avro_value_t a_record = {0};
 static uint64_t record_cnt = 0;
 static uint64_t batch_cnt = 0;
 static uint32_t current_minute = 0;
-static int batch_size = DEFAULT_ROTATE_RECORD_CNT_COMPACT;
+static int batch_size = DEFAULT_ROTATE_RECORD_CNT;
 
 /* Auto-generated schema include file
  * built by make using:
  * `xxd -i flowtuple.avsc.json flowtuple_avsc_json.inc`
  */
 #include "flowtuple_avsc_json.inc"
+#include "flowtuple_compact_avsc_json.inc"
+static int use_compact_schema = 0;
 
 enum {
   FIELD_TIME,
@@ -159,10 +161,18 @@ static int init_corsaro(char *corsarouri)
 
 static int init_avro()
 {
+  const char *schema = NULL;
+  int schema_len = 0;
   /* load the schema */
-  if (avro_schema_from_json_length((const char *)flowtuple_avsc_json,
-                                   flowtuple_avsc_json_len,
-                                   &a_schema) != 0) {
+  if (use_compact_schema != 0) {
+    schema = (const char *)flowtuple_compact_avsc_json;
+    schema_len = flowtuple_compact_avsc_json_len;
+  } else {
+    schema = (const char *)flowtuple_avsc_json;
+    schema_len = flowtuple_avsc_json_len;
+  }
+
+  if (avro_schema_from_json_length(schema, schema_len, &a_schema) != 0) {
     fprintf(stderr, "ERROR: Failed to initialize avro schema (%s)\n",
             avro_strerror());
     return -1;
@@ -224,7 +234,7 @@ static int create_avro_writer(uint32_t time, uint64_t batch_id)
   return -1;
 }
 
-#define SET_FIELD(field_idx, buf, len) \
+#define SET_BYTES_FIELD(field_idx, buf, len) \
   do {                                 \
     if (avro_value_get_by_index(&a_record, (field_idx), &val, NULL) != 0 || \
         avro_value_set_bytes(&val, (buf), (len)) != 0) {                \
@@ -234,12 +244,119 @@ static int create_avro_writer(uint32_t time, uint64_t batch_id)
     }                                                                   \
   } while(0)
 
-static int write_record(corsaro_flowtuple_t *tuple,
-                        uint8_t class, uint32_t time)
+static int fill_record_compact(corsaro_flowtuple_t *tuple,
+                               uint8_t class, uint32_t time)
 {
   avro_value_t val;
   uint32_t tmp;
 
+  /* populate the record (NETWORK BYTE ORDER) */
+
+  /* time (4) */
+  SET_BYTES_FIELD(FIELD_TIME, &time, 4);
+
+  /* class (1) */
+  SET_BYTES_FIELD(FIELD_CLASS, &class, 1);
+
+  /* src_ip (4) */
+  SET_BYTES_FIELD(FIELD_SRC_IP, &tuple->src_ip, 4);
+
+  /* dst_ip (4) */
+  tmp = CORSARO_FLOWTUPLE_SIXT_TO_IP(tuple);
+  SET_BYTES_FIELD(FIELD_DST_IP, &tmp, 4);
+
+  /* src_port (2) */
+  SET_BYTES_FIELD(FIELD_SRC_PORT, &tuple->src_port, 2);
+
+  /* dst_port (2) */
+  SET_BYTES_FIELD(FIELD_DST_PORT, &tuple->dst_port, 2);
+
+  /* protocol (1) */
+  SET_BYTES_FIELD(FIELD_PROTOCOL, &tuple->protocol, 1);
+
+  /* ttl (1) */
+  SET_BYTES_FIELD(FIELD_TTL, &tuple->ttl, 1);
+
+  /* tcp_flags (1) */
+  SET_BYTES_FIELD(FIELD_TCP_FLAGS, &tuple->tcp_flags, 1);
+
+  /* ip_len (2) */
+  SET_BYTES_FIELD(FIELD_IP_LEN, &tuple->ip_len, 2);
+
+  /* packet_cnt (4) */
+  SET_BYTES_FIELD(FIELD_PKT_CNT, &tuple->packet_cnt, 4);
+
+  return 0;
+
+ err:
+  return -1;
+}
+
+#define SET_FIELD(ftype, field_idx, lval)                               \
+  do {                                                                  \
+    ftype ltmp = (lval);                                                \
+    if (avro_value_get_by_index(&a_record, (field_idx), &val, NULL) != 0 || \
+      avro_value_set_##ftype(&val, ltmp) != 0) {                        \
+      fprintf(stderr, "ERROR: Could not set value for field %d (%s)\n", \
+              (field_idx), avro_strerror());                            \
+      goto err;                                                         \
+    }                                                                   \
+  } while(0)
+
+static int fill_record(corsaro_flowtuple_t *tuple,
+                       uint8_t class, uint32_t time)
+{
+  avro_value_t val;
+
+  /* populate the record (NETWORK BYTE ORDER) */
+
+  /* time (long) */
+  SET_FIELD(long, FIELD_TIME, time);
+
+  /* class (enum) */
+  if (avro_value_get_by_index(&a_record, FIELD_CLASS, &val, NULL) != 0 ||
+      avro_value_set_enum(&val, class) != 0) {
+    fprintf(stderr, "ERROR: Could not set value for field %d (%s)\n",
+            FIELD_CLASS, avro_strerror());
+    goto err;
+  }
+
+  /* src_ip (long) */
+  SET_FIELD(long, FIELD_SRC_IP, ntohl(tuple->src_ip));
+
+  /* dst_ip (long) */
+  SET_FIELD(long, FIELD_DST_IP, ntohl(CORSARO_FLOWTUPLE_SIXT_TO_IP(tuple)));
+
+  /* src_port (int) */
+  SET_FIELD(int, FIELD_SRC_PORT, ntohs(tuple->src_port));
+
+  /* dst_port (int) */
+  SET_FIELD(int, FIELD_DST_PORT, ntohs(tuple->dst_port));
+
+  /* protocol (int) */
+  SET_FIELD(int, FIELD_PROTOCOL, tuple->protocol);
+
+  /* ttl (int) */
+  SET_FIELD(int, FIELD_TTL, tuple->ttl);
+
+  /* tcp_flags (int) */
+  SET_FIELD(int, FIELD_TCP_FLAGS, tuple->tcp_flags);
+
+  /* ip_len (int) */
+  SET_FIELD(int, FIELD_IP_LEN, ntohs(tuple->ip_len));
+
+  /* packet_cnt (long) */
+  SET_FIELD(long, FIELD_PKT_CNT, ntohl(tuple->packet_cnt));
+
+  return 0;
+
+ err:
+  return -1;
+}
+
+static int write_record(corsaro_flowtuple_t *tuple,
+                        uint8_t class, uint32_t time)
+{
   /* maybe rotate the output file (batch size or new minute) */
   if (a_writer_init != 0 &&
       ((batch_size > 0 && (++record_cnt % batch_size) == 0)
@@ -268,41 +385,15 @@ static int write_record(corsaro_flowtuple_t *tuple,
     goto err;
   }
 
-  /* populate the record (NETWORK BYTE ORDER) */
-
-  /* time (4) */
-  SET_FIELD(FIELD_TIME, &time, 4);
-
-  /* class (1) */
-  SET_FIELD(FIELD_CLASS, &class, 1);
-
-  /* src_ip (4) */
-  SET_FIELD(FIELD_SRC_IP, &tuple->src_ip, 4);
-
-  /* dst_ip (4) */
-  tmp = CORSARO_FLOWTUPLE_SIXT_TO_IP(tuple);
-  SET_FIELD(FIELD_DST_IP, &tmp, 4);
-
-  /* src_port (2) */
-  SET_FIELD(FIELD_SRC_PORT, &tuple->src_port, 2);
-
-  /* dst_port (2) */
-  SET_FIELD(FIELD_DST_PORT, &tuple->dst_port, 2);
-
-  /* protocol (1) */
-  SET_FIELD(FIELD_PROTOCOL, &tuple->protocol, 1);
-
-  /* ttl (1) */
-  SET_FIELD(FIELD_TTL, &tuple->ttl, 1);
-
-  /* tcp_flags (1) */
-  SET_FIELD(FIELD_TCP_FLAGS, &tuple->tcp_flags, 1);
-
-  /* ip_len (2) */
-  SET_FIELD(FIELD_IP_LEN, &tuple->ip_len, 2);
-
-  /* packet_cnt (4) */
-  SET_FIELD(FIELD_PKT_CNT, &tuple->packet_cnt, 4);
+  if (use_compact_schema != 0) {
+    if (fill_record_compact(tuple, class, time) != 0) {
+      goto err;
+    }
+  } else {
+    if (fill_record(tuple, class, time) != 0) {
+      goto err;
+    }
+  }
 
   /* write the record */
   if (avro_file_writer_append_value(a_writer, &a_record) != 0) {
@@ -384,15 +475,16 @@ static int process_flowtuple_file(char *ftfile)
 static void usage()
 {
   fprintf(stderr,
-          "usage: cors-flowtuple2avro [-n] -t template ft-file [ft-file ...]\n"
+          "usage: cors-flowtuple2avro [-cn] -t template ft-file [ft-file ...]\n"
           "Available options are:\n"
+          "    -c                 encode using the compact FlowTuple schema\n"
           "    -n <batch-size>    rotate avro file after at most n tuples "
           "(default: %d)\n"
           "    -t <template>      Avro file name template (required)\n",
-          DEFAULT_ROTATE_RECORD_CNT_COMPACT
+          DEFAULT_ROTATE_RECORD_CNT
   );
   fprintf(stderr,
-          "\nNote: Avro file name template must contain '%%N' which will be "
+          "\nNote: Avro file name template should contain '%%N' which will be "
           "replaced\n"
           "  by the batch number. If the file exists, it will be replaced.\n"
   );
@@ -407,13 +499,17 @@ int main(int argc, char **argv)
   int infiles_cnt;
 
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":n:t:?")) >= 0) {
+         (opt = getopt(argc, argv, ":n:t:c?")) >= 0) {
     if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
         *(optarg + 1) != '\0') {
       opt = ':';
       --optind;
     }
     switch (opt) {
+    case 'c':
+      use_compact_schema = 1;
+      break;
+
     case 'n':
       batch_size = atoi(optarg);
       break;
@@ -452,10 +548,8 @@ int main(int argc, char **argv)
     goto err;
   }
 
-  if (strstr(avro_template, "%N") == NULL) {
+  if (strstr(avro_template, "%N") == NULL && batch_size > 0) {
     fprintf(stderr, "ERROR: Avro file template must contain '%%N'\n");
-    usage();
-    goto err;
   }
 
   if (strstr(avro_template, "%s") == NULL) {

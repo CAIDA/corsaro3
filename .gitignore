@@ -35,7 +35,8 @@ cors-flowtuple2avro
 
 # Auto-generated files
 corsaro-*.tar.gz
-flowtuple_avsc_json.inc
+tools/flowtuple_avsc_json.inc
+tools/flowtuple_compact_avsc_json.inc
 
 # doxygen files
 docs/doxygen/caida-html

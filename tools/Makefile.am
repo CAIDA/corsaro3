@@ -49,6 +49,10 @@ EXTRA_DIST += flowtuple.avsc.json
 BUILT_SOURCES += flowtuple_avsc_json.inc
 flowtuple_avsc_json.inc: flowtuple.avsc.json
 	xxd -i flowtuple.avsc.json flowtuple_avsc_json.inc
+EXTRA_DIST += flowtuple-compact.avsc.json
+BUILT_SOURCES += flowtuple_compact_avsc_json.inc
+flowtuple_compact_avsc_json.inc: flowtuple-compact.avsc.json
+	xxd -i flowtuple-compact.avsc.json flowtuple_compact_avsc_json.inc
 endif
 
 # not really a part of corsaro, but lets call corsaro the caida telescope

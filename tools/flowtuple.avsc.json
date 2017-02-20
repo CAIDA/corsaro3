@@ -4,16 +4,23 @@
     "namespace": "org.caida.corsaro",
     "doc": "A Corsaro FlowTuple record. All byte fields are in network byte order.",
     "fields": [
-        {"name": "time", "type": "bytes", "size": 4},
-        {"name": "class", "type": "bytes", "size": 1},
-        {"name": "src_ip", "type": "bytes", "size": 4},
-        {"name": "dst_ip", "type": "bytes", "size": 4},
-        {"name": "src_port", "type": "bytes", "size": 2},
-        {"name": "dst_port", "type": "bytes", "size": 2},
-        {"name": "protocol", "type": "bytes", "size": 1},
-        {"name": "ttl", "type": "bytes", "size": 1},
-        {"name": "tcp_flags", "type": "bytes", "size": 1},
-        {"name": "ip_len", "type": "bytes", "size": 2},
-        {"name": "packet_cnt", "type": "bytes", "size": 4}
+        {"name": "time", "type": "long"},
+        {
+            "name": "class",
+            "type": {
+                "type": "enum",
+                "name": "class",
+                "symbols": ["BACKSCATTER", "ICMQREQ", "OTHER"]
+            }
+        },
+        {"name": "src_ip", "type": "long"},
+        {"name": "dst_ip", "type": "long"},
+        {"name": "src_port", "type": "int"},
+        {"name": "dst_port", "type": "int"},
+        {"name": "protocol", "type": "int"},
+        {"name": "ttl", "type": "int"},
+        {"name": "tcp_flags", "type": "int"},
+        {"name": "ip_len", "type": "int"},
+        {"name": "packet_cnt", "type": "long"}
     ]
 }
