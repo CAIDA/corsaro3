@@ -141,6 +141,7 @@ AC_CHECK_LIB([trace], [trace_get_payload_length], ,[AC_MSG_ERROR(
 AC_SEARCH_LIBS([wandio_create], [wandio trace], ,[AC_MSG_ERROR(
 		 [libwandio required (included with libtrace since 3.0.15)]
 		 )])
+AM_CONDITIONAL([WITH_WANDIO], [test "x" == x])
 
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h inttypes.h limits.h math.h stdlib.h string.h \
@@ -331,12 +332,16 @@ AC_SUBST([CORSARO_MINOR_VERSION])
 AC_HEADER_ASSERT
 
 AC_CONFIG_FILES([Makefile libcorsaro/Makefile libcorsaro/plugins/Makefile
-			  libcorsaro/plugins/libp0f/Makefile
-			  libcorsaro/plugins/libanon/Makefile
-			  tools/Makefile common/Makefile
-			  common/libpatricia/Makefile
-			  common/libcsv/Makefile
-			  docs/Makefile
-			  docs/corsaro.doxygen
-			  docs/corsaro.caida.doxygen])
+			libcorsaro/plugins/libp0f/Makefile
+			libcorsaro/plugins/libanon/Makefile
+			tools/Makefile 
+			common/Makefile
+			common/libpatricia/Makefile
+			common/libinterval3/Makefile
+			common/libinterval3/rb_tree/Makefile
+			common/libcsv/Makefile
+                	common/libjsmn/Makefile
+			docs/Makefile
+			docs/corsaro.doxygen
+			docs/corsaro.caida.doxygen])
 AC_OUTPUT
