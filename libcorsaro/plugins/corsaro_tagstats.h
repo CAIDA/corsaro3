@@ -23,7 +23,6 @@
  *
  */
 
-
 #ifndef __CORSARO_TAGSTATS_H
 #define __CORSARO_TAGSTATS_H
 

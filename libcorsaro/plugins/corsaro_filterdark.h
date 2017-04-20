@@ -23,7 +23,6 @@
  *
  */
 
-
 #ifndef __CORSARO_FILTERDARK_H
 #define __CORSARO_FILTERDARK_H
 

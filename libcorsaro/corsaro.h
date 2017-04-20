@@ -94,97 +94,93 @@ typedef struct corsaro_flowtuple_class_end corsaro_flowtuple_class_end_t;
  * which is responsible for reading and writing these records.
  * It is probably safe to look in corsaro_<module>.[ch] to find them.
  */
-typedef enum corsaro_in_record_type
-  {
-    /** The null type used for wildcard matching */
-    CORSARO_IN_RECORD_TYPE_NULL                  = 0,
+typedef enum corsaro_in_record_type {
+  /** The null type used for wildcard matching */
+  CORSARO_IN_RECORD_TYPE_NULL = 0,
 
-    /** Internal type for directing read requests */
-    CORSARO_IN_RECORD_TYPE_INTERNAL_REDIRECT    = 1,
+  /** Internal type for directing read requests */
+  CORSARO_IN_RECORD_TYPE_INTERNAL_REDIRECT = 1,
 
-    /** The overall corsaro header (currently only in global) */
-    CORSARO_IN_RECORD_TYPE_IO_HEADER             = 2,
+  /** The overall corsaro header (currently only in global) */
+  CORSARO_IN_RECORD_TYPE_IO_HEADER = 2,
 
-    /** The overall corsaro trailer (currently only in global) */
-    CORSARO_IN_RECORD_TYPE_IO_TRAILER            = 3,
+  /** The overall corsaro trailer (currently only in global) */
+  CORSARO_IN_RECORD_TYPE_IO_TRAILER = 3,
 
-    /** The start of an interval */
-    CORSARO_IN_RECORD_TYPE_IO_INTERVAL_START     = 4,
+  /** The start of an interval */
+  CORSARO_IN_RECORD_TYPE_IO_INTERVAL_START = 4,
 
-    /** The end of an interval */
-    CORSARO_IN_RECORD_TYPE_IO_INTERVAL_END       = 5,
+  /** The end of an interval */
+  CORSARO_IN_RECORD_TYPE_IO_INTERVAL_END = 5,
 
-    /** The start of a plugin data section */
-    CORSARO_IN_RECORD_TYPE_IO_PLUGIN_START       = 6,
+  /** The start of a plugin data section */
+  CORSARO_IN_RECORD_TYPE_IO_PLUGIN_START = 6,
 
-    /** The end of a plugin data section */
-    CORSARO_IN_RECORD_TYPE_IO_PLUGIN_END         = 7,
+  /** The end of a plugin data section */
+  CORSARO_IN_RECORD_TYPE_IO_PLUGIN_END = 7,
 
-    /* plugin specific records */
+  /* plugin specific records */
 
-    /* corsaro_flowtuple has 20-29 */
+  /* corsaro_flowtuple has 20-29 */
 
-    /** The corsaro_flowtuple flowtuple classification type start record */
-    CORSARO_IN_RECORD_TYPE_FLOWTUPLE_CLASS_START  = 20,
+  /** The corsaro_flowtuple flowtuple classification type start record */
+  CORSARO_IN_RECORD_TYPE_FLOWTUPLE_CLASS_START = 20,
 
-    /** The corsaro_flowtuple flowtuple classification type end record */
-    CORSARO_IN_RECORD_TYPE_FLOWTUPLE_CLASS_END    = 21,
+  /** The corsaro_flowtuple flowtuple classification type end record */
+  CORSARO_IN_RECORD_TYPE_FLOWTUPLE_CLASS_END = 21,
 
-    /** The corsaro_flowtuple flowtuple record */
-    CORSARO_IN_RECORD_TYPE_FLOWTUPLE_FLOWTUPLE     = 22,
+  /** The corsaro_flowtuple flowtuple record */
+  CORSARO_IN_RECORD_TYPE_FLOWTUPLE_FLOWTUPLE = 22,
 
-    /* corsaro_dos has 30-39 */
+  /* corsaro_dos has 30-39 */
 
-    /** The corsaro_dos global header record */
-    CORSARO_IN_RECORD_TYPE_DOS_GLOBAL_HEADER     = 30,
+  /** The corsaro_dos global header record */
+  CORSARO_IN_RECORD_TYPE_DOS_GLOBAL_HEADER = 30,
 
-    /** The corsaro_dos header record */
-    CORSARO_IN_RECORD_TYPE_DOS_HEADER            = 31,
+  /** The corsaro_dos header record */
+  CORSARO_IN_RECORD_TYPE_DOS_HEADER = 31,
 
-    /** The corsaro_dos attack vector record */
-    CORSARO_IN_RECORD_TYPE_DOS_ATTACK_VECTOR     = 32,
+  /** The corsaro_dos attack vector record */
+  CORSARO_IN_RECORD_TYPE_DOS_ATTACK_VECTOR = 32,
 
-  } corsaro_in_record_type_t;
+} corsaro_in_record_type_t;
 
 /** Enum of supported file modes */
-typedef enum corsaro_file_mode
-  {
-    /** ASCII IO mode */
-    CORSARO_FILE_MODE_ASCII  = 0,
-    /** Binary IO mode */
-    CORSARO_FILE_MODE_BINARY = 1,
-    /** Pseudo IO mode which allows trace files to be written */
-    CORSARO_FILE_MODE_TRACE  = 2,
-    /** Unknown IO mode */
-    CORSARO_FILE_MODE_UNKNOWN = 3,
+typedef enum corsaro_file_mode {
+  /** ASCII IO mode */
+  CORSARO_FILE_MODE_ASCII = 0,
+  /** Binary IO mode */
+  CORSARO_FILE_MODE_BINARY = 1,
+  /** Pseudo IO mode which allows trace files to be written */
+  CORSARO_FILE_MODE_TRACE = 2,
+  /** Unknown IO mode */
+  CORSARO_FILE_MODE_UNKNOWN = 3,
 
-    /** Default IO mode */
-    CORSARO_FILE_MODE_DEFAULT = CORSARO_FILE_MODE_UNKNOWN
-  } corsaro_file_mode_t;
+  /** Default IO mode */
+  CORSARO_FILE_MODE_DEFAULT = CORSARO_FILE_MODE_UNKNOWN
+} corsaro_file_mode_t;
 
 /** Supported compression types (must be kept in sync with wandio) */
-typedef enum corsaro_file_compress
-  {
-    /** No compression */
-    CORSARO_FILE_COMPRESS_NONE = WANDIO_COMPRESS_NONE,
-    /** Zlib compression (gzip) */
-    CORSARO_FILE_COMPRESS_ZLIB = WANDIO_COMPRESS_ZLIB,
-    /** Bzip compression */
-    CORSARO_FILE_COMPRESS_BZ2  = WANDIO_COMPRESS_BZ2,
-    /** LZO Compression */
-    CORSARO_FILE_COMPRESS_LZO  = WANDIO_COMPRESS_LZO,
+typedef enum corsaro_file_compress {
+  /** No compression */
+  CORSARO_FILE_COMPRESS_NONE = WANDIO_COMPRESS_NONE,
+  /** Zlib compression (gzip) */
+  CORSARO_FILE_COMPRESS_ZLIB = WANDIO_COMPRESS_ZLIB,
+  /** Bzip compression */
+  CORSARO_FILE_COMPRESS_BZ2 = WANDIO_COMPRESS_BZ2,
+  /** LZO Compression */
+  CORSARO_FILE_COMPRESS_LZO = WANDIO_COMPRESS_LZO,
 
-    /** Default compression */
-    CORSARO_FILE_COMPRESS_DEFAULT = CORSARO_FILE_COMPRESS_ZLIB
-  } corsaro_file_compress_t;
+  /** Default compression */
+  CORSARO_FILE_COMPRESS_DEFAULT = CORSARO_FILE_COMPRESS_ZLIB
+} corsaro_file_compress_t;
 
 /** Settings for interval alignment */
-typedef enum corsaro_interval_align
-  {
-    CORSARO_INTERVAL_ALIGN_NO      = 0,
-    CORSARO_INTERVAL_ALIGN_YES     = 1,
-    CORSARO_INTERVAL_ALIGN_DEFAULT = CORSARO_INTERVAL_ALIGN_NO,
-  } corsaro_interval_align_t;
+typedef enum corsaro_interval_align {
+  CORSARO_INTERVAL_ALIGN_NO = 0,
+  CORSARO_INTERVAL_ALIGN_YES = 1,
+  CORSARO_INTERVAL_ALIGN_DEFAULT = CORSARO_INTERVAL_ALIGN_NO,
+} corsaro_interval_align_t;
 
 /** @} */
 
@@ -257,14 +253,15 @@ int corsaro_start_output(corsaro_t *corsaro);
  * The default is no interval alignment.
  */
 void corsaro_set_interval_alignment(corsaro_t *corsaro,
-				    corsaro_interval_align_t interval_align);
+                                    corsaro_interval_align_t interval_align);
 
 /** Accessor function to set the interval length
  *
  * @param corsaro      The corsaro object to set the interval for
  * @param interval     The interval (in seconds)
  *
- * If this function is not called, the default interval, CORSARO_INTERVAL_DEFAULT,
+ * If this function is not called, the default interval,
+ * CORSARO_INTERVAL_DEFAULT,
  * will be used.
  */
 void corsaro_set_interval(corsaro_t *corsaro, unsigned int interval);
@@ -278,8 +275,7 @@ void corsaro_set_interval(corsaro_t *corsaro, unsigned int interval);
  * If this is set to > 0, all output files will be rotated at the end of
  * n intervals. The default is 0 (no rotation).
  */
-void corsaro_set_output_rotation(corsaro_t *corsaro,
-				 int intervals);
+void corsaro_set_output_rotation(corsaro_t *corsaro, int intervals);
 
 /** Accessor function to set the rotation frequency of meta output files
  *
@@ -291,8 +287,7 @@ void corsaro_set_output_rotation(corsaro_t *corsaro,
  * rotated at the end of n intervals. The default is to follow the output
  * rotation interval specified by corsaro_set_output_rotation.
  */
-void corsaro_set_meta_output_rotation(corsaro_t *corsaro,
-				      int intervals);
+void corsaro_set_meta_output_rotation(corsaro_t *corsaro, int intervals);
 
 /** Convenience function to determine if the output files should be rotated
  *
@@ -301,7 +296,6 @@ void corsaro_set_meta_output_rotation(corsaro_t *corsaro,
  *         interval, 0 if not
  */
 int corsaro_is_rotate_interval(corsaro_t *corsaro);
-
 
 /** Accessor function to set the trace pointer
  *
@@ -358,7 +352,7 @@ void corsaro_disable_globalfile(corsaro_t *corsaro);
  * enabled using this function will be used
  */
 int corsaro_enable_plugin(corsaro_t *corsaro, const char *plugin_name,
-			  const char *plugin_args);
+                          const char *plugin_args);
 
 /** Return an array of the names of plugins which are compiled into corsaro
  *
@@ -449,9 +443,8 @@ int corsaro_per_packet(corsaro_t *corsaro, libtrace_packet_t *packet);
  * For each record, corsaro will simply hand it to each plugin which can process
  * it and updates internal state.
  */
-int corsaro_per_record(corsaro_t *corsaro,
-		       corsaro_in_record_type_t type,
-		       corsaro_in_record_t *record);
+int corsaro_per_record(corsaro_t *corsaro, corsaro_in_record_type_t type,
+                       corsaro_in_record_t *record);
 
 /** Write the final interval and free resources allocated by corsaro
  *
@@ -522,8 +515,8 @@ void corsaro_in_free_record(corsaro_in_record_t *record);
  * @return 0 on EOF, -1 on error, number of bytes read when successful
  */
 off_t corsaro_in_read_record(corsaro_in_t *corsaro,
-			     corsaro_in_record_type_t *record_type,
-			     corsaro_in_record_t *record);
+                             corsaro_in_record_type_t *record_type,
+                             corsaro_in_record_t *record);
 
 /** Get a pointer data in a record
  *

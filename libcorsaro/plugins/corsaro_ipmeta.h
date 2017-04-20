@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -23,7 +23,6 @@
  *
  */
 
-
 #ifndef __CORSARO_IPMETA_H
 #define __CORSARO_IPMETA_H
 
@@ -37,13 +36,15 @@ CORSARO_PLUGIN_GENERATE_PROTOS(corsaro_ipmeta)
 CORSARO_PLUGIN_GENERATE_FT_PROTO(corsaro_ipmeta)
 #endif
 
-ipmeta_record_t *corsaro_ipmeta_get_record(struct corsaro_packet_state *pkt_state,
-					   ipmeta_provider_id_t provider_id);
+ipmeta_record_t *
+corsaro_ipmeta_get_record(struct corsaro_packet_state *pkt_state,
+                          ipmeta_provider_id_t provider_id);
 
-ipmeta_record_t *corsaro_ipmeta_get_default_record(
-				     struct corsaro_packet_state *pkt_state);
+ipmeta_record_t *
+corsaro_ipmeta_get_default_record(struct corsaro_packet_state *pkt_state);
 
-ipmeta_provider_t *corsaro_ipmeta_get_provider(corsaro_t *corsaro,
-					       ipmeta_provider_id_t provider_id);
+ipmeta_provider_t *
+corsaro_ipmeta_get_provider(corsaro_t *corsaro,
+                            ipmeta_provider_id_t provider_id);
 
 #endif /* __CORSARO_IPMETA_H */

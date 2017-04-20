@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -50,8 +50,8 @@
  *
  * This function takes the same style of arguments that printf(3) does.
  */
-void corsaro_log_va(const char *func, corsaro_t *corsaro, 
-		  const char *format, va_list args);
+void corsaro_log_va(const char *func, corsaro_t *corsaro, const char *format,
+                    va_list args);
 
 /** Write a formatted string to the logfile associated with an corsaro object
  *
@@ -64,7 +64,8 @@ void corsaro_log_va(const char *func, corsaro_t *corsaro,
  */
 void corsaro_log(const char *func, corsaro_t *corsaro, const char *format, ...);
 
-/** Write a formatted string to the logfile associated with an corsaro input object
+/** Write a formatted string to the logfile associated with an corsaro input
+ * object
  *
  * @param func         The name of the calling function (__func__)
  * @param corsaro        The corsaro input object to log for
@@ -73,7 +74,8 @@ void corsaro_log(const char *func, corsaro_t *corsaro, const char *format, ...);
  *
  * This function takes the same style of arguments that printf(3) does.
  */
-void corsaro_log_in(const char *func, corsaro_in_t *corsaro, const char *format, ...);
+void corsaro_log_in(const char *func, corsaro_in_t *corsaro, const char *format,
+                    ...);
 
 /** Write a formatted string to a generic log file
  *
@@ -84,8 +86,8 @@ void corsaro_log_in(const char *func, corsaro_in_t *corsaro, const char *format,
  *
  * This function takes the same style of arguments that printf(3) does.
  */
-void corsaro_log_file(const char *func, corsaro_file_t *logfile, 
-		    const char *format, ...);
+void corsaro_log_file(const char *func, corsaro_file_t *logfile,
+                      const char *format, ...);
 
 /** Initialize the logging sub-system for an corsaro output object
  *

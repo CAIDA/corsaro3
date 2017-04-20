@@ -23,7 +23,6 @@
  *
  */
 
-
 #ifndef __CORSARO_FILTERBPF_H
 #define __CORSARO_FILTERBPF_H
 

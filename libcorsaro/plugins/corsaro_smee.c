@@ -23,8 +23,8 @@
  *
  */
 
-#include "config.h"
 #include "corsaro_int.h"
+#include "config.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -41,8 +41,8 @@
 
 #include "utils.h"
 
-#include "corsaro_io.h"
 #include "corsaro_file.h"
+#include "corsaro_io.h"
 #include "corsaro_log.h"
 #include "corsaro_plugin.h"
 
@@ -63,25 +63,25 @@
 #define PLUGIN_NAME "smee"
 
 /** The name for the stat file */
-#define CORSARO_SMEE_STATFILE PLUGIN_NAME"-stat"
+#define CORSARO_SMEE_STATFILE PLUGIN_NAME "-stat"
 /** The name for the sum file */
-#define CORSARO_SMEE_SUMFILE PLUGIN_NAME"-sum"
+#define CORSARO_SMEE_SUMFILE PLUGIN_NAME "-sum"
 /** The name for the src file */
-#define CORSARO_SMEE_SRCFILE PLUGIN_NAME"-sources"
+#define CORSARO_SMEE_SRCFILE PLUGIN_NAME "-sources"
 
 /** Default max lifetime for source to stay in hashtable */
-#define CORSARO_SMEE_MX_LIFETIME        3600
+#define CORSARO_SMEE_MX_LIFETIME 3600
 /** Default memory size allocated for source hash table (in KB) */
-#define CORSARO_SMEE_MX_SOURCES         4000000
+#define CORSARO_SMEE_MX_SOURCES 4000000
 /** Default interval in seconds to write summary files */
-#define CORSARO_SMEE_TIME_REC_INTERVAL  3600
+#define CORSARO_SMEE_TIME_REC_INTERVAL 3600
 
 /** Common plugin information across all instances */
 static corsaro_plugin_t corsaro_smee_plugin = {
-  PLUGIN_NAME,                                 /* name */
-  CORSARO_PLUGIN_ID_SMEE,                         /* id */
-  CORSARO_SMEE_MAGIC,                             /* magic */
-  CORSARO_PLUGIN_GENERATE_PTRS(corsaro_smee),       /* func ptrs */
+  PLUGIN_NAME,                                /* name */
+  CORSARO_PLUGIN_ID_SMEE,                     /* id */
+  CORSARO_SMEE_MAGIC,                         /* magic */
+  CORSARO_PLUGIN_GENERATE_PTRS(corsaro_smee), /* func ptrs */
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
 
@@ -115,11 +115,10 @@ struct corsaro_smee_state_t {
 };
 
 /** Extends the generic plugin state convenience macro in corsaro_plugin.h */
-#define STATE(corsaro)						\
+#define STATE(corsaro)                                                         \
   (CORSARO_PLUGIN_STATE(corsaro, smee, CORSARO_PLUGIN_ID_SMEE))
 /** Extends the generic plugin plugin convenience macro in corsaro_plugin.h */
-#define PLUGIN(corsaro)						\
-  (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_SMEE))
+#define PLUGIN(corsaro) (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_SMEE))
 
 /** Parse a local address prefix */
 static int parse_local_address(corsaro_t *corsaro, char *address_str)
@@ -130,43 +129,38 @@ static int parse_local_address(corsaro_t *corsaro, char *address_str)
   char *tok = NULL;
 
   /* re-alloc the prefix list to hold it */
-  if((state->local_addresses =
-      realloc(state->local_addresses,
-	      sizeof(struct ip_address) * (state->local_addresses_cnt+1))
-      ) == NULL)
-    {
-      fprintf(stderr, "ERROR: could not re-alloc address list\n");
-      return -1;
-    }
+  if ((state->local_addresses = realloc(state->local_addresses,
+                                        sizeof(struct ip_address) *
+                                          (state->local_addresses_cnt + 1))) ==
+      NULL) {
+    fprintf(stderr, "ERROR: could not re-alloc address list\n");
+    return -1;
+  }
 
-la = &(state->local_addresses[state->local_addresses_cnt++]);
+  la = &(state->local_addresses[state->local_addresses_cnt++]);
   la->ver = 4;
 
-  if((tok = strsep(&address_str, "/")) == NULL)
-    {
-      fprintf(stderr, "ERROR: Invalid local address (%s)\n", address_str);
-      return -1;
-    }
+  if ((tok = strsep(&address_str, "/")) == NULL) {
+    fprintf(stderr, "ERROR: Invalid local address (%s)\n", address_str);
+    return -1;
+  }
 
   /* tok should be the address */
-  if((la->a.v4 = inet_addr(tok)) == -1)
-    {
-      /* this sanity check will cause problems the day someone needs to use
-	 255.255.255.255, but for now it is useful. */
-      fprintf(stderr, "ERROR: Invalid local address (%s)\n", tok);
-      return -1;
-    }
+  if ((la->a.v4 = inet_addr(tok)) == -1) {
+    /* this sanity check will cause problems the day someone needs to use
+       255.255.255.255, but for now it is useful. */
+    fprintf(stderr, "ERROR: Invalid local address (%s)\n", tok);
+    return -1;
+  }
 
   /* address_str should be the prefix length */
-  if((la->len = atoi(address_str)) > 32)
-    {
-      fprintf(stderr, "ERROR: Invalid local address mask (%s)\n", address_str);
-      return -1;
-    }
-  if(la->len == 0)
-    {
-      fprintf(stderr, "WARNING: Local address mask of 0 (%s)\n", address_str);
-    }
+  if ((la->len = atoi(address_str)) > 32) {
+    fprintf(stderr, "ERROR: Invalid local address mask (%s)\n", address_str);
+    return -1;
+  }
+  if (la->len == 0) {
+    fprintf(stderr, "WARNING: Local address mask of 0 (%s)\n", address_str);
+  }
 
   return 0;
 }
@@ -175,25 +169,23 @@ la = &(state->local_addresses[state->local_addresses_cnt++]);
 static void usage(corsaro_t *corsaro)
 {
   fprintf(stderr,
-	  "plugin usage: %s [-s] [-i interval] [-l meter_loc] [-L max_src_life] -a prefix\n"
-	  "       -a            local prefix "
-	  "(-a can be specified multiple times)\n"
-	  "       -i            interval between writing summary files (secs) "
-	  "(default: %d)\n"
-	  "       -l            meter location (default: %s)\n"
+          "plugin usage: %s [-s] [-i interval] [-l meter_loc] [-L "
+          "max_src_life] -a prefix\n"
+          "       -a            local prefix "
+          "(-a can be specified multiple times)\n"
+          "       -i            interval between writing summary files (secs) "
+          "(default: %d)\n"
+          "       -l            meter location (default: %s)\n"
 
-	  "       -L            max lifetime for source to stay in hashtable "
-	  "(secs) (default: %d)\n"
-	  "       -m            memory size allocated for source hash table "
-	  "(in KB) (default: %d)\n"
-	  "       -s            write the source tables to a file "
-	  "(disables summary tables)\n",
-	  PLUGIN(corsaro)->argv[0],
-	  CORSARO_SMEE_TIME_REC_INTERVAL,
-	  corsaro_get_monitorname(corsaro),
-	  CORSARO_SMEE_MX_LIFETIME,
-	  CORSARO_SMEE_MX_SOURCES
-	  );
+          "       -L            max lifetime for source to stay in hashtable "
+          "(secs) (default: %d)\n"
+          "       -m            memory size allocated for source hash table "
+          "(in KB) (default: %d)\n"
+          "       -s            write the source tables to a file "
+          "(disables summary tables)\n",
+          PLUGIN(corsaro)->argv[0], CORSARO_SMEE_TIME_REC_INTERVAL,
+          corsaro_get_monitorname(corsaro), CORSARO_SMEE_MX_LIFETIME,
+          CORSARO_SMEE_MX_SOURCES);
 }
 
 /** Parse the arguments given to the plugin
@@ -210,83 +202,78 @@ static int parse_args(corsaro_t *corsaro)
   /* NB: remember to reset optind to 1 before using getopt! */
   optind = 1;
 
-  while((opt = getopt(plugin->argc, plugin->argv, ":a:i:l:L:m:s?")) >= 0)
-    {
-      switch(opt)
-	{
-	case 'a':
-	  /* add this prefix to the list */
-	  if(parse_local_address(corsaro, optarg) != 0)
-	    {
-	      usage(corsaro);
-	      return -1;
-	    }
-	  break;
+  while ((opt = getopt(plugin->argc, plugin->argv, ":a:i:l:L:m:s?")) >= 0) {
+    switch (opt) {
+    case 'a':
+      /* add this prefix to the list */
+      if (parse_local_address(corsaro, optarg) != 0) {
+        usage(corsaro);
+        return -1;
+      }
+      break;
 
-	case 'i':
-	  state->time_rec_interval = atoi(optarg);
-	  break;
+    case 'i':
+      state->time_rec_interval = atoi(optarg);
+      break;
 
-	case 'l':
-	  state->meter_location = strdup(optarg);
-	  break;
+    case 'l':
+      state->meter_location = strdup(optarg);
+      break;
 
-	case 'L':
-	  state->max_lifetime = atoi(optarg);
-	  break;
+    case 'L':
+      state->max_lifetime = atoi(optarg);
+      break;
 
-	case 'm':
-	  state->max_sources = atoi(optarg);
-	  break;
+    case 'm':
+      state->max_sources = atoi(optarg);
+      break;
 
-	case 's':
-	  state->save_distributions = 1;
-	  break;
+    case 's':
+      state->save_distributions = 1;
+      break;
 
-	case '?':
-	case ':':
-	default:
-	  usage(corsaro);
-	  return -1;
-	}
-    }
-
-  if(state->local_addresses_cnt == 0)
-    {
-      fprintf(stderr,
-	      "ERROR: At least one local prefix must be specified using -a\n");
+    case '?':
+    case ':':
+    default:
       usage(corsaro);
       return -1;
     }
+  }
+
+  if (state->local_addresses_cnt == 0) {
+    fprintf(stderr,
+            "ERROR: At least one local prefix must be specified using -a\n");
+    usage(corsaro);
+    return -1;
+  }
 
   return 0;
 }
 
 /** Called by smee to log messages */
 static void smee_log_callback(void *user_data, int priority, int die,
-			      const char *fmt, ...)
+                              const char *fmt, ...)
 {
   va_list ap;
   va_start(ap, fmt);
-  corsaro_log_va("libsmee", (corsaro_t*)user_data, fmt, ap);
+  corsaro_log_va("libsmee", (corsaro_t *)user_data, fmt, ap);
   va_end(ap);
 
-  if(die == 1)
-    {
-      abort();
-    }
+  if (die == 1) {
+    abort();
+  }
 }
 
 /** Helper macro for IO callbacks to write to a Corsaro file */
-#define CORSARO_SMEE_FPRINTF(outfile)			\
-  va_list ap;						\
-  corsaro_t *corsaro = (corsaro_t*)user_data;		\
-  va_start(ap, fmt);					\
-  corsaro_file_vprintf(corsaro, (outfile), fmt, ap);	\
-  /* smee expects a newline to be written.		\
-     this is a little hacky, but... */			\
-  corsaro_file_printf(corsaro, (outfile), "\n");	\
-  va_end(ap);						\
+#define CORSARO_SMEE_FPRINTF(outfile)                                          \
+  va_list ap;                                                                  \
+  corsaro_t *corsaro = (corsaro_t *)user_data;                                 \
+  va_start(ap, fmt);                                                           \
+  corsaro_file_vprintf(corsaro, (outfile), fmt, ap);                           \
+  /* smee expects a newline to be written.                                     \
+     this is a little hacky, but... */                                         \
+  corsaro_file_printf(corsaro, (outfile), "\n");                               \
+  va_end(ap);                                                                  \
   return 0;
 
 /** Called by smee to write stats lines */
@@ -310,7 +297,7 @@ static int smee_sources_callback(void *user_data, const char *fmt, ...)
 /** Called by smee to determine the number of dropped packets */
 static uint64_t smee_pkt_drops(void *user_data)
 {
-  return corsaro_get_dropped_packets((corsaro_t*)user_data);
+  return corsaro_get_dropped_packets((corsaro_t *)user_data);
   return 0;
 }
 
@@ -344,12 +331,10 @@ int corsaro_smee_init_output(corsaro_t *corsaro)
 
   assert(plugin != NULL);
 
-  if((state = malloc_zero(sizeof(struct corsaro_smee_state_t))) == NULL)
-    {
-      corsaro_log(__func__, corsaro,
-		"could not malloc corsaro_smee_state_t");
-      goto err;
-    }
+  if ((state = malloc_zero(sizeof(struct corsaro_smee_state_t))) == NULL) {
+    corsaro_log(__func__, corsaro, "could not malloc corsaro_smee_state_t");
+    goto err;
+  }
   corsaro_plugin_register_state(corsaro->plugin_manager, plugin, state);
 
   /* set some sane default values (for ucsd-nt anyway) */
@@ -360,10 +345,9 @@ int corsaro_smee_init_output(corsaro_t *corsaro)
   state->save_distributions = 0;
 
   /* parse the arguments */
-  if(parse_args(corsaro) != 0)
-    {
-      return -1;
-    }
+  if (parse_args(corsaro) != 0) {
+    return -1;
+  }
 
   /* files opened at first interval */
 
@@ -405,23 +389,22 @@ int corsaro_smee_init_output(corsaro_t *corsaro)
      this is the case and not open the sum file. */
 
   iat_init(corsaro_get_traceuri(corsaro), /* traceuri */
-	   state->meter_location, /* meterloc */
-	   state->max_lifetime, /* mx_lifetime */
-	   state->max_sources, /*c_mx_sources */
-	   state->time_rec_interval, /* c_time_rec_interval */
-	   state->local_addresses,
-	   state->local_addresses_cnt,
-	   corsaro, /* c_user_data */
-	   smee_log_callback, /* c_log_msg */
-	   smee_stat_callback, /* c_stat_printf */
-	   (state->save_distributions == 0 ? smee_sum_callback : NULL),
-	   (state->save_distributions == 0 ? NULL : smee_sources_callback),
-	   smee_pkt_drops /* c_pkt_drops */
-	   );
+           state->meter_location,         /* meterloc */
+           state->max_lifetime,           /* mx_lifetime */
+           state->max_sources,            /*c_mx_sources */
+           state->time_rec_interval,      /* c_time_rec_interval */
+           state->local_addresses, state->local_addresses_cnt,
+           corsaro,            /* c_user_data */
+           smee_log_callback,  /* c_log_msg */
+           smee_stat_callback, /* c_stat_printf */
+           (state->save_distributions == 0 ? smee_sum_callback : NULL),
+           (state->save_distributions == 0 ? NULL : smee_sources_callback),
+           smee_pkt_drops /* c_pkt_drops */
+           );
 
   return 0;
 
- err:
+err:
   corsaro_smee_close_output(corsaro);
   return -1;
 }
@@ -444,128 +427,111 @@ int corsaro_smee_close_output(corsaro_t *corsaro)
   struct corsaro_smee_state_t *state = STATE(corsaro);
 
   /* smee is not smart enough to ignore this if it hasn't been init'd yet */
-  if(state->smee_started != 0)
-    {
-      iat_process_packet(NULL, SM_DUMMY);
-      state->smee_started = 0;
+  if (state->smee_started != 0) {
+    iat_process_packet(NULL, SM_DUMMY);
+    state->smee_started = 0;
+  }
+
+  if (state != NULL) {
+    if (state->statfile != NULL) {
+      corsaro_file_close(corsaro, state->statfile);
+      state->statfile = NULL;
+    }
+    if (state->sumfile != NULL) {
+      corsaro_file_close(corsaro, state->sumfile);
+      state->sumfile = NULL;
+    }
+    if (state->srcfile != NULL) {
+      corsaro_file_close(corsaro, state->srcfile);
+      state->srcfile = NULL;
     }
 
-  if(state != NULL)
-    {
-      if(state->statfile != NULL)
-	{
-	  corsaro_file_close(corsaro, state->statfile);
-	  state->statfile = NULL;
-	}
-      if(state->sumfile != NULL)
-	{
-	  corsaro_file_close(corsaro, state->sumfile);
-	  state->sumfile = NULL;
-	}
-      if(state->srcfile != NULL)
-	{
-	  corsaro_file_close(corsaro, state->srcfile);
-	  state->srcfile = NULL;
-	}
-
-      if(state->local_addresses_cnt > 0 && state->local_addresses != NULL)
-	{
-	  free(state->local_addresses);
-	  state->local_addresses = NULL;
-	  state->local_addresses_cnt = 0;
-	}
-
-      corsaro_plugin_free_state(corsaro->plugin_manager, PLUGIN(corsaro));
+    if (state->local_addresses_cnt > 0 && state->local_addresses != NULL) {
+      free(state->local_addresses);
+      state->local_addresses = NULL;
+      state->local_addresses_cnt = 0;
     }
+
+    corsaro_plugin_free_state(corsaro->plugin_manager, PLUGIN(corsaro));
+  }
 
   return 0;
 }
 
 /** Implements the read_record function of the plugin API */
 off_t corsaro_smee_read_record(struct corsaro_in *corsaro,
-			  corsaro_in_record_type_t *record_type,
-			  corsaro_in_record_t *record)
+                               corsaro_in_record_type_t *record_type,
+                               corsaro_in_record_t *record)
 {
   corsaro_log_in(__func__, corsaro, "not yet implemented");
   return -1;
 }
 
 /** Implements the read_global_data_record function of the plugin API */
-off_t corsaro_smee_read_global_data_record(struct corsaro_in *corsaro,
-			      enum corsaro_in_record_type *record_type,
-			      struct corsaro_in_record *record)
+off_t corsaro_smee_read_global_data_record(
+  struct corsaro_in *corsaro, enum corsaro_in_record_type *record_type,
+  struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
   return -1;
 }
 
 /** Implements the start_interval function of the plugin API */
-int corsaro_smee_start_interval(corsaro_t *corsaro, corsaro_interval_t *int_start)
+int corsaro_smee_start_interval(corsaro_t *corsaro,
+                                corsaro_interval_t *int_start)
 {
   struct corsaro_smee_state_t *state = STATE(corsaro);
 
-  if(state->rotate == 1)
-    {
-      if(state->statfile != NULL)
-	{
-	  corsaro_file_close(corsaro, state->statfile);
-	  state->statfile = NULL;
-	}
-      if(state->sumfile != NULL)
-	{
-	  corsaro_file_close(corsaro, state->sumfile);
-	  state->sumfile = NULL;
-	}
-      if(state->srcfile != NULL)
-	{
-	  corsaro_file_close(corsaro, state->srcfile);
-	  state->srcfile = NULL;
-	}
-
-      state->rotate = 0;
+  if (state->rotate == 1) {
+    if (state->statfile != NULL) {
+      corsaro_file_close(corsaro, state->statfile);
+      state->statfile = NULL;
     }
+    if (state->sumfile != NULL) {
+      corsaro_file_close(corsaro, state->sumfile);
+      state->sumfile = NULL;
+    }
+    if (state->srcfile != NULL) {
+      corsaro_file_close(corsaro, state->srcfile);
+      state->srcfile = NULL;
+    }
+
+    state->rotate = 0;
+  }
 
   /* open the stats output file */
-  if(state->statfile == NULL &&
-     (state->statfile = corsaro_io_prepare_file(corsaro, CORSARO_SMEE_STATFILE,
-						int_start))
-     == NULL)
-    {
-      corsaro_log(__func__, corsaro, "could not open %s output file",
-		CORSARO_SMEE_STATFILE);
-      goto err;
-    }
+  if (state->statfile == NULL &&
+      (state->statfile = corsaro_io_prepare_file(corsaro, CORSARO_SMEE_STATFILE,
+                                                 int_start)) == NULL) {
+    corsaro_log(__func__, corsaro, "could not open %s output file",
+                CORSARO_SMEE_STATFILE);
+    goto err;
+  }
 
   /* open the sum output file (only if save_distributions is disabled) */
-  if(state->save_distributions == 0 &&
-     state->sumfile == NULL &&
-     (state->sumfile = corsaro_io_prepare_file(corsaro, CORSARO_SMEE_SUMFILE,
-					       int_start))
-     == NULL)
-    {
-      corsaro_log(__func__, corsaro, "could not open %s output file",
-		CORSARO_SMEE_SUMFILE);
-      goto err;
-    }
+  if (state->save_distributions == 0 && state->sumfile == NULL &&
+      (state->sumfile = corsaro_io_prepare_file(corsaro, CORSARO_SMEE_SUMFILE,
+                                                int_start)) == NULL) {
+    corsaro_log(__func__, corsaro, "could not open %s output file",
+                CORSARO_SMEE_SUMFILE);
+    goto err;
+  }
 
   /* open the srcs output file */
-  if(state->save_distributions != 0 &&
-     state->srcfile == NULL &&
-     (state->srcfile = corsaro_io_prepare_file(corsaro, CORSARO_SMEE_SRCFILE,
-					       int_start))
-     == NULL)
-    {
-      corsaro_log(__func__, corsaro, "could not open %s output file",
-		CORSARO_SMEE_SRCFILE);
-      goto err;
-    }
+  if (state->save_distributions != 0 && state->srcfile == NULL &&
+      (state->srcfile = corsaro_io_prepare_file(corsaro, CORSARO_SMEE_SRCFILE,
+                                                int_start)) == NULL) {
+    corsaro_log(__func__, corsaro, "could not open %s output file",
+                CORSARO_SMEE_SRCFILE);
+    goto err;
+  }
 
   /* now smee is fully started and can be used */
   state->smee_started = 1;
 
   return 0;
 
- err:
+err:
   corsaro_smee_close_output(corsaro);
   return -1;
 }
@@ -582,17 +548,15 @@ int corsaro_smee_end_interval(corsaro_t *corsaro, corsaro_interval_t *int_end)
 
      go look in _start_interval to see where we rotate the files
   */
-  if(corsaro_is_rotate_interval(corsaro) == 1)
-    {
-      STATE(corsaro)->rotate = 1;
-    }
+  if (corsaro_is_rotate_interval(corsaro) == 1) {
+    STATE(corsaro)->rotate = 1;
+  }
 
   return 0;
 }
 
 /** Implements the process_packet function of the plugin API */
-int corsaro_smee_process_packet(corsaro_t *corsaro,
-			     corsaro_packet_t *packet)
+int corsaro_smee_process_packet(corsaro_t *corsaro, corsaro_packet_t *packet)
 {
   libtrace_packet_t *ltpacket = LT_PKT(packet);
   int rc;
@@ -602,10 +566,9 @@ int corsaro_smee_process_packet(corsaro_t *corsaro,
   /* pass the packet on to smee */
   rc = iat_process_packet(ltpacket, SM_PACKET);
 
-  if(rc != SM_OK && rc != SM_RECORD_INTERVAL)
-    {
-      corsaro_log(__func__, corsaro, "iat_process_packet returned %d", rc);
-      return -1;
-    }
+  if (rc != SM_OK && rc != SM_RECORD_INTERVAL) {
+    corsaro_log(__func__, corsaro, "iat_process_packet returned %d", rc);
+    return -1;
+  }
   return 0;
 }

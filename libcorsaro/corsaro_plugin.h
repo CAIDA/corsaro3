@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -41,36 +41,37 @@
  *
  * @todo split this into corsaro-out and corsaro-in macros
  */
-#define CORSARO_PLUGIN_GENERATE_PROTOS(plugin)				\
-  corsaro_plugin_t * plugin##_alloc();					\
-  int plugin##_probe_filename(const char *fname);			\
-  int plugin##_probe_magic(struct corsaro_in * corsaro, corsaro_file_in_t *file); \
-  int plugin##_init_input(struct corsaro_in *corsaro);			\
-  int plugin##_init_output(struct corsaro *corsaro);			\
-  int plugin##_close_input(struct corsaro_in *corsaro);			\
-  int plugin##_close_output(struct corsaro *corsaro);			\
-  off_t plugin##_read_record(struct corsaro_in *corsaro,			\
-			   enum corsaro_in_record_type *record_type,	\
-			   struct corsaro_in_record *record);		\
-  off_t plugin##_read_global_data_record(struct corsaro_in *corsaro,	\
-			   enum corsaro_in_record_type *record_type,	\
-			   struct corsaro_in_record *record);		\
-  int plugin##_start_interval(struct corsaro *corsaro,			\
-			      struct corsaro_interval *int_start);	\
-  int plugin##_end_interval(struct corsaro *corsaro,			\
-			    struct corsaro_interval *int_end);		\
-  int plugin##_process_packet(struct corsaro *corsaro,			\
-			      struct corsaro_packet *packet);
+#define CORSARO_PLUGIN_GENERATE_PROTOS(plugin)                                 \
+  corsaro_plugin_t *plugin##_alloc();                                          \
+  int plugin##_probe_filename(const char *fname);                              \
+  int plugin##_probe_magic(struct corsaro_in *corsaro,                         \
+                           corsaro_file_in_t *file);                           \
+  int plugin##_init_input(struct corsaro_in *corsaro);                         \
+  int plugin##_init_output(struct corsaro *corsaro);                           \
+  int plugin##_close_input(struct corsaro_in *corsaro);                        \
+  int plugin##_close_output(struct corsaro *corsaro);                          \
+  off_t plugin##_read_record(struct corsaro_in *corsaro,                       \
+                             enum corsaro_in_record_type *record_type,         \
+                             struct corsaro_in_record *record);                \
+  off_t plugin##_read_global_data_record(                                      \
+    struct corsaro_in *corsaro, enum corsaro_in_record_type *record_type,      \
+    struct corsaro_in_record *record);                                         \
+  int plugin##_start_interval(struct corsaro *corsaro,                         \
+                              struct corsaro_interval *int_start);             \
+  int plugin##_end_interval(struct corsaro *corsaro,                           \
+                            struct corsaro_interval *int_end);                 \
+  int plugin##_process_packet(struct corsaro *corsaro,                         \
+                              struct corsaro_packet *packet);
 
 #ifdef WITH_PLUGIN_SIXT
-#define CORSARO_PLUGIN_GENERATE_FT_PROTO(plugin)			\
-  int plugin##_process_flowtuple(struct corsaro *corsaro,		\
-				 corsaro_flowtuple_t *flowtuple,	\
-				 struct corsaro_packet_state *state);	\
-  int plugin##_process_flowtuple_class_start(struct corsaro *corsaro,	\
-					     corsaro_flowtuple_class_start_t *class); \
-  int plugin##_process_flowtuple_class_end(struct corsaro *corsaro,	\
-					   corsaro_flowtuple_class_end_t *class);
+#define CORSARO_PLUGIN_GENERATE_FT_PROTO(plugin)                               \
+  int plugin##_process_flowtuple(struct corsaro *corsaro,                      \
+                                 corsaro_flowtuple_t *flowtuple,               \
+                                 struct corsaro_packet_state *state);          \
+  int plugin##_process_flowtuple_class_start(                                  \
+    struct corsaro *corsaro, corsaro_flowtuple_class_start_t *class);          \
+  int plugin##_process_flowtuple_class_end(                                    \
+    struct corsaro *corsaro, corsaro_flowtuple_class_end_t *class);
 #endif
 
 /** Convenience macro that defines all the function pointers for the corsaro
@@ -82,80 +83,56 @@
  * @todo split this into corsaro-out and corsaro-in macros
  */
 #ifdef WITH_PLUGIN_SIXT
-#define CORSARO_PLUGIN_GENERATE_PTRS(plugin)		\
-  plugin##_probe_filename,				\
-    plugin##_probe_magic,				\
-    plugin##_init_input,				\
-    plugin##_init_output,				\
-    plugin##_close_input,				\
-    plugin##_close_output,				\
-    plugin##_read_record,				\
-    plugin##_read_global_data_record,			\
-    plugin##_start_interval,				\
-    plugin##_end_interval,				\
-    plugin##_process_packet,			        \
-    NULL,						\
-    NULL,						\
-    NULL
+#define CORSARO_PLUGIN_GENERATE_PTRS(plugin)                                   \
+  plugin##_probe_filename, plugin##_probe_magic, plugin##_init_input,          \
+    plugin##_init_output, plugin##_close_input, plugin##_close_output,         \
+    plugin##_read_record, plugin##_read_global_data_record,                    \
+    plugin##_start_interval, plugin##_end_interval, plugin##_process_packet,   \
+    NULL, NULL, NULL
 
-#define CORSARO_PLUGIN_GENERATE_PTRS_FT(plugin)	\
-  plugin##_probe_filename,				\
-    plugin##_probe_magic,				\
-    plugin##_init_input,				\
-    plugin##_init_output,				\
-    plugin##_close_input,				\
-    plugin##_close_output,				\
-    plugin##_read_record,				\
-    plugin##_read_global_data_record,			\
-    plugin##_start_interval,				\
-    plugin##_end_interval,				\
-    plugin##_process_packet,			        \
-    plugin##_process_flowtuple,				\
-    plugin##_process_flowtuple_class_start,		\
+#define CORSARO_PLUGIN_GENERATE_PTRS_FT(plugin)                                \
+  plugin##_probe_filename, plugin##_probe_magic, plugin##_init_input,          \
+    plugin##_init_output, plugin##_close_input, plugin##_close_output,         \
+    plugin##_read_record, plugin##_read_global_data_record,                    \
+    plugin##_start_interval, plugin##_end_interval, plugin##_process_packet,   \
+    plugin##_process_flowtuple, plugin##_process_flowtuple_class_start,        \
     plugin##_process_flowtuple_class_end
 #else
-#define CORSARO_PLUGIN_GENERATE_PTRS(plugin)		\
-  plugin##_probe_filename,				\
-    plugin##_probe_magic,				\
-    plugin##_init_input,				\
-    plugin##_init_output,				\
-    plugin##_close_input,				\
-    plugin##_close_output,				\
-    plugin##_read_record,				\
-    plugin##_read_global_data_record,			\
-    plugin##_start_interval,				\
-    plugin##_end_interval,				\
-    plugin##_process_packet			        
+#define CORSARO_PLUGIN_GENERATE_PTRS(plugin)                                   \
+  plugin##_probe_filename, plugin##_probe_magic, plugin##_init_input,          \
+    plugin##_init_output, plugin##_close_input, plugin##_close_output,         \
+    plugin##_read_record, plugin##_read_global_data_record,                    \
+    plugin##_start_interval, plugin##_end_interval, plugin##_process_packet
 #endif
 
 /** Convenience macro that defines all the 'remaining' blank fields in a corsaro
- *  plugin object 
+ *  plugin object
  *
  *  This becomes useful if we add more fields to the end of the plugin
  *  structure, because each plugin does not need to be updated in order to
  *  correctly 'zero' these fields.
  */
-#define CORSARO_PLUGIN_GENERATE_TAIL		\
-  NULL,				/* next */	\
-    0,				/* argc */	\
-    NULL                        /* argv */
+#define CORSARO_PLUGIN_GENERATE_TAIL                                           \
+  NULL,  /* next */                                                            \
+    0,   /* argc */                                                            \
+    NULL /* argv */
 
-/** Convenience macro to cast the state pointer in the plugin 
+/** Convenience macro to cast the state pointer in the plugin
  *
  * Plugins should use extend this macro to provide access to their state
  */
-#define CORSARO_PLUGIN_STATE(corsaro, type, id)			\
-  ((struct corsaro_##type##_state_t*)				\
-   ((corsaro)->plugin_manager->plugins_state[(id)-1]))
+#define CORSARO_PLUGIN_STATE(corsaro, type, id)                                \
+  ((struct corsaro_##type##_state_t                                            \
+      *)((corsaro)->plugin_manager->plugins_state[(id)-1]))
 
 /** Convenience macro to get this plugin from corsaro
  *
  * Plugins should use extend this macro to provide access to themself
  */
-#define CORSARO_PLUGIN_PLUGIN(corsaro, id)						\
+#define CORSARO_PLUGIN_PLUGIN(corsaro, id)                                     \
   ((corsaro)->plugin_manager->plugins[(id)-1])
 
-/** A unique identifier for a plugin, used when writing binary data 
+/** A unique identifier for a plugin, used when writing binary data
  *
  * @note this identifier does not affect the order in which plugins are
  *       passed packets. Plugin precedence is determined either by the
@@ -163,63 +140,61 @@
  *       order of the plugins that have been explicitly enabled using
  *       \ref corsaro_enable_plugin
  */
-typedef enum corsaro_plugin_id
-{
-  /** 
+typedef enum corsaro_plugin_id {
+  /**
    * Pass-through PCAP plugin
-   * 
+   *
    * Allows Corsaro to be used to capture PCAP files from a live interface.
-   * This should always be the highest priority plugin 
+   * This should always be the highest priority plugin
    */
-  CORSARO_PLUGIN_ID_PCAP             = 1,
-  
+  CORSARO_PLUGIN_ID_PCAP = 1,
+
   /** IP address anonymization plugin */
-  CORSARO_PLUGIN_ID_ANON             = 2,
+  CORSARO_PLUGIN_ID_ANON = 2,
 
   /** libipmeta lookup plugin */
-  CORSARO_PLUGIN_ID_IPMETA           = 3,
+  CORSARO_PLUGIN_ID_IPMETA = 3,
 
   /** P0F Passive OS Fingerprint plugin */
-  CORSARO_PLUGIN_ID_P0F              = 5,
+  CORSARO_PLUGIN_ID_P0F = 5,
 
   /** FilterGeo plugin */
-  CORSARO_PLUGIN_ID_FILTERGEO        = 6,
+  CORSARO_PLUGIN_ID_FILTERGEO = 6,
 
   /** FilterPfx plugin */
-  CORSARO_PLUGIN_ID_FILTERPFX        = 7,
+  CORSARO_PLUGIN_ID_FILTERPFX = 7,
 
   /** FilterBPF plugin */
-  CORSARO_PLUGIN_ID_FILTERBPF        = 8,
+  CORSARO_PLUGIN_ID_FILTERBPF = 8,
 
   /** FilterDark plugin */
-  CORSARO_PLUGIN_ID_FILTERDARK       = 9,
+  CORSARO_PLUGIN_ID_FILTERDARK = 9,
 
   /** FlowTuple plugin */
-  CORSARO_PLUGIN_ID_FLOWTUPLE        = 20,
+  CORSARO_PLUGIN_ID_FLOWTUPLE = 20,
 
   /** RS DoS plugin */
-  CORSARO_PLUGIN_ID_DOS              = 30,
+  CORSARO_PLUGIN_ID_DOS = 30,
 
   /** Confickerscan plugin */
-  CORSARO_PLUGIN_ID_CONFICKERSCAN    = 40,
+  CORSARO_PLUGIN_ID_CONFICKERSCAN = 40,
 
   /** Smee plugin */
-  CORSARO_PLUGIN_ID_SMEE             = 80,
+  CORSARO_PLUGIN_ID_SMEE = 80,
 
   /** Tag stats plugin */
-  CORSARO_PLUGIN_ID_TAGSTATS         = 90,
+  CORSARO_PLUGIN_ID_TAGSTATS = 90,
 
   /** Reporting plugin */
-  CORSARO_PLUGIN_ID_REPORT           = 100,
+  CORSARO_PLUGIN_ID_REPORT = 100,
 
   /** Maximum plugin ID assigned */
-  CORSARO_PLUGIN_ID_MAX              = CORSARO_PLUGIN_ID_REPORT
+  CORSARO_PLUGIN_ID_MAX = CORSARO_PLUGIN_ID_REPORT
 } corsaro_plugin_id_t;
 
 /** An corsaro packet processing plugin */
 /* All functions should return -1, or NULL on failure */
-typedef struct corsaro_plugin
-{
+typedef struct corsaro_plugin {
   /** The name of this plugin used in the ascii output and eventually to allow
    * plugins to be enabled and disabled */
   const char *name;
@@ -244,7 +219,7 @@ typedef struct corsaro_plugin
    * @return 1 if the name matches the plugin, 0 otherwise
    */
   int (*probe_filename)(const char *fname);
-  
+
   /** Given a file, looks at next 4 bytes to determine if this
    * is the right plugin. Used to "guess" the plugin when it is not
    * specified
@@ -253,11 +228,11 @@ typedef struct corsaro_plugin
    * @return 1 if the file matches the plugin, 0 otherwise
    */
   int (*probe_magic)(struct corsaro_in *corsaro, corsaro_file_in_t *file);
-  
+
   /** Initialises an input file using the plugin
    *
    * @param corsaro 	The corsaro input to be initialized
-   * @return 0 if successful, -1 in the event of error 
+   * @return 0 if successful, -1 in the event of error
    */
   int (*init_input)(struct corsaro_in *corsaro);
 
@@ -288,14 +263,14 @@ typedef struct corsaro_plugin
    * @param[in,out] record_type    The type of record to read, NULL for wildcard
    * @param[in,out] record         A pointer to the record object to fill
    * @return The the number of bytes read from the file, or -1 if an error
-   *  occurs. 0 is returned when the plugin reaches the end of it's data. 
+   *  occurs. 0 is returned when the plugin reaches the end of it's data.
    *
    * If no more data is available for reading, this function should return 0.
    * The returned pointer should be cast to the appropriate plugin data struct.
    */
-  off_t (*read_record)(struct corsaro_in *corsaro, 
-		       enum corsaro_in_record_type *record_type, 
-		       struct corsaro_in_record *record);
+  off_t (*read_record)(struct corsaro_in *corsaro,
+                       enum corsaro_in_record_type *record_type,
+                       struct corsaro_in_record *record);
 
   /** Reads a plugin global data block from an input file
    *
@@ -303,14 +278,14 @@ typedef struct corsaro_plugin
    * @param[in,out] record_type    The type of record to read, NULL for wildcard
    * @param[in,out] record         A pointer to the record object to fill
    * @return The the number of bytes read from the file, or -1 if an error
-   *  occurs. 0 is returned when the plugin reaches the end of it's data. 
+   *  occurs. 0 is returned when the plugin reaches the end of it's data.
    *
    * If no more data is available for reading, this function should return 0.
    * The returned pointer should be cast to the appropriate plugin data struct.
    */
-  off_t (*read_global_data_record)(struct corsaro_in *corsaro, 
-		       enum corsaro_in_record_type *record_type, 
-		       struct corsaro_in_record *record);
+  off_t (*read_global_data_record)(struct corsaro_in *corsaro,
+                                   enum corsaro_in_record_type *record_type,
+                                   struct corsaro_in_record *record);
 
   /** Starts a new interval
    *
@@ -318,7 +293,8 @@ typedef struct corsaro_plugin
    * @param int_start   The start structure for the interval
    * @return 0 if successful, -1 if an error occurs
    */
-  int (*start_interval)(struct corsaro *corsaro, struct corsaro_interval *int_start);
+  int (*start_interval)(struct corsaro *corsaro,
+                        struct corsaro_interval *int_start);
 
   /** Ends an interval
    *
@@ -328,9 +304,10 @@ typedef struct corsaro_plugin
    *
    * This is likely when the plugin will write it's data to it's output file
    */
-  int (*end_interval)(struct corsaro *corsaro, struct corsaro_interval *int_end);
+  int (*end_interval)(struct corsaro *corsaro,
+                      struct corsaro_interval *int_end);
 
-  /** 
+  /**
    * Process a packet
    *
    * @param corsaro       The output object to process the packet for
@@ -345,7 +322,7 @@ typedef struct corsaro_plugin
   int (*process_packet)(struct corsaro *corsaro, struct corsaro_packet *packet);
 
 #ifdef WITH_PLUGIN_SIXT
-  /** 
+  /**
    * Process a flowtuple
    *
    * @param corsaro       The output object to process the flowtuple for
@@ -355,11 +332,11 @@ typedef struct corsaro_plugin
    * This is an optional function which allows plugins to re-process flowtuple
    * data.
    */
-  int (*process_flowtuple)(struct corsaro *corsaro, 
-			   corsaro_flowtuple_t *flowtuple,
-			   struct corsaro_packet_state *state);
+  int (*process_flowtuple)(struct corsaro *corsaro,
+                           corsaro_flowtuple_t *flowtuple,
+                           struct corsaro_packet_state *state);
 
-  /** 
+  /**
    * Process a flowtuple class start record
    *
    * @param corsaro       The output object to process the flowtuple for
@@ -369,10 +346,10 @@ typedef struct corsaro_plugin
    * This is an optional function which allows plugins to re-process flowtuple
    * data class start records.
    */
-  int (*process_flowtuple_class_start)(struct corsaro *corsaro, 
-				       corsaro_flowtuple_class_start_t *class);
+  int (*process_flowtuple_class_start)(struct corsaro *corsaro,
+                                       corsaro_flowtuple_class_start_t *class);
 
-  /** 
+  /**
    * Process a flowtuple class end record
    *
    * @param corsaro       The output object to process the flowtuple for
@@ -382,8 +359,8 @@ typedef struct corsaro_plugin
    * This is an optional function which allows plugins to re-process flowtuple
    * data class end records.
    */
-  int (*process_flowtuple_class_end)(struct corsaro *corsaro, 
-				     corsaro_flowtuple_class_end_t *class);
+  int (*process_flowtuple_class_end)(struct corsaro *corsaro,
+                                     corsaro_flowtuple_class_end_t *class);
 #endif
 
   /** Next pointer, should always be NULL - used by the plugin
@@ -392,7 +369,7 @@ typedef struct corsaro_plugin
 
   /** Count of arguments in argv */
   int argc;
-  
+
   /** Array of plugin arguments
    * This is populated by the plugin manager in corsaro_plugin_enable_plugin.
    * It is the responsibility of the plugin to do something sensible with it
@@ -419,14 +396,13 @@ typedef struct corsaro_plugin
 } corsaro_plugin_t;
 
 /** Holds the metadata for the plugin manager
- * 
+ *
  * This allows both corsaro_t and corsaro_in_t objects to use the plugin
  * infrastructure without needing to pass references to themselves
  */
-typedef struct corsaro_plugin_manager
-{
+typedef struct corsaro_plugin_manager {
   /** An array of plugin ids that have been enabled by the user
-   * 
+   *
    * If this array is NULL, then assume all have been enabled.
    */
   uint16_t *plugins_enabled;
@@ -457,17 +433,17 @@ typedef struct corsaro_plugin_manager
  */
 corsaro_plugin_manager_t *corsaro_plugin_manager_init();
 
-/** Start the plugin manager 
+/** Start the plugin manager
  *
  * @param manager  The manager to start
  */
-int corsaro_plugin_manager_start(corsaro_plugin_manager_t *manager); 
+int corsaro_plugin_manager_start(corsaro_plugin_manager_t *manager);
 
 /** Free the plugin manager and all in-use plugins
  *
  * @param manager  The plugin manager to free
  *
- * @note the plugins registered with the manager MUST have already 
+ * @note the plugins registered with the manager MUST have already
  * been closed (either plugin->close_output or plugin->close_input).
  * Also, the logfile is NOT closed, as it is assumed to be shared with
  * another object (corsaro_t or corsaro_in_t).
@@ -480,8 +456,8 @@ void corsaro_plugin_manager_free(corsaro_plugin_manager_t *manager);
  * @param id        The id of the plugin to get
  * @return the plugin corresponding to the id if found, NULL otherwise
  */
-corsaro_plugin_t *corsaro_plugin_get_by_id(corsaro_plugin_manager_t *manager, 
-					   int id);
+corsaro_plugin_t *corsaro_plugin_get_by_id(corsaro_plugin_manager_t *manager,
+                                           int id);
 
 /** Attempt to retrieve a plugin by magic number (not by using magic)
  *
@@ -489,8 +465,8 @@ corsaro_plugin_t *corsaro_plugin_get_by_id(corsaro_plugin_manager_t *manager,
  * @param id        The magic number of the plugin to get
  * @return the plugin corresponding to the magic number if found, NULL otherwise
  */
-corsaro_plugin_t *corsaro_plugin_get_by_magic(corsaro_plugin_manager_t *manager, 
-					      uint32_t id);
+corsaro_plugin_t *corsaro_plugin_get_by_magic(corsaro_plugin_manager_t *manager,
+                                              uint32_t id);
 
 /** Attempt to retrieve a plugin by name
  *
@@ -498,19 +474,19 @@ corsaro_plugin_t *corsaro_plugin_get_by_magic(corsaro_plugin_manager_t *manager,
  * @param name      The name of the plugin to get
  * @return the plugin corresponding to the name if found, NULL otherwise
  */
-corsaro_plugin_t *corsaro_plugin_get_by_name(corsaro_plugin_manager_t *manager, 
-					 const char *name);
+corsaro_plugin_t *corsaro_plugin_get_by_name(corsaro_plugin_manager_t *manager,
+                                             const char *name);
 
 /** Retrieve the next plugin in the list
  *
  * @param manager   The plugin manager to get the next plugin for
  * @param plugin    The current plugin
  * @return the plugin which follows the current plugin, NULL if the end of the
- * plugin list has been reached. If plugin is NULL, the first plugin will be 
+ * plugin list has been reached. If plugin is NULL, the first plugin will be
  * returned.
  */
-corsaro_plugin_t *corsaro_plugin_next(corsaro_plugin_manager_t *manager, 
-				  corsaro_plugin_t *plugin);
+corsaro_plugin_t *corsaro_plugin_next(corsaro_plugin_manager_t *manager,
+                                      corsaro_plugin_t *plugin);
 
 /** Register the state for a plugin
  *
@@ -518,17 +494,16 @@ corsaro_plugin_t *corsaro_plugin_next(corsaro_plugin_manager_t *manager,
  * @param plugin    The plugin to register state for
  * @param state     A pointer to the state object to register
  */
-void corsaro_plugin_register_state(corsaro_plugin_manager_t *manager, 
-				 corsaro_plugin_t *plugin,
-				 void *state);
+void corsaro_plugin_register_state(corsaro_plugin_manager_t *manager,
+                                   corsaro_plugin_t *plugin, void *state);
 
 /** Free the state for a plugin
  *
  * @param manager   The plugin manager associated with the state
  * @param plugin    The plugin to free state for
  */
-void corsaro_plugin_free_state(corsaro_plugin_manager_t *manager, 
-			     corsaro_plugin_t *plugin);
+void corsaro_plugin_free_state(corsaro_plugin_manager_t *manager,
+                               corsaro_plugin_t *plugin);
 
 /** Check a filename to see if it contains a plugin's name
  *
@@ -539,24 +514,24 @@ void corsaro_plugin_free_state(corsaro_plugin_manager_t *manager,
 int corsaro_plugin_probe_filename(const char *fname, corsaro_plugin_t *plugin);
 
 /** Get the name of a plugin given it's ID number
- * 
+ *
  * @param manager    The plugin manager associated with the state
  * @param id         The plugin id to retrieve the name for
  * @return the name of the plugin as a string, NULL if no plugin matches
  * the given id
  */
 const char *corsaro_plugin_get_name_by_id(corsaro_plugin_manager_t *manager,
-					  int id);
+                                          int id);
 
 /** Get the name of a plugin given it's magic number
- * 
+ *
  * @param manager    The plugin manager associated with the state
  * @param magic      The plugin magic number to retrieve the name for
  * @return the name of the plugin as a string, NULL if no plugin matches
  * the given magic number
  */
 const char *corsaro_plugin_get_name_by_magic(corsaro_plugin_manager_t *manager,
-					     uint32_t magic);
+                                             uint32_t magic);
 
 /** Determine whether this plugin is enabled for use
  *
@@ -568,7 +543,7 @@ const char *corsaro_plugin_get_name_by_magic(corsaro_plugin_manager_t *manager,
  *  function, or implicitly because all plugins are enabled.
  */
 int corsaro_plugin_is_enabled(corsaro_plugin_manager_t *manager,
-			      corsaro_plugin_t *plugin);
+                              corsaro_plugin_t *plugin);
 
 /** Attempt to enable a plugin by its name
  *
@@ -580,7 +555,7 @@ int corsaro_plugin_is_enabled(corsaro_plugin_manager_t *manager,
  * See corsaro_enable_plugin for more details.
  */
 int corsaro_plugin_enable_plugin(corsaro_plugin_manager_t *manager,
-				 const char *plugin_name,
-				 const char *plugin_args);
+                                 const char *plugin_name,
+                                 const char *plugin_args);
 
 #endif /* __CORSARO_PLUGIN_H */

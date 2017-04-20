@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -52,37 +52,38 @@
 /** @todo either make use of those that libtrace defines, or copy the way that
     libtrace does this*/
 #if __GNUC__ >= 3
-#  ifndef DEPRECATED
-#    define DEPRECATED __attribute__((deprecated))
-#  endif
-#  ifndef SIMPLE_FUNCTION
-#    define SIMPLE_FUNCTION __attribute__((pure))
-#  endif
-#  ifndef UNUSED
-#    define UNUSED __attribute__((unused))
-#  endif
-#  ifndef PACKED
-#    define PACKED __attribute__((packed))
-#  endif
-#  ifndef PRINTF
-#    define PRINTF(formatpos,argpos) __attribute__((format(printf,formatpos,argpos)))
-#  endif
+#ifndef DEPRECATED
+#define DEPRECATED __attribute__((deprecated))
+#endif
+#ifndef SIMPLE_FUNCTION
+#define SIMPLE_FUNCTION __attribute__((pure))
+#endif
+#ifndef UNUSED
+#define UNUSED __attribute__((unused))
+#endif
+#ifndef PACKED
+#define PACKED __attribute__((packed))
+#endif
+#ifndef PRINTF
+#define PRINTF(formatpos, argpos)                                              \
+  __attribute__((format(printf, formatpos, argpos)))
+#endif
 #else
-#  ifndef DEPRECATED
-#    define DEPRECATED
-#  endif
-#  ifndef SIMPLE_FUNCTION
-#    define SIMPLE_FUNCTION
-#  endif
-#  ifndef UNUSED
-#    define UNUSED
-#  endif
-#  ifndef PACKED
-#    define PACKED
-#  endif
-#  ifndef PRINTF
-#    define PRINTF(formatpos,argpos)
-#  endif
+#ifndef DEPRECATED
+#define DEPRECATED
+#endif
+#ifndef SIMPLE_FUNCTION
+#define SIMPLE_FUNCTION
+#endif
+#ifndef UNUSED
+#define UNUSED
+#endif
+#ifndef PACKED
+#define PACKED
+#endif
+#ifndef PRINTF
+#define PRINTF(formatpos, argpos)
+#endif
 #endif
 
 /**
@@ -93,26 +94,24 @@
  * @{ */
 
 /** Enum of overall corsaro magic numbers */
-typedef enum corsaro_magic
-  { 
-    /** Overall corsaro magic number - "EDGR" */
-    CORSARO_MAGIC          = 0x45444752,
-    /** corsaro header magic number - "HEAD" */
-    CORSARO_MAGIC_HEADER   = 0x48454144,
-    /** corsaro interval magic number - "INTR" */
-    CORSARO_MAGIC_INTERVAL = 0x494E5452,
-    /* corsaro data block magic number - "DATA" */
-    CORSARO_MAGIC_DATA     = 0x44415441,
-    /* corsaro trailer magic number - "FOOT" */
-    CORSARO_MAGIC_TRAILER  = 0x464F4F54
-  } corsaro_magic_t;
+typedef enum corsaro_magic {
+  /** Overall corsaro magic number - "EDGR" */
+  CORSARO_MAGIC = 0x45444752,
+  /** corsaro header magic number - "HEAD" */
+  CORSARO_MAGIC_HEADER = 0x48454144,
+  /** corsaro interval magic number - "INTR" */
+  CORSARO_MAGIC_INTERVAL = 0x494E5452,
+  /* corsaro data block magic number - "DATA" */
+  CORSARO_MAGIC_DATA = 0x44415441,
+  /* corsaro trailer magic number - "FOOT" */
+  CORSARO_MAGIC_TRAILER = 0x464F4F54
+} corsaro_magic_t;
 
 /** Structure representing a corsaro file header
- * 
+ *
  * Values are all in HOST byte order
  */
-struct corsaro_header
-{
+struct corsaro_header {
   /** The global corsaro magic number */
   uint32_t corsaro_magic;
   /** The header magic number */
@@ -136,11 +135,10 @@ struct corsaro_header
 } PACKED;
 
 /** Structure representing a corsaro file trailer
- * 
+ *
  * Values are all in HOST byte order
  */
-struct corsaro_trailer
-{
+struct corsaro_trailer {
   /** The global corsaro magic number */
   uint32_t corsaro_magic;
   /** The trailer magic number */
@@ -161,7 +159,7 @@ struct corsaro_trailer
   uint32_t runtime;
 } PACKED;
 
-/** Structure representing the start or end of an interval 
+/** Structure representing the start or end of an interval
  *
  * The start time represents the first second which this interval covers.
  * I.e. start.time <= pkt.time for all pkt in the interval
@@ -169,34 +167,32 @@ struct corsaro_trailer
  * I.e. end.time >= pkt.time for all pkt in the interval
  *
  * If looking at the start and end interval records for a given interval,
- * the interval duration will be: 
+ * the interval duration will be:
  * @code end.time - start.time + 1 @endcode
  * The +1 includes the final second in the time.
  *
  * If corsaro is shutdown at any time other than an interval boundary, the
  * end.time value will be the seconds component of the arrival time of the
  * last observed packet.
- * 
+ *
  * Values are all in HOST byte order
  */
-struct corsaro_interval
-{
+struct corsaro_interval {
   /** The global corsaro magic number */
   uint32_t corsaro_magic;
   /** The interval magic number */
   uint32_t magic;
   /** The interval number (starts at 0) */
-  uint16_t         number;
+  uint16_t number;
   /** The time this interval started/ended */
-  uint32_t         time;
+  uint32_t time;
 } PACKED;
 
 /** Structure representing the start or end of a plugin data block
  *
  * Values are all in HOST byte order
  */
-struct corsaro_plugin_data
-{
+struct corsaro_plugin_data {
   /** The global corsaro magic number */
   uint32_t corsaro_magic;
   /** The plugin data magic number */
@@ -213,8 +209,7 @@ struct corsaro_plugin_data
  * Plugins can add data to it, or check for data from earlier plugins.
  */
 #define CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN 32
-struct corsaro_packet_state
-{
+struct corsaro_packet_state {
   /** Features of the packet that have been identified by earlier plugins */
   uint8_t flags;
 
@@ -232,51 +227,47 @@ struct corsaro_packet_state
   ipmeta_record_t *ipmeta_record_default;
 #endif
 
-  /* p0f plugin attributes */
+/* p0f plugin attributes */
 #ifdef WITH_PLUGIN_P0F
   /** The Operating System of the source IP as identified by p0f
-   * OS class ID (-1 = not found)       
+   * OS class ID (-1 = not found)
    */
-  int32_t os_class_id;  
+  int32_t os_class_id;
   /** The Operating System of the source IP as identified by p0f
-   * OS name ID (-1 = not found)        
+   * OS name ID (-1 = not found)
    */
   int32_t os_name_id;
   /** First chars of OS flavor           */
-  char os_flavor [CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN];
+  char os_flavor[CORSARO_PACKET_STATE_OS_FLAVOR_MAX_LEN];
 #endif
-
 };
 
 /** The possible packet state flags */
-enum
-  {
-    /** The packet is classified as backscatter */
-    CORSARO_PACKET_STATE_FLAG_BACKSCATTER    = 0x01,
+enum {
+  /** The packet is classified as backscatter */
+  CORSARO_PACKET_STATE_FLAG_BACKSCATTER = 0x01,
 
-    /** The packet should be ignored by filter-aware plugins */
-    CORSARO_PACKET_STATE_FLAG_IGNORE         = 0x02,
+  /** The packet should be ignored by filter-aware plugins */
+  CORSARO_PACKET_STATE_FLAG_IGNORE = 0x02,
 
-    /** Indicates the P0F plugin has run */
-    CORSARO_PACKET_STATE_FLAG_P0F            = 0x08,
-  };
+  /** Indicates the P0F plugin has run */
+  CORSARO_PACKET_STATE_FLAG_P0F = 0x08,
+};
 
 /** A lightweight wrapper around a libtrace packet */
-struct corsaro_packet
-{
+struct corsaro_packet {
   /** The corsaro state associated with this packet */
-  corsaro_packet_state_t  state;
+  corsaro_packet_state_t state;
 
   /** A pointer to the underlying libtrace packet */
-  libtrace_packet_t    *ltpacket;
+  libtrace_packet_t *ltpacket;
 };
 
 /** Convenience macro to get to the libtrace packet inside an corsaro packet */
-#define LT_PKT(corsaro_packet)   (corsaro_packet->ltpacket) 
+#define LT_PKT(corsaro_packet) (corsaro_packet->ltpacket)
 
 /** Corsaro output state */
-struct corsaro
-{
+struct corsaro {
   /** The local wall time that corsaro was started at */
   struct timeval init_time;
 
@@ -357,7 +348,7 @@ struct corsaro
   /** The total number of packets that have been processed */
   uint64_t packet_cnt;
 
-  /** The total number of packets that have been accepted by libtrace 
+  /** The total number of packets that have been accepted by libtrace
       (before the current interval) */
   uint64_t accepted_pkts;
 
@@ -367,12 +358,10 @@ struct corsaro
 
   /** Has this corsaro object been started yet? */
   int started;
-
 };
 
 /** Corsaro input state */
-struct corsaro_in
-{
+struct corsaro_in {
   /** The uri of the file to read data from */
   char *uridata;
 
@@ -391,15 +380,13 @@ struct corsaro_in
 
   /** Has this corsaro_in object been started yet? */
   int started;
-
 };
 
 /** The initial buffer size in the record object */
-#define CORSARO_IN_RECORD_DEFAULT_BUFFER_LEN     LIBTRACE_PACKET_BUFSIZE+1024
+#define CORSARO_IN_RECORD_DEFAULT_BUFFER_LEN LIBTRACE_PACKET_BUFSIZE + 1024
 
 /** A reusable opaque structure for corsaro to read an input record into */
-struct corsaro_in_record
-{
+struct corsaro_in_record {
   /** The corsaro input object the record is associated with */
   corsaro_in_t *corsaro;
 
@@ -411,28 +398,26 @@ struct corsaro_in_record
 
   /** The type of the record currently in the buffer */
   corsaro_in_record_type_t type;
-
 };
 
 #ifdef WITH_PLUGIN_TIMING
 /* Helper macros for doing timing */
 
 /** Start a timer with the given name */
-#define TIMER_START(timer)			\
-  struct timeval timer_start;			\
-  do {						\
-  gettimeofday_wrap(&timer_start);		\
-  } while(0)
+#define TIMER_START(timer)                                                     \
+  struct timeval timer_start;                                                  \
+  do {                                                                         \
+    gettimeofday_wrap(&timer_start);                                           \
+  } while (0)
 
-#define TIMER_END(timer)					\
-  struct timeval timer_end, timer_diff;				\
-  do {								\
-    gettimeofday_wrap(&timer_end);				\
-    timeval_subtract(&timer_diff, &timer_end, &timer_start);	\
-  } while(0)
+#define TIMER_END(timer)                                                       \
+  struct timeval timer_end, timer_diff;                                        \
+  do {                                                                         \
+    gettimeofday_wrap(&timer_end);                                             \
+    timeval_subtract(&timer_diff, &timer_end, &timer_start);                   \
+  } while (0)
 
-#define TIMER_VAL(timer)			\
-  ((timer_diff.tv_sec*1000000) + timer_diff.tv_usec)
+#define TIMER_VAL(timer) ((timer_diff.tv_sec * 1000000) + timer_diff.tv_usec)
 #endif
 
 #endif /* __CORSARO_INT_H */

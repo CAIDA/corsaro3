@@ -1,3 +1,6 @@
+# IDE crap
+.idea
+
 # temp files
 *~
 *.#*
@@ -9,6 +12,7 @@
 *.o
 
 # Compiled Dynamic libraries
+*.dSYM
 *.so
 
 # Compiled Static libraries
@@ -27,7 +31,12 @@ cors2ascii
 cors-ft-aggregate
 cors-ft-reports
 cors-trace2tuple
+cors-flowtuple2avro
+
+# Auto-generated files
 corsaro-*.tar.gz
+tools/flowtuple_avsc_json.inc
+tools/flowtuple_compact_avsc_json.inc
 
 # doxygen files
 docs/doxygen/caida-html

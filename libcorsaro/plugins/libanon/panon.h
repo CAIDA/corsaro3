@@ -1,11 +1,11 @@
-/* 
+/*
  * corsaro
  *
  * Alistair King, CAIDA, UC San Diego
  * corsaro-info@caida.org
- * 
+ *
  * Copyright (C) 2012 The Regents of the University of California.
- * 
+ *
  * This file is part of corsaro.
  *
  * corsaro is free software: you can redistribute it and/or modify
@@ -21,7 +21,7 @@
  * You should have received a copy of the GNU General Public License
  * along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
  *
- * This file is a modified version of the 'panon.h' file included with 
+ * This file is a modified version of the 'panon.h' file included with
  * libtrace (http://research.wand.net.nz/software/libtrace.php)
  *
  */
@@ -34,11 +34,11 @@
 #include "rijndael.h"
 #include <inttypes.h>
 
-uint32_t anonymize( const uint32_t orig_addr );
-uint32_t pp_anonymize( const uint32_t orig_addr );
-uint32_t cpp_anonymize( const uint32_t orig_addr );
-void panon_init_decrypt(const uint8_t * key);
-void panon_init(const char * key);
-void panon_init_cache(void); 
+uint32_t anonymize(const uint32_t orig_addr);
+uint32_t pp_anonymize(const uint32_t orig_addr);
+uint32_t cpp_anonymize(const uint32_t orig_addr);
+void panon_init_decrypt(const uint8_t *key);
+void panon_init(const char *key);
+void panon_init_cache(void);
 
-#endif 
+#endif

@@ -23,8 +23,8 @@
  *
  */
 
-#include "config.h"
 #include "corsaro_int.h"
+#include "config.h"
 
 #include <assert.h>
 #include <inttypes.h>
@@ -86,9 +86,9 @@
 
 /** Common plugin information across all instances */
 static corsaro_plugin_t corsaro_filterbpf_plugin = {
-  PLUGIN_NAME,                                 /* name */
-  CORSARO_PLUGIN_ID_FILTERBPF,                      /* id */
-  CORSARO_ANON_MAGIC,                          /* magic */
+  PLUGIN_NAME,                 /* name */
+  CORSARO_PLUGIN_ID_FILTERBPF, /* id */
+  CORSARO_ANON_MAGIC,          /* magic */
   CORSARO_PLUGIN_GENERATE_PTRS(corsaro_filterbpf),
   CORSARO_PLUGIN_GENERATE_TAIL,
 };
@@ -106,39 +106,38 @@ struct corsaro_filterbpf_state_t {
 };
 
 /** Extends the generic plugin state convenience macro in corsaro_plugin.h */
-#define STATE(corsaro)						\
+#define STATE(corsaro)                                                         \
   (CORSARO_PLUGIN_STATE(corsaro, filterbpf, CORSARO_PLUGIN_ID_FILTERBPF))
 
 /** Extends the generic plugin plugin convenience macro in corsaro_plugin.h */
-#define PLUGIN(corsaro)						\
+#define PLUGIN(corsaro)                                                        \
   (CORSARO_PLUGIN_PLUGIN(corsaro, CORSARO_PLUGIN_ID_FILTERBPF))
 
 /** Print usage information to stderr */
 static void usage(corsaro_plugin_t *plugin)
 {
-  fprintf(stderr,
-	  "plugin usage: %s [-m mode] -f filter [-f filter]\n"
-	  "       -f            BPF filter to apply.\n"
-	  "                     -f can be used up to %d times.\n"
-	  "                     If more than one filter is supplied, filters "
-	  "must be given\n"
-	  "                     a unique identifier by prepending the filter "
-	  "string with\n"
-	  "                     '[<group<,group>>|]<name>:'. For example, the filter 'tcp or "
-	  "udp' becomes\n"
-	  "                     'my_group.my_filter:tcp or udp'\n"
-	  "       -m             Match mode for grouped tags.\n"
-	  "                      Either '%s' or '%s' may be used (default: %s)\n",
-	  plugin->argv[0],
-	  MAX_COMMAND_LINE_BPF,
-	  MATCH_MODE_ALL,
-	  MATCH_MODE_ANY,
-	  MATCH_MODE_DEFAULT);
+  fprintf(
+    stderr,
+    "plugin usage: %s [-m mode] -f filter [-f filter]\n"
+    "       -f            BPF filter to apply.\n"
+    "                     -f can be used up to %d times.\n"
+    "                     If more than one filter is supplied, filters "
+    "must be given\n"
+    "                     a unique identifier by prepending the filter "
+    "string with\n"
+    "                     '[<group<,group>>|]<name>:'. For example, the filter "
+    "'tcp or "
+    "udp' becomes\n"
+    "                     'my_group.my_filter:tcp or udp'\n"
+    "       -m             Match mode for grouped tags.\n"
+    "                      Either '%s' or '%s' may be used (default: %s)\n",
+    plugin->argv[0], MAX_COMMAND_LINE_BPF, MATCH_MODE_ALL, MATCH_MODE_ANY,
+    MATCH_MODE_DEFAULT);
 }
 
 static int create_filter(corsaro_t *corsaro,
-			 struct corsaro_filterbpf_state_t *state,
-			 char *filter_str)
+                         struct corsaro_filterbpf_state_t *state,
+                         char *filter_str)
 {
   corsaro_tag_group_t *group = NULL;
   corsaro_tag_t *tag = NULL;
@@ -151,91 +150,79 @@ static int create_filter(corsaro_t *corsaro,
   int i;
 
   /* first, check if we were given a name */
-  if((filter_str_bpf = strchr(filter_str, ':')) != NULL)
-    {
-      *filter_str_bpf = '\0';
-      filter_str_bpf++;
-      /* now, check if we were given a group */
-      if((filter_str_name = strchr(filter_str, '|')) != NULL)
-	{
-	  *filter_str_name = '\0';
-	  filter_str_name++;
+  if ((filter_str_bpf = strchr(filter_str, ':')) != NULL) {
+    *filter_str_bpf = '\0';
+    filter_str_bpf++;
+    /* now, check if we were given a group */
+    if ((filter_str_name = strchr(filter_str, '|')) != NULL) {
+      *filter_str_name = '\0';
+      filter_str_name++;
 
-	  if(filter_str_group_cnt == MAX_FILTER_GROUPS)
-	    {
-	      fprintf(stderr,
-		      "ERROR: A filter may be associated with a maximum of %d "
-		      "groups\n",
-		      MAX_FILTER_GROUPS);
-	      return -1;
-	    }
+      if (filter_str_group_cnt == MAX_FILTER_GROUPS) {
+        fprintf(stderr,
+                "ERROR: A filter may be associated with a maximum of %d "
+                "groups\n",
+                MAX_FILTER_GROUPS);
+        return -1;
+      }
 
-	  /* now, check if this was a list of groups */
-	  /* for each , in filter_str, assign to a filter group */
-	  ptr = filter_str;
-	  while((filter_str_group[filter_str_group_cnt++] =
-		 strsep(&ptr, ",")) != NULL);
-	  /* we don't care to look at the last nul byte */
-	  filter_str_group_cnt--;
-	}
-      else
-	{
-	  /* no group */
-	  filter_str_name = filter_str;
-	}
-    }
-  else
-    {
-      /* we use the bpf as the name */
+      /* now, check if this was a list of groups */
+      /* for each , in filter_str, assign to a filter group */
+      ptr = filter_str;
+      while ((filter_str_group[filter_str_group_cnt++] = strsep(&ptr, ",")) !=
+             NULL)
+        ;
+      /* we don't care to look at the last nul byte */
+      filter_str_group_cnt--;
+    } else {
+      /* no group */
       filter_str_name = filter_str;
-      filter_str_bpf = filter_str;
     }
+  } else {
+    /* we use the bpf as the name */
+    filter_str_name = filter_str;
+    filter_str_bpf = filter_str;
+  }
 
   assert(strlen(filter_str_name) > 0);
   assert(strlen(filter_str_bpf) > 0);
 
   corsaro_log(__func__, corsaro, "creating tag with name '%s' and bpf '%s'",
-	      filter_str_name, filter_str_bpf);
+              filter_str_name, filter_str_bpf);
 
   bpf_filter = trace_create_filter(filter_str_bpf);
   assert(bpf_filter != NULL);
-  if((tag = corsaro_tag_init(corsaro, filter_str_name, bpf_filter)) == NULL)
-    {
-      fprintf(stderr, "ERROR: could not allocate tag for %s.\n", filter_str_bpf);
-      fprintf(stderr, "ERROR: ensure all filters are uniquely named\n");
-      return -1;
-    }
+  if ((tag = corsaro_tag_init(corsaro, filter_str_name, bpf_filter)) == NULL) {
+    fprintf(stderr, "ERROR: could not allocate tag for %s.\n", filter_str_bpf);
+    fprintf(stderr, "ERROR: ensure all filters are uniquely named\n");
+    return -1;
+  }
   state->cmd_bpf[state->cmd_bpf_cnt] = tag;
   state->cmd_bpf_cnt++;
 
-  for(i=0; i<filter_str_group_cnt; i++)
-    {
-      corsaro_log(__func__, corsaro, "adding tag '%s' to group '%s'",
-		  filter_str_name, filter_str_group[i]);
+  for (i = 0; i < filter_str_group_cnt; i++) {
+    corsaro_log(__func__, corsaro, "adding tag '%s' to group '%s'",
+                filter_str_name, filter_str_group[i]);
 
-      /* if the group string is not null, then we need to either create a group,
-	 or get an existing group with that name.  luckily we can just ask for a
-	 new group and we will be given the old group if it exists */
-      assert(filter_str_group[i] != NULL);
-      if((group =
-	  corsaro_tag_group_init(corsaro, filter_str_group[i],
-				 state->match_mode,
-				 NULL)) == NULL)
-	{
-	  fprintf(stderr, "ERROR: could not create group for %s.\n",
-		  filter_str_group[i]);
-	  return -1;
-	}
-
-	assert(group != NULL);
-
-	if(corsaro_tag_group_add_tag(group, tag) != 0)
-	  {
-	    fprintf(stderr, "ERROR: could not add tag '%s' to group '%s'.\n",
-		    filter_str_name, filter_str_group[i]);
-	    return -1;
-	  }
+    /* if the group string is not null, then we need to either create a group,
+       or get an existing group with that name.  luckily we can just ask for a
+       new group and we will be given the old group if it exists */
+    assert(filter_str_group[i] != NULL);
+    if ((group = corsaro_tag_group_init(corsaro, filter_str_group[i],
+                                        state->match_mode, NULL)) == NULL) {
+      fprintf(stderr, "ERROR: could not create group for %s.\n",
+              filter_str_group[i]);
+      return -1;
     }
+
+    assert(group != NULL);
+
+    if (corsaro_tag_group_add_tag(group, tag) != 0) {
+      fprintf(stderr, "ERROR: could not add tag '%s' to group '%s'.\n",
+              filter_str_name, filter_str_group[i]);
+      return -1;
+    }
+  }
 
   return 0;
 }
@@ -253,60 +240,49 @@ static int parse_args(corsaro_t *corsaro)
   /* NB: remember to reset optind to 1 before using getopt! */
   optind = 1;
 
-  while((opt = getopt(plugin->argc, plugin->argv, ":f:m:?")) >= 0)
-    {
-      switch(opt)
-	{
+  while ((opt = getopt(plugin->argc, plugin->argv, ":f:m:?")) >= 0) {
+    switch (opt) {
 
-	case 'f':
-	  if(state->cmd_bpf_cnt == MAX_COMMAND_LINE_BPF)
-	    {
-	      fprintf(stderr, "ERROR: A maximum of %d filters can be "
-		      "specified using the -f option.\n",
-		      MAX_COMMAND_LINE_BPF);
-	      usage(plugin);
-	      return -1;
-	    }
+    case 'f':
+      if (state->cmd_bpf_cnt == MAX_COMMAND_LINE_BPF) {
+        fprintf(stderr, "ERROR: A maximum of %d filters can be "
+                        "specified using the -f option.\n",
+                MAX_COMMAND_LINE_BPF);
+        usage(plugin);
+        return -1;
+      }
 
-	  if(create_filter(corsaro, state, optarg) != 0)
-	    {
-	      return -1;
-	    }
-	  break;
+      if (create_filter(corsaro, state, optarg) != 0) {
+        return -1;
+      }
+      break;
 
-	case 'm':
-	  if(strcmp(optarg, MATCH_MODE_ANY) == 0)
-	    {
-	      state->match_mode = CORSARO_TAG_GROUP_MATCH_MODE_ANY;
-	    }
-	  else if(strcmp(optarg, MATCH_MODE_ALL) == 0)
-	    {
-	      state->match_mode = CORSARO_TAG_GROUP_MATCH_MODE_ALL;
-	    }
-	  else
-	    {
-	      fprintf(stderr, "ERROR: Invalid match mode specified: %s\n",
-		      optarg);
-	      usage(plugin);
-	      return -1;
-	    }
-	  break;
+    case 'm':
+      if (strcmp(optarg, MATCH_MODE_ANY) == 0) {
+        state->match_mode = CORSARO_TAG_GROUP_MATCH_MODE_ANY;
+      } else if (strcmp(optarg, MATCH_MODE_ALL) == 0) {
+        state->match_mode = CORSARO_TAG_GROUP_MATCH_MODE_ALL;
+      } else {
+        fprintf(stderr, "ERROR: Invalid match mode specified: %s\n", optarg);
+        usage(plugin);
+        return -1;
+      }
+      break;
 
-	case '?':
-	case ':':
-	default:
-	  usage(plugin);
-	  return -1;
-	}
-    }
-
-  if(state->cmd_bpf_cnt == 0)
-    {
-      fprintf(stderr, "ERROR: %s requires a filter to be specified using '-f'\n",
-	      plugin->argv[0]);
+    case '?':
+    case ':':
+    default:
       usage(plugin);
       return -1;
     }
+  }
+
+  if (state->cmd_bpf_cnt == 0) {
+    fprintf(stderr, "ERROR: %s requires a filter to be specified using '-f'\n",
+            plugin->argv[0]);
+    usage(plugin);
+    return -1;
+  }
 
   return 0;
 }
@@ -327,7 +303,8 @@ int corsaro_filterbpf_probe_filename(const char *fname)
 }
 
 /** Implements the probe_magic function of the plugin API */
-int corsaro_filterbpf_probe_magic(corsaro_in_t *corsaro, corsaro_file_in_t *file)
+int corsaro_filterbpf_probe_magic(corsaro_in_t *corsaro,
+                                  corsaro_file_in_t *file)
 {
   /* this does not write files */
   return 0;
@@ -341,30 +318,28 @@ int corsaro_filterbpf_init_output(corsaro_t *corsaro)
 
   assert(plugin != NULL);
 
-  if((state = malloc_zero(sizeof(struct corsaro_filterbpf_state_t))) == NULL)
-    {
-      corsaro_log(__func__, corsaro,
-		"could not malloc corsaro_filterbpf_state_t");
-      goto err;
-    }
+  if ((state = malloc_zero(sizeof(struct corsaro_filterbpf_state_t))) == NULL) {
+    corsaro_log(__func__, corsaro,
+                "could not malloc corsaro_filterbpf_state_t");
+    goto err;
+  }
   corsaro_plugin_register_state(corsaro->plugin_manager, plugin, state);
 
   /* make all the default match mode */
   state->match_mode = CORSARO_TAG_GROUP_MATCH_MODE_DEFAULT;
 
   /* parse the arguments */
-  if(parse_args(corsaro) != 0)
-    {
-      /* parse args calls usage itself, so do not goto err here */
-      return -1;
-    }
+  if (parse_args(corsaro) != 0) {
+    /* parse args calls usage itself, so do not goto err here */
+    return -1;
+  }
 
   /* just to be safe */
   assert(state->cmd_bpf_cnt > 0);
 
   return 0;
 
- err:
+err:
   corsaro_filterbpf_close_output(corsaro);
   return -1;
 }
@@ -389,27 +364,23 @@ int corsaro_filterbpf_close_output(corsaro_t *corsaro)
   int i;
   struct corsaro_filterbpf_state_t *state = STATE(corsaro);
 
-  if(state == NULL)
-    {
-      return 0;
+  if (state == NULL) {
+    return 0;
+  }
+
+  if (state->cmd_bpf != NULL) {
+    for (i = 0; i < state->cmd_bpf_cnt; i++) {
+      if (state->cmd_bpf[i] != NULL) {
+        trace_destroy_filter(state->cmd_bpf[i]->user);
+        state->cmd_bpf[i]->user = NULL;
+
+        /* the tag manger will free the tags and groups for us */
+        state->cmd_bpf[i] = NULL;
+      }
     }
 
-  if(state->cmd_bpf != NULL)
-    {
-      for(i=0; i<state->cmd_bpf_cnt; i++)
-	{
-	  if(state->cmd_bpf[i] != NULL)
-	    {
-	      trace_destroy_filter(state->cmd_bpf[i]->user);
-	      state->cmd_bpf[i]->user = NULL;
-
-	      /* the tag manger will free the tags and groups for us */
-	      state->cmd_bpf[i] = NULL;
-	    }
-	}
-
-      state->cmd_bpf_cnt = 0;
-    }
+    state->cmd_bpf_cnt = 0;
+  }
 
   corsaro_plugin_free_state(corsaro->plugin_manager, PLUGIN(corsaro));
 
@@ -418,17 +389,17 @@ int corsaro_filterbpf_close_output(corsaro_t *corsaro)
 
 /** Implements the read_record function of the plugin API */
 off_t corsaro_filterbpf_read_record(struct corsaro_in *corsaro,
-			       corsaro_in_record_type_t *record_type,
-			       corsaro_in_record_t *record)
+                                    corsaro_in_record_type_t *record_type,
+                                    corsaro_in_record_t *record)
 {
   assert(0);
   return -1;
 }
 
 /** Implements the read_global_data_record function of the plugin API */
-off_t corsaro_filterbpf_read_global_data_record(struct corsaro_in *corsaro,
-			      enum corsaro_in_record_type *record_type,
-			      struct corsaro_in_record *record)
+off_t corsaro_filterbpf_read_global_data_record(
+  struct corsaro_in *corsaro, enum corsaro_in_record_type *record_type,
+  struct corsaro_in_record *record)
 {
   /* we write nothing to the global file. someone messed up */
   return -1;
@@ -436,7 +407,7 @@ off_t corsaro_filterbpf_read_global_data_record(struct corsaro_in *corsaro,
 
 /** Implements the start_interval function of the plugin API */
 int corsaro_filterbpf_start_interval(corsaro_t *corsaro,
-				corsaro_interval_t *int_start)
+                                     corsaro_interval_t *int_start)
 {
   /* we do not care */
   return 0;
@@ -444,7 +415,7 @@ int corsaro_filterbpf_start_interval(corsaro_t *corsaro,
 
 /** Implements the end_interval function of the plugin API */
 int corsaro_filterbpf_end_interval(corsaro_t *corsaro,
-				corsaro_interval_t *int_end)
+                                   corsaro_interval_t *int_end)
 {
   /* we do not care */
   return 0;
@@ -452,7 +423,7 @@ int corsaro_filterbpf_end_interval(corsaro_t *corsaro,
 
 /** Implements the process_packet function of the plugin API */
 int corsaro_filterbpf_process_packet(corsaro_t *corsaro,
-				     corsaro_packet_t *packet)
+                                     corsaro_packet_t *packet)
 {
   struct corsaro_filterbpf_state_t *fb_state = STATE(corsaro);
   int i;
@@ -463,31 +434,26 @@ int corsaro_filterbpf_process_packet(corsaro_t *corsaro,
      must apply all filters to every packet. we then ask the tag framework
      to record those that we have matches for */
 
-  for(i=0; i<fb_state->cmd_bpf_cnt; i++)
-    {
-      assert(fb_state->cmd_bpf[i] != NULL &&
-	     BPF(fb_state->cmd_bpf[i]) != NULL);
-      rc = trace_apply_filter(BPF(fb_state->cmd_bpf[i]), LT_PKT(packet));
-      if(rc < 0)
-	{
-	  corsaro_log(__func__, corsaro, "invalid bpf filter for tag '%s'",
-		      fb_state->cmd_bpf[i]->name);
-	  return -1;
-	}
-      if(rc > 0)
-	{
-	  /* mark this filter as a match */
-	  corsaro_tag_set_match(&packet->state, fb_state->cmd_bpf[i], rc);
-	  /* turn off the ignore flag */
-	  ignore = 0;
-	}
+  for (i = 0; i < fb_state->cmd_bpf_cnt; i++) {
+    assert(fb_state->cmd_bpf[i] != NULL && BPF(fb_state->cmd_bpf[i]) != NULL);
+    rc = trace_apply_filter(BPF(fb_state->cmd_bpf[i]), LT_PKT(packet));
+    if (rc < 0) {
+      corsaro_log(__func__, corsaro, "invalid bpf filter for tag '%s'",
+                  fb_state->cmd_bpf[i]->name);
+      return -1;
     }
+    if (rc > 0) {
+      /* mark this filter as a match */
+      corsaro_tag_set_match(&packet->state, fb_state->cmd_bpf[i], rc);
+      /* turn off the ignore flag */
+      ignore = 0;
+    }
+  }
 
   /* flip on the ignore bit if any of the filters match */
-  if(ignore != 0)
-    {
-      packet->state.flags |= CORSARO_PACKET_STATE_FLAG_IGNORE;
-    }
+  if (ignore != 0) {
+    packet->state.flags |= CORSARO_PACKET_STATE_FLAG_IGNORE;
+  }
 
   return 0;
 }
