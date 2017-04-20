@@ -362,7 +362,12 @@ static int write_record(corsaro_flowtuple_t *tuple,
       ((batch_size > 0 && (++record_cnt % batch_size) == 0)
        || ((time/60)*60) != current_minute)) {
     /* close the writer */
-    avro_file_writer_close(a_writer);
+    errno = 0;
+    if (avro_file_writer_close(a_writer) != 0 || errno != 0) {
+      fprintf(stderr, "ERROR: Could not close file (%s) (errno:%d)\n",
+              avro_strerror(), errno);
+      goto err;
+    }
     a_writer_init = 0;
     if (((time/60)*60) != current_minute) {
       record_cnt = 0;
@@ -396,9 +401,11 @@ static int write_record(corsaro_flowtuple_t *tuple,
   }
 
   /* write the record */
-  if (avro_file_writer_append_value(a_writer, &a_record) != 0) {
-    fprintf(stderr, "ERROR: Could not write record to file (%s)\n",
-            avro_strerror());
+  /* hax since libavro file writing really really sucks: */
+  errno = 0;
+  if (avro_file_writer_append_value(a_writer, &a_record) != 0 || errno != 0) {
+    fprintf(stderr, "ERROR: Could not write record to file (%s) (errno:%d)\n",
+            avro_strerror(), errno);
     goto err;
   }
 
@@ -550,6 +557,8 @@ int main(int argc, char **argv)
 
   if (strstr(avro_template, "%N") == NULL && batch_size > 0) {
     fprintf(stderr, "ERROR: Avro file template must contain '%%N'\n");
+    usage();
+    goto err;
   }
 
   if (strstr(avro_template, "%s") == NULL) {
