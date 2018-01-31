@@ -22,28 +22,29 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-SUBDIRS = common docs libcorsaro tools libcorsaro3 corsarotrace
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro -I$(top_srcdir)/common \
-	-I$(top_srcdir)/libcorsaro/plugins
+#SUBDIRS = plugins
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
+	-I$(top_srcdir)/common/libpatricia \
+	-I$(top_srcdir)/libcorsaro3/plugins
 
-bin_PROGRAMS = corsaro
+lib_LTLIBRARIES = libcorsaro3.la
 
-# main corsaro program
-corsaro_SOURCES = \
-	corsaro_main.c
+include_HEADERS = libcorsaro3_log.h libcorsaro3.h
 
-corsaro_LDADD = -lcorsaro
+libcorsaro3_la_SOURCES = 	\
+	libcorsaro3_log.c 		\
+	libcorsaro3_log.h 		\
+	libcorsaro3_plugin.c 	        \
+	libcorsaro3_plugin.h            \
+        libcorsaro3_io.c                \
+        libcorsaro3_io.h                \
+        libcorsaro3.h
 
-corsaro_LDFLAGS = -L$(top_builddir)/libcorsaro
+#libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \
+#	$(top_builddir)/libcorsaro/plugins/libcorsaroplugins.la
 
-EXTRA_DIST = libtrace-3.0.13-wandio_export.patch thirdparty/libsmee-2.2.2.tar.gz
+libcorsaro3_la_LDFLAGS = -version-info @CORSARO_MAJOR_VERSION@:@CORSARO_MINOR_VERSION@:@CORSARO_MID_VERSION@
 
 ACLOCAL_AMFLAGS = -I m4
 
 CLEANFILES = *~
-
-format:
-	find . -type f -name "*.[ch]" -not -path "./common/*" -exec \
-		clang-format -style=file -i {} \;
-
-.PHONY: format

@@ -22,21 +22,21 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-SUBDIRS = common docs libcorsaro tools libcorsaro3 corsarotrace
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro -I$(top_srcdir)/common \
-	-I$(top_srcdir)/libcorsaro/plugins
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro3 
+	-I$(top_srcdir)/libcorsaro3/plugins
 
-bin_PROGRAMS = corsaro
+bin_PROGRAMS = corsarotrace
 
 # main corsaro program
-corsaro_SOURCES = \
-	corsaro_main.c
+corsarotrace_SOURCES = \
+	corsarotrace.c \
+        configparser.c \
+        configparser.h \
+        corsarotrace.h
 
-corsaro_LDADD = -lcorsaro
+corsarotrace_LDADD = -lcorsaro3
 
-corsaro_LDFLAGS = -L$(top_builddir)/libcorsaro
-
-EXTRA_DIST = libtrace-3.0.13-wandio_export.patch thirdparty/libsmee-2.2.2.tar.gz
+corsarotrace_LDFLAGS = -L$(top_builddir)/libcorsaro3
 
 ACLOCAL_AMFLAGS = -I m4
 

@@ -136,10 +136,13 @@ AX_LIB_SOCKET_NSL
 # Checks for libraries.
 AC_CHECK_LIB([packetdump], [trace_dump_packet], ,[AC_MSG_WARN(
 			   [libpacketdump missing. ascii packet dumps not available])])
-AC_CHECK_LIB([trace], [trace_get_payload_length], ,[AC_MSG_ERROR(
-		      [libtrace >= 3.0.8 required])])
+AC_CHECK_LIB([trace], [trace_pstart], ,[AC_MSG_ERROR(
+		      [libtrace >= 4.0.0 required])])
 AC_SEARCH_LIBS([wandio_create], [wandio trace], ,[AC_MSG_ERROR(
 		 [libwandio required (included with libtrace since 3.0.15)]
+		 )])
+AC_SEARCH_LIBS([yaml_parser_initialize], [yaml], ,[AC_MSG_ERROR(
+		 [libyaml required]
 		 )])
 AM_CONDITIONAL([WITH_WANDIO], [test "x" == x])
 
@@ -334,6 +337,8 @@ AC_HEADER_ASSERT
 AC_CONFIG_FILES([Makefile libcorsaro/Makefile libcorsaro/plugins/Makefile
 			libcorsaro/plugins/libp0f/Makefile
 			libcorsaro/plugins/libanon/Makefile
+                        libcorsaro3/Makefile
+                        corsarotrace/Makefile
 			tools/Makefile 
 			common/Makefile
 			common/libpatricia/Makefile
