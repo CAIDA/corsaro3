@@ -514,7 +514,12 @@ int corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
         kh_clear(sixt, state->st_hash[i]);
     }
 
-    return corsaro_io_write_interval_end(p->logger, state->outfile, int_end);
+    if (corsaro_file_write_interval(state->outfile, int_end, 0) < 0) {
+        corsaro_log(p->logger,
+                "failed to write interval end to flowtuple output file");
+        return -1;
+    }
+    return 0;
 }
 
 /**

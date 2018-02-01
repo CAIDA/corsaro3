@@ -34,6 +34,7 @@
 #include <libtrace.h>
 
 #include "libcorsaro3_log.h"
+#include "libcorsaro3.h"
 
 /** The default compression level */
 #define CORSARO_FILE_COMPRESS_LEVEL_DEFAULT 6
@@ -152,6 +153,8 @@ off_t corsaro_file_vprintf(corsaro_file_t *file, const char *format,
         va_list args);
 off_t corsaro_file_printf(corsaro_file_t *file, const char *format, ...);
 off_t corsaro_file_write(corsaro_file_t *file, const void *buffer, off_t len);
+off_t corsaro_file_write_interval(corsaro_file_t *file,
+        corsaro_interval_t *interval, uint8_t isstart);
 
 #endif
 

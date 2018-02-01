@@ -174,6 +174,31 @@ off_t corsaro_file_write(corsaro_file_t *file, const void *buffer,
     return wandio_wwrite(file->wand_io, buffer, len);
 }
 
+off_t corsaro_file_write_interval(corsaro_file_t *file,
+        corsaro_interval_t *interval, uint8_t isstart) {
+
+    if (file->mode == CORSARO_FILE_MODE_BINARY) {
+        corsaro_interval_t nint;
+        /* byte flip all the fields */
+        nint.corsaro_magic = htonl(interval->corsaro_magic);
+        nint.magic = htonl(interval->magic);
+        nint.number = htons(interval->number);
+        nint.time = htonl(interval->time);
+
+        return wandio_wwrite(file->wand_io, &nint, sizeof(corsaro_interval_t));
+    } else if (file->mode == CORSARO_FILE_MODE_ASCII && isstart) {
+        return corsaro_file_printf(file, "# CORSARO_INTERVAL_START %d %ld\n",
+                interval->number, interval->time);
+    } else if (file->mode == CORSARO_FILE_MODE_ASCII) {
+        return corsaro_file_printf(file, "# CORSARO_INTERVAL_END %d %ld\n",
+                interval->number, interval->time);
+    }
+
+    /* Not a valid output type for writing intervals? */
+    return -1;
+}
+
+
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
