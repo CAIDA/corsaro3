@@ -22,7 +22,7 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-#SUBDIRS = plugins
+SUBDIRS = plugins
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
 	-I$(top_srcdir)/common/libpatricia \
 	-I$(top_srcdir)/libcorsaro3/plugins
@@ -37,11 +37,12 @@ libcorsaro3_la_SOURCES = 	\
 	libcorsaro3_plugin.c 	        \
 	libcorsaro3_plugin.h            \
         libcorsaro3_io.c                \
+        libcorsaro3_file.c              \
         libcorsaro3_io.h                \
         libcorsaro3.h
 
-#libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \
-#	$(top_builddir)/libcorsaro/plugins/libcorsaroplugins.la
+libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \
+	$(top_builddir)/libcorsaro3/plugins/libcorsaro3plugins.la
 
 libcorsaro3_la_LDFLAGS = -version-info @CORSARO_MAJOR_VERSION@:@CORSARO_MINOR_VERSION@:@CORSARO_MID_VERSION@
 
