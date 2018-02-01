@@ -233,7 +233,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     /* check if we have passed the end of an interval */
-    if (tls->next_report && tv.tv_sec >= tls->next_report) {
+    while (tls->next_report && tv.tv_sec >= tls->next_report) {
         END_INTERVAL_MACRO
     }
 

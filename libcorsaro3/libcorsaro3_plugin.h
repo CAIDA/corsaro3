@@ -35,6 +35,30 @@
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_io.h"
 
+/** Convenience macros that define all the function prototypes for the corsaro
+ * plugin API
+ */
+#define CORSARO_PLUGIN_GENERATE_PROTOTYPES(plugin)          \
+    corsaro_plugin_t *plugin##_alloc(void);                 \
+    int plugin##_parse_config(corsaro_plugin_t *p, yaml_document_t *doc, \
+            yaml_node_t *options);                          \
+    int plugin##_finalise_config(corsaro_plugin_t *p,       \
+            corsaro_plugin_proc_options_t *stdopts);        \
+    void plugin##_destroy_self(corsaro_plugin_t *p);        \
+    void *plugin##_init_processing(corsaro_plugin_t *p);    \
+    int plugin##_halt_processing(corsaro_plugin_t *p, void *local); \
+    int plugin##_start_interval(corsaro_plugin_t *p, void *local, \
+            corsaro_interval_t *int_start);                 \
+    int plugin##_end_interval(corsaro_plugin_t *p, void *local, \
+            corsaro_interval_t *int_end);                   \
+    int plugin##_process_packet(corsaro_plugin_t *p, void *local, \
+            libtrace_packet_t *packet, corsaro_packet_state_t *pstate); \
+    int plugin##_rotate_output(corsaro_plugin_t *p, void *local, \
+            corsaro_interval_t *rot_start);
+
+
+
+
 typedef enum corsaro_plugin_id {
     CORSARO_PLUGIN_ID_FLOWTUPLE = 20,
     CORSARO_PLUGIN_ID_DOS = 30,
@@ -56,6 +80,32 @@ typedef struct corsaro_plugin_proc_options {
     corsaro_file_compress_t compress;
     int compresslevel;
 } corsaro_plugin_proc_options_t;
+
+/** Corsaro state for a packet
+ *
+ * This is passed, along with the packet, to each plugin.
+ * Plugins can add data to it, or check for data from earlier plugins.
+ */
+typedef struct corsaro_packet_state {
+    /** Features of the packet that have been identified by earlier plugins */
+    uint8_t flags;
+
+    /* TODO add other stuff in here as needed, e.g. tags */
+
+} corsaro_packet_state_t;
+
+/** The possible packet state flags */
+enum {
+    /** The packet is classified as backscatter */
+    CORSARO_PACKET_STATE_FLAG_BACKSCATTER = 0x01,
+
+    /** The packet should be ignored by filter-aware plugins */
+    CORSARO_PACKET_STATE_FLAG_IGNORE = 0x02,
+
+    /** Indicates the P0F plugin has run */
+    CORSARO_PACKET_STATE_FLAG_P0F = 0x08,
+};
+
 
 struct corsaro_plugin {
 
@@ -79,7 +129,7 @@ struct corsaro_plugin {
     int (*end_interval)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *int_end);
     int (*process_packet)(corsaro_plugin_t *p, void *local,
-            libtrace_packet_t *packet);
+            libtrace_packet_t *packet, corsaro_packet_state_t *pstate);
     int (*rotate_output)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *rot_start);
 
@@ -131,11 +181,11 @@ int corsaro_push_rotate_file_plugins(corsaro_plugin_set_t *pset,
 
 
 #define CORSARO_INIT_PLUGIN_PROC_OPTS(opts) \
-  opts->template = NULL; \
-  opts->monitorid = NULL; \
-  opts->outmode = CORSARO_FILE_MODE_UNKNOWN; \
-  opts->compress = CORSARO_FILE_COMPRESS_UNSET; \
-  opts->compresslevel = -1; 
+  opts.template = NULL; \
+  opts.monitorid = NULL; \
+  opts.outmode = CORSARO_FILE_MODE_UNKNOWN; \
+  opts.compress = CORSARO_FILE_COMPRESS_UNSET; \
+  opts.compresslevel = -1; 
 
 #define CORSARO_PLUGIN_GENERATE_BASE_PTRS(plugin)               \
   plugin##_parse_config, plugin##_finalise_config,              \

@@ -28,8 +28,12 @@
 #ifndef CORSARO_IO_H_
 #define CORSARO_IO_H_
 
+#include <stdarg.h>
 #include <inttypes.h>
 #include <wandio.h>
+#include <libtrace.h>
+
+#include "libcorsaro3_log.h"
 
 /** The default compression level */
 #define CORSARO_FILE_COMPRESS_LEVEL_DEFAULT 6
@@ -85,6 +89,38 @@ typedef enum corsaro_file_mode {
     CORSARO_FILE_MODE_DEFAULT = CORSARO_FILE_MODE_UNKNOWN
 } corsaro_file_mode_t;
 
+/** An opaque structure defining an corsaro output file */
+typedef struct corsaro_file {
+    /** The requested output format for the file */
+    corsaro_file_mode_t mode;
+
+    /** Per-framework state for the file */
+    union {
+        /** ASCII & Binary mode state */
+        struct {
+            /** The wandio output file handle */
+            iow_t *io;
+        } ms_wandio;
+
+        /** Trace mode state */
+        struct {
+            /** The libtrace object used to create the trace */
+            libtrace_out_t *trace;
+        } ms_trace;
+    } mode_state;
+
+} corsaro_file_t;
+
+/** Shortcut to the non-trace (wandio) state structure */
+#define state_wandio mode_state.ms_wandio
+/** Shortcut to a non-trace io object */
+#define wand_io mode_state.ms_wandio.io
+
+/** Shortcut to the trace state structure */
+#define state_trace mode_state.ms_trace
+/** Shortcut to the libtrace object */
+#define trace_io mode_state.ms_trace.trace
+
 
 /** Convenience function for generating a file name based on the given
  *  template string
@@ -106,6 +142,16 @@ char *corsaro_generate_file_name(const char *template,
         uint32_t time,
         corsaro_file_compress_t compress);
 
+
+/** libcorsaro3_file API */
+corsaro_file_t *corsaro_file_open(corsaro_logger_t *logger, char *fname,
+        corsaro_file_mode_t mode, corsaro_file_compress_t compress_type,
+        int compress_level, int flags);
+void corsaro_file_close(corsaro_file_t *file);
+off_t corsaro_file_vprintf(corsaro_file_t *file, const char *format,
+        va_list args);
+off_t corsaro_file_printf(corsaro_file_t *file, const char *format, ...);
+off_t corsaro_file_write(corsaro_file_t *file, const void *buffer, off_t len);
 
 #endif
 

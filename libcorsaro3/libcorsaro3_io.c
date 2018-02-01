@@ -62,6 +62,10 @@ char *corsaro_generate_file_name(const char *template,
     char secs[11]; /* length of UINT32_MAX +1 */
     struct timeval tv;
 
+    if (template == NULL) {
+        return NULL;
+    }
+
     for (; *tmpl; ++tmpl) {
         if (*tmpl == '.' && compress == CORSARO_FILE_COMPRESS_NONE) {
             if (strncmp(tmpl, CORSARO_FILE_ZLIB_SUFFIX,
@@ -80,10 +84,16 @@ char *corsaro_generate_file_name(const char *template,
                      * it to corsaro_io_template_has_timestamp */
 
                 case CORSARO_IO_MONITOR_PATTERN:
+                    if (monitorname == NULL) {
+                        return NULL;
+                    }
                     bufp = stradd(monitorname, bufp, buflim);
                     continue;
 
                 case CORSARO_IO_PLUGIN_PATTERN:
+                    if (plugin == NULL) {
+                        return NULL;
+                    }
                     bufp = stradd(plugin, bufp, buflim);
                     continue;
 

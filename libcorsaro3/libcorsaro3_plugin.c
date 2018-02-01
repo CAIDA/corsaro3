@@ -129,6 +129,10 @@ static inline void populate_interval(corsaro_interval_t *interval,
     interval->time = time;
 }
 
+static inline void reset_packet_state(corsaro_packet_state_t *pstate) {
+    pstate->flags = 0;
+}
+
 
 corsaro_plugin_t *corsaro_load_all_plugins(corsaro_logger_t *logger) {
     corsaro_plugin_t *all = NULL;
@@ -263,16 +267,16 @@ int corsaro_push_packet_plugins(corsaro_plugin_set_t *pset,
         libtrace_packet_t *packet) {
     int index = 0;
     corsaro_plugin_t *p = pset->active_plugins;
+    corsaro_packet_state_t pstate;
 
     if (pset->api != CORSARO_TRACE_API) {
         return -1;
     }
 
+    reset_packet_state(&pstate);
+
     while (p != NULL) {
-        /* TODO check return state -- a plugin may suggest all subsequent
-         * plugins ignore this packet, so we need to support that.
-         */
-        p->process_packet(p, pset->plugin_state[index], packet);
+        p->process_packet(p, pset->plugin_state[index], packet, &pstate);
         p = p->next;
         index ++;
     }
