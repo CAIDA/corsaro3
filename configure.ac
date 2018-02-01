@@ -55,6 +55,18 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([libcorsaro/corsaro.c])
 AC_CONFIG_HEADERS([config.h])
 
+# Check for -fvisibility
+gl_VISIBILITY
+
+gcc_PACKED
+gcc_DEPRECATED
+gcc_UNUSED
+gcc_PURE
+gcc_FORMAT
+
+# Check for gcc style TLS (__thread)
+gcc_TLS
+
 # Checks for programs.
 AC_PROG_LIBTOOL
 AC_PROG_CC_C99
@@ -338,6 +350,7 @@ AC_CONFIG_FILES([Makefile libcorsaro/Makefile libcorsaro/plugins/Makefile
 			libcorsaro/plugins/libp0f/Makefile
 			libcorsaro/plugins/libanon/Makefile
                         libcorsaro3/Makefile
+                        libcorsaro3/libcorsaro3.h
                         corsarotrace/Makefile
 			tools/Makefile 
 			common/Makefile
