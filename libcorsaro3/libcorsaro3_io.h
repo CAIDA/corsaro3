@@ -31,6 +31,10 @@
 #include <inttypes.h>
 #include <wandio.h>
 
+/** The default compression level */
+#define CORSARO_FILE_COMPRESS_LEVEL_DEFAULT 6
+
+
 /** The suffix used to detect gzip output is desired */
 #define CORSARO_FILE_ZLIB_SUFFIX ".gz"
 
@@ -59,9 +63,27 @@ typedef enum corsaro_file_compress {
     /** LZO Compression */
     CORSARO_FILE_COMPRESS_LZO = WANDIO_COMPRESS_LZO,
 
+    /** Special value used to indicate no type chosen yet */
+    CORSARO_FILE_COMPRESS_UNSET = 255,
+
     /** Default compression */
     CORSARO_FILE_COMPRESS_DEFAULT = CORSARO_FILE_COMPRESS_ZLIB
 } corsaro_file_compress_t;
+
+/** Enum of supported file modes */
+typedef enum corsaro_file_mode {
+    /** ASCII IO mode */
+    CORSARO_FILE_MODE_ASCII = 0,
+    /** Binary IO mode */
+    CORSARO_FILE_MODE_BINARY = 1,
+    /** Pseudo IO mode which allows trace files to be written */
+    CORSARO_FILE_MODE_TRACE = 2,
+    /** Unknown IO mode */
+    CORSARO_FILE_MODE_UNKNOWN = 3,
+
+    /** Default IO mode */
+    CORSARO_FILE_MODE_DEFAULT = CORSARO_FILE_MODE_UNKNOWN
+} corsaro_file_mode_t;
 
 
 /** Convenience function for generating a file name based on the given

@@ -130,9 +130,16 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global) {
 
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
+    corsaro_plugin_proc_options_t stdopts;
 
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)malloc(
             sizeof(corsaro_trace_local_t));
+
+    stdopts.template = glob->template;
+    stdopts.monitorid = glob->monitorid;
+    stdopts.outmode = glob->outmode;
+    stdopts.compress = glob->compress;
+    stdopts.compresslevel = glob->compresslevel;
 
     tls->plugins = corsaro_start_plugins(glob->logger,
             glob->active_plugins, glob->plugincount, CORSARO_TRACE_API);

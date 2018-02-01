@@ -33,6 +33,7 @@
 
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
+#include "libcorsaro3_io.h"
 
 typedef enum corsaro_plugin_id {
     CORSARO_PLUGIN_ID_FLOWTUPLE = 20,
@@ -48,6 +49,14 @@ enum {
 
 typedef struct corsaro_plugin corsaro_plugin_t;
 
+typedef struct corsaro_plugin_proc_options {
+    char *template;
+    char *monitorid;
+    corsaro_file_mode_t outmode;
+    corsaro_file_compress_t compress;
+    int compresslevel;
+} corsaro_plugin_proc_options_t;
+
 struct corsaro_plugin {
 
     /* Static identifying information for the plugin */
@@ -58,6 +67,8 @@ struct corsaro_plugin {
     /* Callbacks for general functionality */
     int (*parse_config)(corsaro_plugin_t *p, yaml_document_t *doc,
             yaml_node_t *options);
+    int (*finalise_config)(corsaro_plugin_t *p,
+            corsaro_plugin_proc_options_t *stdopts);
     void (*destroy_self)(corsaro_plugin_t *p);
 
     /* Callbacks for trace processing */
@@ -103,6 +114,8 @@ corsaro_plugin_t *corsaro_enable_plugin(corsaro_logger_t *logger,
 void corsaro_disable_plugin(corsaro_plugin_t *p);
 int corsaro_configure_plugin(corsaro_plugin_t *p, yaml_document_t *doc,
         yaml_node_t *options);
+int corsaro_finish_plugin_config(corsaro_plugin_t *p,
+        corsaro_plugin_proc_options_t *stdopts);
 
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
         corsaro_plugin_t *plist, int count, int api);
@@ -117,8 +130,16 @@ int corsaro_push_rotate_file_plugins(corsaro_plugin_set_t *pset,
         uint32_t intervalid, uint32_t ts);
 
 
+#define CORSARO_INIT_PLUGIN_PROC_OPTS(opts) \
+  opts->template = NULL; \
+  opts->monitorid = NULL; \
+  opts->outmode = CORSARO_FILE_MODE_UNKNOWN; \
+  opts->compress = CORSARO_FILE_COMPRESS_UNSET; \
+  opts->compresslevel = -1; 
+
 #define CORSARO_PLUGIN_GENERATE_BASE_PTRS(plugin)               \
-  plugin##_parse_config, plugin##_destroy_self
+  plugin##_parse_config, plugin##_finalise_config,              \
+  plugin##_destroy_self
 
 #define CORSARO_PLUGIN_GENERATE_TRACE_PTRS(plugin)              \
   plugin##_init_processing, plugin##_halt_processing,           \

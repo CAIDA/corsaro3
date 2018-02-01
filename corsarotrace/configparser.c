@@ -55,6 +55,39 @@ static int parse_promisc_mode(corsaro_trace_global_t *glob, char *value) {
 
 }
 
+static int parse_file_mode(corsaro_trace_global_t *glob, char *value) {
+    /* TODO support trace mode? */
+
+    if (strcmp(value, "ascii") == 0 || strcmp(value, "text") == 0) {
+        glob->outmode = CORSARO_FILE_MODE_ASCII;
+    } else if (strcmp(value, "binary") == 0) {
+        glob->outmode = CORSARO_FILE_MODE_BINARY;
+    } else {
+        corsaro_log(glob->logger, "invalid output file mode '%s'", value);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int parse_compress_mode(corsaro_trace_global_t *glob, char *value) {
+
+    if (strcmp(value, "gzip") == 0 || strcmp(value, "zlib") == 0) {
+        glob->compress = CORSARO_FILE_COMPRESS_ZLIB;
+    } else if (strcmp(value, "bzip") == 0 || strcmp(value, "bz2") == 0) {
+        glob->compress = CORSARO_FILE_COMPRESS_BZ2;
+    } else if (strcmp(value, "lzo") == 0) {
+        glob->compress = CORSARO_FILE_COMPRESS_LZO;
+    } else if (strcmp(value, "none") == 0) {
+        glob->compress = CORSARO_FILE_COMPRESS_NONE;
+    } else {
+        corsaro_log(glob->logger, "invalid compression method '%s'", value);
+        return -1;
+    }
+
+    return 0;
+}
+
 static int parse_plugin_config(corsaro_trace_global_t *glob,
         yaml_document_t *doc, yaml_node_t *pluginlist) {
 
@@ -146,6 +179,20 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && strcmp((char *)key->data.scalar.value, "outputmode")) {
+        if (parse_file_mode(glob, (char *)value->data.scalar.value) < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && strcmp((char *)key->data.scalar.value, "compressmethod")) {
+        if (parse_compress_mode(glob, (char *)value->data.scalar.value) < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && strcmp((char *)key->data.scalar.value, "filter")) {
         glob->filterstring = strdup((char *)value->data.scalar.value);
     }
@@ -163,6 +210,12 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && strcmp((char *)key->data.scalar.value, "rotatefreq")) {
         glob->rotatefreq = strtoul((char *)value->data.scalar.value, NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && strcmp((char *)key->data.scalar.value, "compresslevel")) {
+        glob->compresslevel = strtoul((char *)value->data.scalar.value,
+                NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -256,6 +309,7 @@ yamlfail:
 
 corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     corsaro_trace_global_t *glob = NULL;
+    corsaro_plugin_proc_options_t stdopts;
 
     /* Allocate memory for global variables */
     glob = (corsaro_trace_global_t *)malloc(sizeof(corsaro_trace_global_t));
@@ -285,6 +339,10 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->trace = NULL;
     glob->filter = NULL;
     glob->logger = NULL;
+
+    glob->outmode = CORSARO_FILE_MODE_DEFAULT;
+    glob->compress = CORSARO_FILE_COMPRESS_DEFAULT;
+    glob->compresslevel = CORSARO_FILE_COMPRESS_LEVEL_DEFAULT;
 
     /* Need to grab the template first, in case we need it for logging.
      * This will mean we read the config file twice... :(
@@ -335,6 +393,9 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         return NULL;
     }
 
+    /* Ok to cleanse this now, the config parsing above should have made
+     * copies of all the plugins that we need.
+     */
     corsaro_cleanse_plugin_list(allplugins);
 
     /* Check essential options are set */
@@ -354,6 +415,20 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         corsaro_trace_free_global(glob);
         return NULL;
     }
+
+    stdopts.template = glob->template;
+    stdopts.monitorid = glob->monitorid;
+    stdopts.compresslevel = glob->compresslevel;
+    stdopts.compress = glob->compress;
+    stdopts.outmode = glob->outmode;
+
+    if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts) < 0) {
+        corsaro_log(glob->logger,
+            "error while finishing plugin configuration. Exiting.");
+        corsaro_trace_free_global(glob);
+        return NULL;
+    }
+
 
     return glob;
 

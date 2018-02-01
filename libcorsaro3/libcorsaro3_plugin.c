@@ -198,8 +198,23 @@ int corsaro_configure_plugin(corsaro_plugin_t *p, yaml_document_t *doc,
     return p->parse_config(p, doc, options);
 }
 
+int corsaro_finish_plugin_config(corsaro_plugin_t *plist,
+        corsaro_plugin_proc_options_t *stdopts) {
+
+    corsaro_plugin_t *p = plist;
+
+    while (p != NULL) {
+        if (p->config != NULL) {
+            p->finalise_config(p, stdopts);
+        }
+        p = p->next;
+    }
+    return 0;
+}
+
+/* XXX number of arguments is starting to get out of hand */
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist,int count, int api) {
+        corsaro_plugin_t *plist, int count, int api) {
     int index = 0;
 
     corsaro_plugin_set_t *pset = (corsaro_plugin_set_t *)malloc(
@@ -237,6 +252,7 @@ int corsaro_stop_plugins(corsaro_plugin_set_t *pset) {
            p->halt_processing(p, pset->plugin_state[index]);
         }
 
+        pset->plugin_state[index] = NULL;
         p = p->next;
         index ++;
     }

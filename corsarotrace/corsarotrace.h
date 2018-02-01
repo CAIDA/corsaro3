@@ -34,6 +34,7 @@
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_plugin.h"
+#include "libcorsaro3_io.h"
 
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
@@ -62,6 +63,10 @@ typedef struct corsaro_trace_glob {
     uint32_t boundendts;
     uint32_t interval;
     uint32_t rotatefreq;
+
+    int compresslevel;
+    corsaro_file_compress_t compress;
+    corsaro_file_mode_t outmode;
 
     uint8_t promisc;
     uint8_t logmode;
