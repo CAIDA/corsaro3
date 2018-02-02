@@ -94,6 +94,7 @@ typedef enum corsaro_file_mode {
 typedef struct corsaro_file {
     /** The requested output format for the file */
     corsaro_file_mode_t mode;
+    char *filename;
 
     /** Per-framework state for the file */
     union {
@@ -132,8 +133,13 @@ typedef struct corsaro_file {
  * @param time          the current time (used for strftime formatting)
  * @param compress      if set to CORSARO_FILE_COMPRESS_NONE then any .gz or
  *                      .bz2 file extension will be removed
+ * @param threadid      the ID of the thread that is opening this file.
  * @return pointer to a dynamically allocated string with the filename if
  * successful, NULL otherwise
+ *
+ *
+ * If threadid is >= 0, then ".<threadid>--" will be prepended to the
+ * filename.
  *
  * Note: It is the caller's responsibility to free the returned string
  */
@@ -141,7 +147,8 @@ char *corsaro_generate_file_name(const char *template,
         const char *plugin,
         const char *monitorname,
         uint32_t time,
-        corsaro_file_compress_t compress);
+        corsaro_file_compress_t compress,
+        int threadid);
 
 
 /** libcorsaro3_file API */

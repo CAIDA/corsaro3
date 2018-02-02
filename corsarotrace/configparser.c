@@ -109,7 +109,6 @@ static int parse_plugin_config(corsaro_trace_global_t *glob,
 
             /* key = plugin name */
             /* value = map of plugin options */
-
             orig = corsaro_find_plugin(allplugins, (char *)key->data.scalar.value);
             if (orig == NULL) {
                 corsaro_log(glob->logger, "unknown plugin '%s'",
@@ -149,15 +148,13 @@ static int grab_corsaro_filename_template(corsaro_trace_global_t *glob,
         yaml_document_t *doc, yaml_node_t *key, yaml_node_t *value) {
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "outtemplate")) {
+            && !strcmp((char *)key->data.scalar.value, "outtemplate")) {
         glob->template = strdup((char *)value->data.scalar.value);
-        return 0;
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "logfilename")) {
+            && !strcmp((char *)key->data.scalar.value, "logfilename")) {
         glob->logfilename = strdup((char *)value->data.scalar.value);
-        return 0;
     }
 
     return 1;
@@ -167,75 +164,75 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
         yaml_document_t *doc, yaml_node_t *key, yaml_node_t *value) {
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "inputuri")) {
+            && !strcmp((char *)key->data.scalar.value, "inputuri")) {
         glob->inputuri = strdup((char *)value->data.scalar.value);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "promisc")) {
+            && !strcmp((char *)key->data.scalar.value, "promisc")) {
         if (parse_promisc_mode(glob, (char *)value->data.scalar.value) < 0) {
             return -1;
         }
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "outputmode")) {
+            && !strcmp((char *)key->data.scalar.value, "outputmode")) {
         if (parse_file_mode(glob, (char *)value->data.scalar.value) < 0) {
             return -1;
         }
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "compressmethod")) {
+            && !strcmp((char *)key->data.scalar.value, "compressmethod")) {
         if (parse_compress_mode(glob, (char *)value->data.scalar.value) < 0) {
             return -1;
         }
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "filter")) {
+            && !strcmp((char *)key->data.scalar.value, "filter")) {
         glob->filterstring = strdup((char *)value->data.scalar.value);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "monitorid")) {
+            && !strcmp((char *)key->data.scalar.value, "monitorid")) {
         glob->monitorid = strdup((char *)value->data.scalar.value);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "interval")) {
+            && !strcmp((char *)key->data.scalar.value, "interval")) {
         glob->interval = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "rotatefreq")) {
+            && !strcmp((char *)key->data.scalar.value, "rotatefreq")) {
         glob->rotatefreq = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "compresslevel")) {
+            && !strcmp((char *)key->data.scalar.value, "compresslevel")) {
         glob->compresslevel = strtoul((char *)value->data.scalar.value,
                 NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "threads")) {
+            && !strcmp((char *)key->data.scalar.value, "threads")) {
         glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "startboundaryts")) {
+            && !strcmp((char *)key->data.scalar.value, "startboundaryts")) {
         glob->boundstartts = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && strcmp((char *)key->data.scalar.value, "endboundaryts")) {
+            && !strcmp((char *)key->data.scalar.value, "endboundaryts")) {
         glob->boundendts = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
-            && strcmp((char *)key->data.scalar.value, "plugins")) {
-        glob->plugincount = parse_plugin_config(glob, doc, value) == 0;
+            && !strcmp((char *)key->data.scalar.value, "plugins")) {
+        glob->plugincount = parse_plugin_config(glob, doc, value);
         if (glob->plugincount == 0) {
             return -1;
         }

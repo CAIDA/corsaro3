@@ -45,7 +45,7 @@
     int plugin##_finalise_config(corsaro_plugin_t *p,       \
             corsaro_plugin_proc_options_t *stdopts);        \
     void plugin##_destroy_self(corsaro_plugin_t *p);        \
-    void *plugin##_init_processing(corsaro_plugin_t *p);    \
+    void *plugin##_init_processing(corsaro_plugin_t *p, int threadid);    \
     int plugin##_halt_processing(corsaro_plugin_t *p, void *local); \
     int plugin##_start_interval(corsaro_plugin_t *p, void *local, \
             corsaro_interval_t *int_start);                 \
@@ -122,7 +122,7 @@ struct corsaro_plugin {
     void (*destroy_self)(corsaro_plugin_t *p);
 
     /* Callbacks for trace processing */
-    void *(*init_processing)(corsaro_plugin_t *p);
+    void *(*init_processing)(corsaro_plugin_t *p, int threadid);
     int (*halt_processing)(corsaro_plugin_t *p, void *local);
     int (*start_interval)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *int_start);
@@ -168,7 +168,7 @@ int corsaro_finish_plugin_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts);
 
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist, int count, int api);
+        corsaro_plugin_t *plist, int count, int api, int threadid);
 int corsaro_stop_plugins(corsaro_plugin_set_t *pluginset);
 int corsaro_push_end_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
         uint32_t ts);

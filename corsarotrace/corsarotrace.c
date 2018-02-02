@@ -142,7 +142,8 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     stdopts.compresslevel = glob->compresslevel;
 
     tls->plugins = corsaro_start_plugins(glob->logger,
-            glob->active_plugins, glob->plugincount, CORSARO_TRACE_API);
+            glob->active_plugins, glob->plugincount, CORSARO_TRACE_API,
+            trace_get_perpkt_thread_id(t));
 
     tls->next_report = 0;
     tls->current_interval.number = 0;
@@ -166,6 +167,7 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)local;
 
+
     if (tls->pkts_outstanding) {
         if (corsaro_push_end_plugins(tls->plugins,
                     tls->current_interval.number, tls->last_ts) == -1) {
@@ -177,6 +179,9 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     if (corsaro_stop_plugins(tls->plugins) == -1) {
         corsaro_log(glob->logger, "error while stopping plugins.");
     }
+
+    publish_file_closed_message(trace, t, &tls->lastrotateinterval,
+                    ((uint64_t)tls->next_report) << 32);
 
     free(tls);
 }
@@ -225,10 +230,13 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     if (tv.tv_sec < tls->current_interval.time) {
+        fprintf(stderr, "%u -- %u %u\n", tv.tv_sec, tls->current_interval.time,
+                tls->next_report);
         corsaro_log(glob->logger,
                 "received a packet from *before* our current interval!");
         corsaro_log(glob->logger,
-                "skipping packet, but this is probably a bug.");
+                "skipping packet, but this is probably a b00g.");
+        exit(1);
         return packet;
     }
 
@@ -239,6 +247,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     tls->pkts_outstanding ++;
     tls->pkts_since_tick ++;
+    tls->last_ts = tv.tv_sec;
     corsaro_push_packet_plugins(tls->plugins, packet);
 
     return packet;
@@ -310,6 +319,8 @@ static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
         wait->finished_intervals = fin->next;
         free(fin);
     }
+
+    corsaro_halted = 1;
 }
 
 static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
@@ -396,10 +407,11 @@ int start_trace_input(corsaro_trace_global_t *glob) {
 
     trace_set_reporter_thold(glob->trace, 1);
     if (glob->interval > 0) {
-        trace_set_tick_interval(glob->trace, glob->interval);
+        trace_set_tick_interval(glob->trace, glob->interval * 1000);
     }
 
     trace_set_combiner(glob->trace, &combiner_ordered, nothing);
+    trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, NULL, NULL);
 
     trace_set_perpkt_threads(glob->trace, glob->threads);
 
@@ -534,7 +546,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Create trace and start processing threads */
-    if (start_trace_input(glob) == 0) {
+    if (start_trace_input(glob) < 0) {
         corsaro_log(glob->logger, "failed to start packet source %s.", glob->inputuri);
         return 1;
     }
@@ -547,7 +559,9 @@ int main(int argc, char *argv[]) {
     while (!corsaro_halted) {
         sleep(1);
     }
-    trace_pstop(glob->trace);
+    if (!trace_has_finished(glob->trace)) {
+        trace_pstop(glob->trace);
+    }
 
     /* Join on input trace */
     trace_join(glob->trace);

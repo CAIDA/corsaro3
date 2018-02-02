@@ -88,6 +88,8 @@ struct corsaro_flowtuple_state_t {
     /** The current outfile */
     int outfile_n;
 
+    /** The ID of the thread running this plugin instance */
+    int threadid;
 };
 
 typedef struct corsaro_flowtuple_config {
@@ -398,7 +400,7 @@ static int binary_dump(corsaro_plugin_t *p,
 
 
 
-void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p) {
+void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
 
     struct corsaro_flowtuple_state_t *state;
     int i;
@@ -410,6 +412,8 @@ void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p) {
         /* OOM */
         return NULL;
     }
+
+    state->threadid = threadid;
 
     /* defer opening the output file until we start the first interval */
 
@@ -465,7 +469,8 @@ int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
         char *outname = NULL;
 
         outname = corsaro_generate_file_name(conf->basic.template, p->name,
-                conf->basic.monitorid, int_start->time, conf->basic.compress);
+                conf->basic.monitorid, int_start->time, conf->basic.compress,
+                state->threadid);
 
         if (outname == NULL) {
             corsaro_log(p->logger,

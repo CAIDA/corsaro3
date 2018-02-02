@@ -44,7 +44,8 @@ char *corsaro_generate_file_name(const char *template,
         const char *plugin,
         const char *monitorname,
         uint32_t time,
-        corsaro_file_compress_t compress)
+        corsaro_file_compress_t compress,
+        int threadid)
 {
     /* some of the structure of this code is borrowed from the
        FreeBSD implementation of strftime */
@@ -65,6 +66,7 @@ char *corsaro_generate_file_name(const char *template,
     if (template == NULL) {
         return NULL;
     }
+
 
     for (; *tmpl; ++tmpl) {
         if (*tmpl == '.' && compress == CORSARO_FILE_COMPRESS_NONE) {
@@ -111,6 +113,22 @@ char *corsaro_generate_file_name(const char *template,
         if (bufp == buflim)
             break;
         *bufp++ = *tmpl;
+    }
+
+    if (bufp >= buflim) {
+        /* Not enough space for the full filename */
+        return NULL;
+    }
+
+    if (threadid >= 0) {
+        char thspace[1024];
+        snprintf(thspace, 1024, "--%d", threadid);
+        bufp = stradd(thspace, bufp, buflim);
+    }
+
+    if (bufp >= buflim) {
+        /* Not enough space for the full filename */
+        return NULL;
     }
 
     *bufp = '\0';

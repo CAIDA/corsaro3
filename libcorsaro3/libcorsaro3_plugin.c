@@ -30,6 +30,10 @@
 #include <assert.h>
 #include "libcorsaro3_plugin.h"
 
+#ifdef WITH_PLUGIN_SIXT
+#include "corsaro_flowtuple.h"
+#endif
+
 #define PLUGIN_INIT_ADD(plugin)                                                \
 {                                                                              \
     tail = add_plugin(logger, tail, plugin##_alloc(), 1);                      \
@@ -85,6 +89,8 @@ static int corsaro_plugin_verify(corsaro_logger_t *logger,
                 plugin->name);
         return 0;
     }
+
+    return 1;
 
 }
 
@@ -218,7 +224,7 @@ int corsaro_finish_plugin_config(corsaro_plugin_t *plist,
 
 /* XXX number of arguments is starting to get out of hand */
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist, int count, int api) {
+        corsaro_plugin_t *plist, int count, int api, int threadid) {
     int index = 0;
 
     corsaro_plugin_set_t *pset = (corsaro_plugin_set_t *)malloc(
@@ -236,7 +242,8 @@ corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
         assert(index < count);
 
         if (api == CORSARO_TRACE_API) {
-            pset->plugin_state[index] = plist->init_processing(plist);
+            pset->plugin_state[index] = plist->init_processing(plist,
+                    threadid);
         }
         index += 1;
         plist = plist->next;

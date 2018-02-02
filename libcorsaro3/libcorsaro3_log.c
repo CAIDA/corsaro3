@@ -60,9 +60,9 @@ void corsaro_log(corsaro_logger_t *logger, const char *fmt, ...) {
         /* syslog is thread-safe, so skip the mutex */
         if (logger->name) {
             snprintf(bigbuf, sizeof(bigbuf), "[%s] %s", logger->name, fmt);
-            vsyslog(LOG_DAEMON, bigbuf, ap);
+            vsyslog(LOG_DAEMON | LOG_DEBUG, bigbuf, ap);
         } else {
-            vsyslog(LOG_DAEMON, fmt, ap);
+            vsyslog(LOG_DAEMON | LOG_DEBUG, fmt, ap);
         }
     } else {
         if (logger->mode == CORSARO_LOG_STDERR) {
@@ -131,7 +131,7 @@ corsaro_logger_t *init_corsaro_logger(char *name, char *fname) {
     }
 
     pthread_mutex_init(&logger->mutex, NULL);
-
+    return logger;
 }
 
 
