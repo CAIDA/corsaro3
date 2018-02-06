@@ -67,6 +67,15 @@ static void clean()
 /** Initialize a corsaro_in object for the given file name */
 static int init_corsaro(char *corsarouri)
 {
+  /* HAX: allow plugin to be specified using "PLUGIN,FILE" syntax */
+  char *plugin_name = NULL;
+  char *newuri = NULL;
+  if ((newuri = strchr(corsarouri, ',')) != NULL) {
+    newuri++;
+    plugin_name = corsarouri;
+    corsarouri = newuri;
+  }
+
   /* get an corsaro_in object */
   if ((corsaro = corsaro_alloc_input(corsarouri)) == NULL) {
     fprintf(stderr, "could not alloc corsaro_in\n");
@@ -82,10 +91,18 @@ static int init_corsaro(char *corsarouri)
   }
 
   /* start corsaro */
-  if (corsaro_start_input(corsaro) != 0) {
-    fprintf(stderr, "could not start corsaro\n");
-    clean();
-    return -1;
+  if (plugin_name != NULL) {
+    if (corsaro_start_input_with_hint(corsaro, plugin_name) != 0) {
+      fprintf(stderr, "could not start corsaro\n");
+      clean();
+      return -1;
+    }
+  } else {
+    if (corsaro_start_input(corsaro) != 0) {
+      fprintf(stderr, "could not start corsaro\n");
+      clean();
+      return -1;
+    }
   }
 
   return 0;

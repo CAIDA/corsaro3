@@ -1343,6 +1343,43 @@ corsaro_in_t *corsaro_alloc_input(const char *corsarouri)
   return corsaro;
 }
 
+int corsaro_start_input_with_hint(corsaro_in_t *corsaro,
+                                  char *plugin_hint)
+{
+  corsaro_plugin_t *p = NULL;
+
+  /* open the file! */
+  if ((corsaro->file = corsaro_file_ropen(corsaro->uridata)) == NULL) {
+    corsaro_log_in(__func__, corsaro, "could not open input file %s",
+                   corsaro->uridata);
+    /* ak comments the following, leave it up to the caller to free
+       the state object */
+    /*corsaro_in_free(corsaro);*/
+    return -1;
+  }
+
+  while ((p = corsaro_plugin_next(corsaro->plugin_manager, p)) != NULL &&
+         corsaro->plugin == NULL) {
+    if (p->probe_filename(plugin_hint) == 1) {
+      corsaro_log_in(__func__, corsaro,
+                     "%s plugin selected to read %s (using file name)", p->name,
+                     corsaro->uridata);
+      corsaro->plugin = p;
+    }
+  }
+
+  /* start up the plugin we detected */
+  if (corsaro->plugin->init_input(corsaro) != 0) {
+    corsaro_log_in(__func__, corsaro, "could not initialize %s",
+                   corsaro->plugin->name);
+    return -1;
+  }
+
+  corsaro->started = 1;
+
+  return 0;
+}
+
 int corsaro_start_input(corsaro_in_t *corsaro)
 {
   corsaro_plugin_t *p = NULL;

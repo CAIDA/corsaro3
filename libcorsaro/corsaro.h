@@ -494,6 +494,15 @@ corsaro_in_t *corsaro_alloc_input(const char *corsarouri);
  */
 int corsaro_start_input(corsaro_in_t *corsaro);
 
+/** Initialize an corsaro input object that has already been allocated
+ *
+ * @param corsaro       The corsaro input object to start
+ * @param plugin_hint   Name of the plugin to use
+ * @return 0 if corsaro is started successfully, -1 if an error occurs
+ */
+int corsaro_start_input_with_hint(corsaro_in_t *corsaro,
+                                  char *plugin_hint);
+
 /** Allocate a reusable corsaro record object
  *
  * @param corsaro          The corsaro input object to associate with the record
