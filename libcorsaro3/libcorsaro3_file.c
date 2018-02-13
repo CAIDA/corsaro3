@@ -36,9 +36,17 @@
 #include "libcorsaro3_io.h"
 #include "libcorsaro3_log.h"
 #include "libcorsaro3.h"
+#include "wandio_utils.h"
 
 /** The string to prefix file names with when creating trace files */
 #define CORSARO_FILE_TRACE_FORMAT "pcapfile:"
+
+/** The string that is assumed to be at the start of any corsaro ASCII file */
+#define CORSARO_FILE_ASCII_CHECK "# CORSARO"
+
+/** The string that is assumed to be at the start of any corsaro binary file */
+#define CORSARO_FILE_BINARY_CHECK "EDGR"
+
 
 
 corsaro_file_t *corsaro_file_open(corsaro_logger_t *logger, char *fname,
@@ -56,6 +64,7 @@ corsaro_file_t *corsaro_file_open(corsaro_logger_t *logger, char *fname,
     }
 
     f->mode = mode;
+    f->filename = fname;
 
     /* did they ask for a libtrace file? */
     switch (mode) {
@@ -135,6 +144,9 @@ void corsaro_file_close(corsaro_file_t *file)
             assert(0);
     }
 
+    if (file->filename) {
+        free(file->filename);
+    }
     free(file);
     return;
 }
@@ -198,6 +210,115 @@ off_t corsaro_file_write_interval(corsaro_file_t *file,
     return -1;
 }
 
+corsaro_file_in_t *corsaro_file_ropen(corsaro_logger_t *logger, char *fname) {
+
+    corsaro_file_in_t *rf = NULL;
+    int len;
+    char peekbuf[128];
+
+    rf = (corsaro_file_in_t *)malloc(sizeof(corsaro_file_in_t));
+
+    if (rf == NULL) {
+        /* OOM */
+        corsaro_log(logger, "failed to allocate memory for corsaro_file_in_t.");
+        goto ropen_fail;
+    }
+
+    rf->mode = CORSARO_FILE_MODE_UNKNOWN;
+    rf->filename = fname;
+
+    rf->wandio = wandio_create(fname);
+    if (rf->wandio == NULL) {
+        corsaro_log(logger, "failed to open rfile %s.", fname);
+        goto ropen_fail;
+    }
+
+    len = wandio_peek(rf->wandio, peekbuf, sizeof(peekbuf));
+    if (len >= strlen(CORSARO_FILE_ASCII_CHECK) &&
+            memcmp(CORSARO_FILE_ASCII_CHECK, peekbuf,
+                    strlen(CORSARO_FILE_ASCII_CHECK)) == 0) {
+        rf->mode = CORSARO_FILE_MODE_ASCII;
+    } else if (len >= strlen(CORSARO_FILE_BINARY_CHECK) &&
+            memcmp(CORSARO_FILE_BINARY_CHECK, peekbuf,
+                    strlen(CORSARO_FILE_BINARY_CHECK)) == 0) {
+        rf->mode = CORSARO_FILE_MODE_BINARY;
+    }
+
+    return rf;
+
+ropen_fail:
+    if (rf) {
+        free(rf);
+    }
+    return NULL;
+}
+
+void corsaro_file_rclose(corsaro_file_in_t *file) {
+
+    if (file == NULL) {
+        return;
+    }
+
+    if (file->wandio) {
+        wandio_destroy(file->wandio);
+    }
+
+    file->wandio = NULL;
+    free(file);
+}
+
+off_t corsaro_file_rread_ascii_line(corsaro_logger_t *logger,
+        corsaro_file_in_t *file, char *line, off_t len) {
+
+    off_t ret;
+    if (file->mode != CORSARO_FILE_MODE_ASCII) {
+        corsaro_log(logger, "attempted to read a line from a non-ASCII file.");
+        return 0;
+    }
+
+    if (line == NULL || len <= 0) {
+        corsaro_log(logger,
+                "line and/or len parameters for corsaro_read_ascii_line() are invalid.");
+        return 0;
+    }
+
+    /* Remove the '\n' -- we're mostly using this for parsing */
+    if ((ret = wandio_fgets(file->wandio, line, len, 1)) <= 0) {
+        corsaro_log(logger,
+                "wandio has failed to read a line from an ASCII corsaro file.");
+        return 0;
+    }
+
+    return ret;
+}
+
+off_t corsaro_file_rread_bytes(corsaro_logger_t *logger,
+        corsaro_file_in_t *file, char *buf, off_t len) {
+
+    off_t ret;
+
+    if (file->mode != CORSARO_FILE_MODE_BINARY && file->mode !=
+            CORSARO_FILE_MODE_ASCII) {
+        corsaro_log(logger,
+                "attempted to read bytes from an incompatible file.");
+        return 0;
+    }
+
+    if (buf == NULL || len <= 0) {
+        corsaro_log(logger,
+                "buffer and/or len parameters for corsaro_read_bytes() are invalid.");
+        return 0;
+    }
+
+    /* Remove the '\n' -- we're mostly using this for parsing */
+    if ((ret = wandio_read(file->wandio, buf, len)) <= 0) {
+        corsaro_log(logger,
+                "wandio has failed to read bytes from a corsaro file.");
+        return 0;
+    }
+
+    return ret;
+}
 
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

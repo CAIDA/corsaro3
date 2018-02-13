@@ -83,10 +83,6 @@ struct corsaro_flowtuple_state_t {
     uint16_t current_class;
     /** The outfile for the plugin */
     corsaro_file_t *outfile;
-    /** A set of pointers to outfiles to support non-blocking close */
-    corsaro_file_t *outfile_p[OUTFILE_POINTERS];
-    /** The current outfile */
-    int outfile_n;
 
     /** The ID of the thread running this plugin instance */
     int threadid;
@@ -112,7 +108,7 @@ static corsaro_plugin_t corsaro_flowtuple_plugin = {
     CORSARO_FLOWTUPLE_MAGIC,
     CORSARO_PLUGIN_GENERATE_BASE_PTRS(corsaro_flowtuple),
     CORSARO_PLUGIN_GENERATE_TRACE_PTRS(corsaro_flowtuple),
-//    CORSARO_PLUGIN_GENERATE_READ_PTRS(corsaro_flowtuple),
+    CORSARO_PLUGIN_GENERATE_READ_PTRS(corsaro_flowtuple),
     CORSARO_PLUGIN_GENERATE_TAIL
 
 };
@@ -444,17 +440,64 @@ int corsaro_flowtuple_halt_processing(corsaro_plugin_t *p, void *local) {
         }
     }
 
-    /* close all the outfile pointers */
-    for (i = 0; i < OUTFILE_POINTERS; i++) {
-        if (state->outfile_p[i] != NULL) {
-            corsaro_file_close(state->outfile_p[i]);
-            state->outfile_p[i] = NULL;
-        }
+    if (state->outfile != NULL) {
+        corsaro_file_close(state->outfile);
     }
     state->outfile = NULL;
     free(state);
 
     return 0;
+}
+
+char *corsaro_flowtuple_derive_output_name(corsaro_plugin_t *p,
+        void *local, uint32_t timestamp, int threadid) {
+
+    corsaro_flowtuple_config_t *conf;
+    struct corsaro_flowtuple_state_t *state;
+    char *outname = NULL;
+
+    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_derive_output_name", NULL);
+
+    outname = corsaro_generate_file_name(conf->basic.template, p->name,
+            conf->basic.monitorid, timestamp, conf->basic.compress,
+            threadid);
+    if (outname == NULL) {
+        corsaro_log(p->logger,
+                "failed to generate suitable filename for flowtuple output");
+        return NULL;
+    }
+    return outname;
+
+}
+
+corsaro_file_t *corsaro_flowtuple_open_output_file(corsaro_plugin_t *p,
+        void *local, uint32_t timestamp, int threadid) {
+
+    corsaro_flowtuple_config_t *conf;
+    struct corsaro_flowtuple_state_t *state;
+    char *outname = NULL;
+    corsaro_file_t *f = NULL;
+
+    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_open_output_file", NULL);
+
+    outname = corsaro_flowtuple_derive_output_name(p, local, timestamp,
+            threadid);
+    if (outname == NULL) {
+        return f;
+    }
+
+    f = corsaro_file_open(p->logger,
+            outname, conf->basic.outmode, conf->basic.compress,
+            conf->basic.compresslevel,
+            O_CREAT);
+
+    if (f == NULL) {
+        corsaro_log(p->logger, "failed to open flowtuple output file %s",
+                outname);
+        free(outname);
+    }
+
+    return f;
 }
 
 int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
@@ -463,32 +506,15 @@ int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
 
-    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_start_interval");
+    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_start_interval", -1);
 
     if (state->outfile == NULL) {
-        char *outname = NULL;
+        state->outfile = corsaro_flowtuple_open_output_file(p, local,
+                int_start->time, state->threadid);
 
-        outname = corsaro_generate_file_name(conf->basic.template, p->name,
-                conf->basic.monitorid, int_start->time, conf->basic.compress,
-                state->threadid);
-
-        if (outname == NULL) {
-            corsaro_log(p->logger,
-                "failed to generate suitable filename for flowtuple output");
+        if (state->outfile == NULL) {
             return -1;
         }
-
-        state->outfile_p[state->outfile_n] = corsaro_file_open(p->logger,
-                outname, conf->basic.outmode, conf->basic.compress,
-                conf->basic.compresslevel,
-                O_CREAT);
-        if (state->outfile_p[state->outfile_n] == NULL) {
-            corsaro_log(p->logger, "failed to open output file %s", outname);
-            free(outname);
-            return -1;
-        }
-
-        state->outfile = state->outfile_p[state->outfile_n];
     }
     return 0;
 }
@@ -500,7 +526,7 @@ int corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
 
-    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_end_interval");
+    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_end_interval", -1);
 
     for (i = 0; i <= CORSARO_FLOWTUPLE_CLASS_MAX; i++) {
         assert(state->st_hash[i] != NULL);
@@ -632,7 +658,7 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
 
-    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_process_packet");
+    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_process_packet", -1);
 
     if ((pstate->flags & CORSARO_PACKET_STATE_FLAG_IGNORE) != 0) {
         return 0;
@@ -694,25 +720,45 @@ int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local,
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
 
-    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_rotate_output");
+    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_rotate_output", -1);
 
-    /* leave the current file to finish draining buffers */
-    assert(state->outfile != NULL);
-
-    /* move on to the next output pointer */
-    state->outfile_n = (state->outfile_n + 1) % OUTFILE_POINTERS;
-
-    if (state->outfile_p[state->outfile_n] != NULL) {
+    if (state->outfile != NULL) {
         /* we're gonna have to wait for this to close */
-        corsaro_file_close(state->outfile_p[state->outfile_n]);
-        state->outfile_p[state->outfile_n] = NULL;
+        corsaro_file_close(state->outfile);
+        state->outfile = NULL;
     }
-
-    state->outfile = NULL;
     return 0;
 }
 
+int corsaro_flowtuple_write_result(corsaro_plugin_t *p, void *local,
+        corsaro_plugin_result_t *res, corsaro_file_t *out) {
 
+    /* TODO */
+    return -1;
+}
+
+int corsaro_flowtuple_read_result(corsaro_plugin_t *p, void *local,
+        corsaro_file_in_t *in, corsaro_plugin_result_t *res) {
+
+
+    /* TODO */
+    return -1;
+}
+
+int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
+        corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2) {
+
+
+    /* TODO */
+    return -1;
+}
+
+void corsaro_flowtuple_release_result(corsaro_plugin_t *p, void *local,
+        corsaro_plugin_result_t *res) {
+
+    /* TODO */
+    free(res->resdata);
+}
 
 /*
  * Hashes the flowtuple based on the following table

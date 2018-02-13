@@ -130,16 +130,8 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global) {
 
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
-    corsaro_plugin_proc_options_t stdopts;
-
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)malloc(
             sizeof(corsaro_trace_local_t));
-
-    stdopts.template = glob->template;
-    stdopts.monitorid = glob->monitorid;
-    stdopts.outmode = glob->outmode;
-    stdopts.compress = glob->compress;
-    stdopts.compresslevel = glob->compresslevel;
 
     tls->plugins = corsaro_start_plugins(glob->logger,
             glob->active_plugins, glob->plugincount, CORSARO_TRACE_API,
@@ -293,17 +285,6 @@ static void *init_waiter(libtrace_t *trace, libtrace_thread_t *t,
     return wait;
 }
 
-static void trigger_merge(corsaro_trace_global_t *glob,
-        corsaro_fin_interval_t *fin) {
-
-
-    corsaro_log(glob->logger,
-            "%u threads have finished with interval %u:%u\n",
-            fin->threads_ended, fin->interval_id, fin->timestamp);
-
-
-}
-
 static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *tls) {
 
@@ -315,7 +296,8 @@ static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
     while (wait->finished_intervals) {
         fin = wait->finished_intervals;
 
-        trigger_merge(glob, fin);
+        corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins, fin,
+                glob->plugincount);
         wait->finished_intervals = fin->next;
         free(fin);
     }
@@ -353,7 +335,8 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
             quik.timestamp = msg->interval_time;
             quik.threads_ended = 1;
             quik.next = NULL;
-            trigger_merge(glob, &quik);
+            corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins,
+                    &quik, glob->plugincount);
             return;
         }
 
@@ -369,7 +352,8 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
             fin->threads_ended ++;
             if (fin->threads_ended == glob->threads) {
                 assert(fin == wait->finished_intervals);
-                trigger_merge(glob, fin);
+                corsaro_merge_plugin_outputs(glob->logger,
+                        glob->active_plugins, fin, glob->plugincount);
                 wait->finished_intervals = fin->next;
                 free(fin);
             }

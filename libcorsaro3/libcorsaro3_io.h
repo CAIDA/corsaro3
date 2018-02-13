@@ -113,6 +113,17 @@ typedef struct corsaro_file {
 
 } corsaro_file_t;
 
+/** An opaque structure defining a corsaro result input source */
+typedef struct corsaro_file_in {
+    /** The IO mode that was used to write this file */
+    corsaro_file_mode_t mode;
+    char *filename;
+
+    /** The wandio input file handle */
+    io_t *wandio;
+
+} corsaro_file_in_t;
+
 /** Shortcut to the non-trace (wandio) state structure */
 #define state_wandio mode_state.ms_wandio
 /** Shortcut to a non-trace io object */
@@ -162,6 +173,13 @@ off_t corsaro_file_printf(corsaro_file_t *file, const char *format, ...);
 off_t corsaro_file_write(corsaro_file_t *file, const void *buffer, off_t len);
 off_t corsaro_file_write_interval(corsaro_file_t *file,
         corsaro_interval_t *interval, uint8_t isstart);
+
+corsaro_file_in_t *corsaro_file_ropen(corsaro_logger_t *logger, char *fname);
+void corsaro_file_rclose(corsaro_file_in_t *file);
+off_t corsaro_file_rread_ascii_line(corsaro_logger_t *logger,
+        corsaro_file_in_t *file, char *line, off_t len);
+off_t corsaro_file_rread_bytes(corsaro_logger_t *logger,
+        corsaro_file_in_t *file, char *line, off_t len);
 
 #endif
 

@@ -302,16 +302,16 @@ khint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
 #endif
 
 
-#define FLOWTUPLE_PROC_FUNC_START(name) \
+#define FLOWTUPLE_PROC_FUNC_START(name, failret) \
     conf = (corsaro_flowtuple_config_t *)(p->config); \
     state = (struct corsaro_flowtuple_state_t *)local; \
     if (state == NULL) { \
         corsaro_log(p->logger, "NULL state in %s()", name); \
-        return -1; \
+        return failret; \
     } \
     if (conf == NULL) { \
         corsaro_log(p->logger, "NULL config in %s()", name); \
-        return -1; \
+        return failret; \
     }
 
 

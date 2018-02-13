@@ -351,5 +351,175 @@ int corsaro_push_rotate_file_plugins(corsaro_plugin_set_t *pset,
     return 0;
 }
 
+static int find_next_merge_result(corsaro_plugin_t *p, void *plocal,
+        corsaro_file_in_t **readers, corsaro_plugin_result_t *results,
+        int tcount) {
+
+    int i, ret;
+    corsaro_plugin_result_t *cand = NULL;
+    int candind = -1;
+
+    /* TODO implement */
+    for (i = 0; i < tcount; i++) {
+        if (readers[i] == NULL) {
+            /* no more results from this source */
+            continue;
+        }
+
+        if (results[i].type == CORSARO_RESULT_TYPE_BLANK) {
+            /* need a fresh result */
+            ret = p->read_result(p, plocal, readers[i], &(results[i]));
+            if (ret == -1) {
+                /* some error occurred? */
+                /* close the reader I guess... */
+                corsaro_file_rclose(readers[i]);
+                readers[i] = NULL;
+                results[i].type = CORSARO_RESULT_TYPE_EOF;
+                continue;
+            }
+        }
+
+        if (results[i].type == CORSARO_RESULT_TYPE_EOF) {
+            /* Reached EOF for this source. */
+            corsaro_file_rclose(readers[i]);
+            readers[i] = NULL;
+            results[i].type = CORSARO_RESULT_TYPE_EOF;
+            continue;
+        }
+
+        if (cand == NULL) {
+            cand = &(results[i]);
+            candind = i;
+            continue;
+        }
+
+        if (p->compare_results(p, plocal, cand, &(results[i])) > 0) {
+            cand = &(results[i]);
+            candind = i;
+        }
+    }
+
+    if (candind == -1) {
+        /* All of our sources have no more results */
+        /* return tcount to indicate that there are no more results, i.e. EOF
+         * for all readers.
+         */
+        return tcount;
+    }
+
+    return candind;
+}
+
+int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
+        corsaro_plugin_t *plist, corsaro_fin_interval_t *fin, int count)
+{
+
+    corsaro_plugin_set_t *pset;
+    corsaro_plugin_t *p;
+    int index = 0;
+    corsaro_file_in_t **readers = NULL;
+    corsaro_file_t *output = NULL;
+    corsaro_plugin_result_t *results = NULL;
+    int i;
+    int errors = 0;
+
+    pset = corsaro_start_plugins(logger, plist, count, CORSARO_READER_API,
+            9999);
+    if (pset == NULL) {
+        corsaro_log(logger,
+                "error while starting plugins for merging output.");
+        return 1;
+    }
+
+    readers = (corsaro_file_in_t **)calloc(1, fin->threads_ended *
+            sizeof(corsaro_file_in_t *));
+    results = (corsaro_plugin_result_t *)calloc(1, fin->threads_ended *
+            sizeof(corsaro_plugin_result_t));
+
+    p = pset->active_plugins;
+    while (p != NULL) {
+        int nextresind;
+
+        output = p->open_output_file(p, pset->plugin_state[index],
+                fin->timestamp, -1);
+        if (output == NULL) {
+            corsaro_log(logger,
+                    "unable to open %s output file for merge output.",
+                    p->name);
+            errors ++;
+            continue;
+        }
+
+        for (i = 0; i < fin->threads_ended; i++) {
+            char *fname = p->derive_output_name(p,
+                    pset->plugin_state[index], fin->timestamp, i);
+            readers[i] = corsaro_file_ropen(logger, fname);
+
+            if (readers[i] == NULL) {
+                corsaro_log(logger,
+                        "error while opening %s file as input for merging.",
+                        p->name);
+                errors ++;
+            }
+        }
+
+        do {
+            nextresind = find_next_merge_result(p, pset->plugin_state[index],
+                    readers, results, fin->threads_ended);
+
+            if (nextresind >= fin->threads_ended) {
+                /* no more results, close file and move onto next plugin */
+                break;
+            }
+
+            p->write_result(p, pset->plugin_state[index],
+                    &(results[nextresind]), output);
+
+            /* If the 'earliest' result is an interval marker, all next results
+             * must be interval markers -- so every reader needs to read next
+             * time round. TODO
+             */
+
+            if (results[nextresind].type == CORSARO_RESULT_TYPE_START_INTERVAL
+                    || results[nextresind].type ==
+                            CORSARO_RESULT_TYPE_END_INTERVAL) {
+                for (i = 0; i < fin->threads_ended; i++) {
+                    if (results[i].type == CORSARO_RESULT_TYPE_EOF) {
+                        continue;
+                    }
+                    p->release_result(p, pset->plugin_state[index],
+                            &(results[i]));
+                    results[i].type = CORSARO_RESULT_TYPE_BLANK;
+                }
+            } else {
+
+                /* Otherwise, 'earliest' is a single result -- just blank that
+                 * result. */
+                p->release_result(p, pset->plugin_state[index],
+                        &(results[nextresind]));
+                results[nextresind].type = CORSARO_RESULT_TYPE_BLANK;
+            }
+
+        } while (nextresind < fin->threads_ended);
+
+
+        /* Should be unnecessary, but just to be safe */
+        for (i = 0; i < fin->threads_ended; i++) {
+            if (readers[i] != NULL) {
+                corsaro_file_rclose(readers[i]);
+            }
+        }
+        corsaro_file_close(output);
+
+        p = p->next;
+        index ++;
+    }
+
+    free(readers);
+    free(results);
+    corsaro_stop_plugins(pset);
+    return errors;
+
+}
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
