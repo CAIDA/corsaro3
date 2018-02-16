@@ -314,6 +314,18 @@ khint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
         return failret; \
     }
 
+#define FLOWTUPLE_READ_FUNC_START(name, failret) \
+    conf = (corsaro_flowtuple_config_t *)(p->config); \
+    state = (struct corsaro_flowtuple_result_state_t *)local; \
+    if (state == NULL) { \
+        corsaro_log(p->logger, "NULL state in %s()", name); \
+        return failret; \
+    } \
+    if (conf == NULL) { \
+        corsaro_log(p->logger, "NULL config in %s()", name); \
+        return failret; \
+    }
+
 
 #endif
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

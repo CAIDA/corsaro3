@@ -245,6 +245,10 @@ corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
             pset->plugin_state[index] = plist->init_processing(plist,
                     threadid);
         }
+        if (api == CORSARO_READER_API) {
+            pset->plugin_state[index] = plist->init_reading(plist);
+        }
+
         index += 1;
         plist = plist->next;
         pset->plugincount ++;
@@ -260,7 +264,10 @@ int corsaro_stop_plugins(corsaro_plugin_set_t *pset) {
 
     while (p != NULL) {
         if (pset->api == CORSARO_TRACE_API) {
-           p->halt_processing(p, pset->plugin_state[index]);
+            p->halt_processing(p, pset->plugin_state[index]);
+        }
+        if (pset->api == CORSARO_READER_API) {
+            p->halt_reading(p, pset->plugin_state[index]);
         }
 
         pset->plugin_state[index] = NULL;
@@ -351,6 +358,126 @@ int corsaro_push_rotate_file_plugins(corsaro_plugin_set_t *pset,
     return 0;
 }
 
+static inline int compare_results_common(corsaro_plugin_result_t *res1,
+        corsaro_plugin_result_t *res2, corsaro_logger_t *logger) {
+
+    corsaro_result_type_t t1, t2;
+
+    t1 = res1->type;
+    t2 = res2->type;
+
+    /* EOF always comes last */
+    if (t1 == CORSARO_RESULT_TYPE_EOF) {
+        return 1;
+    }
+
+    if (t2 == CORSARO_RESULT_TYPE_EOF) {
+        return -1;
+    }
+
+    /* Data should come before anything else, since we want to
+     * consume / combine the 'marker' results in a single pass.
+     * In other words, keep reading data from a result file until
+     * we hit a marker, then wait until all other files have
+     * reached the same marker.
+     */
+    if (t1 == CORSARO_RESULT_TYPE_DATA) {
+        if (t2 == CORSARO_RESULT_TYPE_DATA) {
+            return 0;
+        }
+
+        return -1;
+    }
+
+    if (t2 == CORSARO_RESULT_TYPE_DATA) {
+        return 1;
+    }
+
+    /* Ideally, we wouldn't get non-matching interval markers. But
+     * we can at least use the interval number to try and resolve
+     * the issue.
+     */
+    if (t1 == CORSARO_RESULT_TYPE_START_INTERVAL) {
+        corsaro_interval_t *int1 = (corsaro_interval_t *)(res1->resdata);
+        corsaro_interval_t *int2 = (corsaro_interval_t *)(res2->resdata);
+
+        if (t2 == CORSARO_RESULT_TYPE_START_INTERVAL) {
+            if (int1->number < int2->number) {
+                return -1;
+            } else if (int1->number > int2->number) {
+                return 1;
+            } else {
+                /* Don't care, these are the same interval. Return -1
+                 * to avoid falling through to the plugin compare
+                 * function.
+                 */
+                return -1;
+            }
+        } else if (t2 == CORSARO_RESULT_TYPE_END_INTERVAL) {
+            if (int1->number < int2->number) {
+                return -1;
+            } else if (int1->number > int2->number) {
+                return 1;
+            } else {
+                return -1;
+            }
+        }
+    }
+
+    if (t1 == CORSARO_RESULT_TYPE_END_INTERVAL) {
+        corsaro_interval_t *int1 = (corsaro_interval_t *)(res1->resdata);
+        corsaro_interval_t *int2 = (corsaro_interval_t *)(res2->resdata);
+
+        if (t2 == CORSARO_RESULT_TYPE_END_INTERVAL) {
+            if (int1->number < int2->number) {
+                return -1;
+            } else if (int1->number > int2->number) {
+                return 1;
+            } else {
+                /* Don't care, these are the same interval. Return -1
+                 * to avoid falling through to the plugin compare
+                 * function.
+                 */
+                return -1;
+            }
+        } else if (t2 == CORSARO_RESULT_TYPE_START_INTERVAL) {
+            if (int1->number < int2->number) {
+                return -1;
+            } else if (int1->number > int2->number) {
+                return 1;
+            } else {
+                return 1;
+            }
+        }
+    }
+
+    /* Up to the plugin to handle group comparisons */
+    if (t1 == CORSARO_RESULT_TYPE_START_GROUP) {
+        if (t2 == CORSARO_RESULT_TYPE_START_GROUP) {
+            return 0;
+        } else if (t2 == CORSARO_RESULT_TYPE_END_GROUP) {
+            return 0;
+        }
+    }
+
+    if (t1 == CORSARO_RESULT_TYPE_END_GROUP) {
+        if (t2 == CORSARO_RESULT_TYPE_END_GROUP) {
+            return 0;
+        } else if (t2 == CORSARO_RESULT_TYPE_START_GROUP) {
+            return 0;
+        }
+    }
+
+    /* If we get here, we've got two types that don't really make
+     * sense to compare against each other?
+     */
+
+    corsaro_log(logger, "Bad result type comparison: %d vs %d", t1, t2);
+    /* TODO better error handling -- this really shouldn't happen though */
+    assert(0);
+
+}
+
 static int find_next_merge_result(corsaro_plugin_t *p, void *plocal,
         corsaro_file_in_t **readers, corsaro_plugin_result_t *results,
         int tcount) {
@@ -381,6 +508,7 @@ static int find_next_merge_result(corsaro_plugin_t *p, void *plocal,
 
         if (results[i].type == CORSARO_RESULT_TYPE_EOF) {
             /* Reached EOF for this source. */
+            /* TODO delete the file?? */
             corsaro_file_rclose(readers[i]);
             readers[i] = NULL;
             results[i].type = CORSARO_RESULT_TYPE_EOF;
@@ -393,9 +521,16 @@ static int find_next_merge_result(corsaro_plugin_t *p, void *plocal,
             continue;
         }
 
-        if (p->compare_results(p, plocal, cand, &(results[i])) > 0) {
+        ret = compare_results_common(cand, &(results[i]), p->logger);
+
+        if (ret > 0) {
             cand = &(results[i]);
             candind = i;
+        } else if (ret == 0) {
+            if (p->compare_results(p, plocal, cand, &(results[i])) > 0) {
+                cand = &(results[i]);
+                candind = i;
+            }
         }
     }
 
@@ -410,18 +545,42 @@ static int find_next_merge_result(corsaro_plugin_t *p, void *plocal,
     return candind;
 }
 
+static inline int is_boundary_result(corsaro_result_type_t rt) {
+
+    if (rt == CORSARO_RESULT_TYPE_START_INTERVAL) {
+        return 1;
+    }
+
+    if (rt == CORSARO_RESULT_TYPE_END_INTERVAL) {
+        return 1;
+    }
+
+    if (rt == CORSARO_RESULT_TYPE_START_GROUP) {
+        return 1;
+    }
+
+    if (rt == CORSARO_RESULT_TYPE_END_GROUP) {
+        return 1;
+    }
+
+    return 0;
+
+}
+
 int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
         corsaro_plugin_t *plist, corsaro_fin_interval_t *fin, int count)
 {
 
     corsaro_plugin_set_t *pset;
-    corsaro_plugin_t *p;
+    corsaro_plugin_t *p = NULL;
     int index = 0;
     corsaro_file_in_t **readers = NULL;
     corsaro_file_t *output = NULL;
     corsaro_plugin_result_t *results = NULL;
     int i;
     int errors = 0;
+
+    corsaro_log(logger, "commencing merge for all plugins %u:%u.", fin->interval_id, fin->timestamp);
 
     pset = corsaro_start_plugins(logger, plist, count, CORSARO_READER_API,
             9999);
@@ -440,6 +599,8 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
     while (p != NULL) {
         int nextresind;
 
+        corsaro_log(logger, "commencing merge for plugin %s", p->name);
+
         output = p->open_output_file(p, pset->plugin_state[index],
                 fin->timestamp, -1);
         if (output == NULL) {
@@ -447,6 +608,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
                     "unable to open %s output file for merge output.",
                     p->name);
             errors ++;
+            p = p->next;
             continue;
         }
 
@@ -472,17 +634,27 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
                 break;
             }
 
-            p->write_result(p, pset->plugin_state[index],
-                    &(results[nextresind]), output);
+            if (p->write_result(p, pset->plugin_state[index],
+                    &(results[nextresind]), output) < 0) {
+                /* Something went wrong with the writing */
+                corsaro_log(logger,
+                        "error while writing %s result to merged result file.",
+                        p->name);
+                errors ++;
+
+                /* This output file is probably screwed so just bail on this
+                 * one and hope someone is checking the logs.
+                 */
+                break;
+            }
+
 
             /* If the 'earliest' result is an interval marker, all next results
              * must be interval markers -- so every reader needs to read next
-             * time round. TODO
+             * time round.
              */
 
-            if (results[nextresind].type == CORSARO_RESULT_TYPE_START_INTERVAL
-                    || results[nextresind].type ==
-                            CORSARO_RESULT_TYPE_END_INTERVAL) {
+            if (is_boundary_result(results[nextresind].type)) {
                 for (i = 0; i < fin->threads_ended; i++) {
                     if (results[i].type == CORSARO_RESULT_TYPE_EOF) {
                         continue;
@@ -518,6 +690,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
     free(readers);
     free(results);
     corsaro_stop_plugins(pset);
+    corsaro_log(logger, "completed merge for all plugins %u:%u.", fin->interval_id, fin->timestamp);
     return errors;
 
 }

@@ -174,6 +174,8 @@ off_t corsaro_file_write(corsaro_file_t *file, const void *buffer, off_t len);
 off_t corsaro_file_write_interval(corsaro_file_t *file,
         corsaro_interval_t *interval, uint8_t isstart);
 
+int corsaro_file_read_ascii_interval(char *ascline,
+        corsaro_interval_t *interval,  corsaro_logger_t *logger);
 corsaro_file_in_t *corsaro_file_ropen(corsaro_logger_t *logger, char *fname);
 void corsaro_file_rclose(corsaro_file_in_t *file);
 off_t corsaro_file_rread_ascii_line(corsaro_logger_t *logger,

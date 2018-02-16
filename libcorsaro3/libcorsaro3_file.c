@@ -210,6 +210,42 @@ off_t corsaro_file_write_interval(corsaro_file_t *file,
     return -1;
 }
 
+int corsaro_file_read_ascii_interval(char *ascline,
+        corsaro_interval_t *interval, corsaro_logger_t *logger) {
+
+    char intervalstr[128];
+    uint32_t intnum;
+    uint32_t intts;
+    int restype = -1;
+
+    /* Interval marker */
+    if (sscanf(ascline, "# %s %u %u", intervalstr, &intnum, &intts) != 3) {
+        corsaro_log(logger,
+                "poorly formatted interval line: %s",
+                ascline);
+        return -1;
+    }
+
+    if (strcmp(intervalstr, "CORSARO_INTERVAL_START") == 0) {
+        restype = 1;
+    } else if (strcmp(intervalstr, "CORSARO_INTERVAL_END") == 0) {
+        restype = 0;
+    } else {
+        corsaro_log(logger,
+                "unexpected interval marker %s in output.",
+                intervalstr);
+        return -1;
+    }
+
+    interval->number = intnum;
+    interval->time = intts;
+    interval->corsaro_magic = CORSARO_MAGIC;
+    interval->magic = CORSARO_MAGIC_INTERVAL;
+
+    return restype;
+}
+
+
 corsaro_file_in_t *corsaro_file_ropen(corsaro_logger_t *logger, char *fname) {
 
     corsaro_file_in_t *rf = NULL;
@@ -273,20 +309,27 @@ off_t corsaro_file_rread_ascii_line(corsaro_logger_t *logger,
     off_t ret;
     if (file->mode != CORSARO_FILE_MODE_ASCII) {
         corsaro_log(logger, "attempted to read a line from a non-ASCII file.");
-        return 0;
+        return -1;
     }
 
     if (line == NULL || len <= 0) {
         corsaro_log(logger,
                 "line and/or len parameters for corsaro_read_ascii_line() are invalid.");
-        return 0;
+        return -1;
     }
 
-    /* Remove the '\n' -- we're mostly using this for parsing */
-    if ((ret = wandio_fgets(file->wandio, line, len, 1)) <= 0) {
+    if ((ret = wandio_fgets(file->wandio, line, len, 0)) < 0) {
         corsaro_log(logger,
                 "wandio has failed to read a line from an ASCII corsaro file.");
-        return 0;
+    } else if (ret == 0) {
+        return ret;
+    } else {
+        /* Remove the '\n' -- we're mostly using this for parsing */
+        if (line[ret - 1] != '\n') {
+            printf("%d %d %s:  %02x\n", ret, strlen(line), line, line[ret - 1]);
+        }
+        assert(line[ret - 1] == '\n');
+        line[ret - 1] = '\0';
     }
 
     return ret;

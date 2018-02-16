@@ -59,6 +59,8 @@
             void *local, uint32_t timestamp, int threadid);              \
     char *plugin##_derive_output_name(corsaro_plugin_t *p, void *local, \
             uint32_t timestamp, int threadid);              \
+    void *plugin##_init_reading(corsaro_plugin_t *p);    \
+    int plugin##_halt_reading(corsaro_plugin_t *p, void *local); \
     int plugin##_write_result(corsaro_plugin_t *p, void *local, \
             corsaro_plugin_result_t *res, corsaro_file_t *out); \
     int plugin##_read_result(corsaro_plugin_t *p, void *local, \
@@ -82,7 +84,9 @@ typedef enum corsaro_result_type {
     CORSARO_RESULT_TYPE_EOF,
     CORSARO_RESULT_TYPE_START_INTERVAL,
     CORSARO_RESULT_TYPE_END_INTERVAL,
-    CORSARO_RESULT_TYPE_DATA
+    CORSARO_RESULT_TYPE_DATA,
+    CORSARO_RESULT_TYPE_START_GROUP,
+    CORSARO_RESULT_TYPE_END_GROUP,
 } corsaro_result_type_t;
 
 enum {
@@ -156,6 +160,8 @@ struct corsaro_plugin {
             uint32_t timestamp, int threadid);
     char *(*derive_output_name)(corsaro_plugin_t *p, void *local,
             uint32_t timestamp, int threadid);
+    void *(*init_reading)(corsaro_plugin_t *p);
+    int (*halt_reading)(corsaro_plugin_t *p, void *local);
     int (*write_result)(corsaro_plugin_t *p, void *local,
             corsaro_plugin_result_t *res, corsaro_file_t *out);
     int (*read_result)(corsaro_plugin_t *p, void *local,
@@ -228,7 +234,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
   opts.monitorid = NULL; \
   opts.outmode = CORSARO_FILE_MODE_UNKNOWN; \
   opts.compress = CORSARO_FILE_COMPRESS_UNSET; \
-  opts.compresslevel = -1; 
+  opts.compresslevel = -1;
 
 #define CORSARO_PLUGIN_GENERATE_BASE_PTRS(plugin)               \
   plugin##_parse_config, plugin##_finalise_config,              \
@@ -241,8 +247,10 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
   plugin##_open_output_file, plugin##_derive_output_name
 
 #define CORSARO_PLUGIN_GENERATE_READ_PTRS(plugin)               \
-  plugin##_write_result, plugin##_read_result,                  \
-  plugin##_compare_results, plugin##_release_result             \
+  plugin##_init_reading, plugin##_halt_reading,                 \
+  plugin##_write_result,                                        \
+  plugin##_read_result, plugin##_compare_results,               \
+  plugin##_release_result
 
 #define CORSARO_PLUGIN_GENERATE_TAIL                            \
   NULL, 0, 0, NULL, NULL

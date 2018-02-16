@@ -222,8 +222,6 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     if (tv.tv_sec < tls->current_interval.time) {
-        fprintf(stderr, "%u -- %u %u\n", tv.tv_sec, tls->current_interval.time,
-                tls->next_report);
         corsaro_log(glob->logger,
                 "received a packet from *before* our current interval!");
         corsaro_log(glob->logger,
@@ -394,9 +392,8 @@ int start_trace_input(corsaro_trace_global_t *glob) {
         trace_set_tick_interval(glob->trace, glob->interval * 1000);
     }
 
-    trace_set_combiner(glob->trace, &combiner_ordered, nothing);
+    trace_set_combiner(glob->trace, &combiner_unordered, nothing);
     trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, NULL, NULL);
-
     trace_set_perpkt_threads(glob->trace, glob->threads);
 
     processing = trace_create_callback_set();

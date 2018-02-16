@@ -39,6 +39,8 @@ libcorsaro3_la_SOURCES = 	\
         libcorsaro3_io.c                \
         libcorsaro3_file.c              \
         libcorsaro3_io.h                \
+        libcorsaro3_result_freelist.h   \
+        libcorsaro3_result_freelist.c   \
         libcorsaro3.h
 
 libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \
