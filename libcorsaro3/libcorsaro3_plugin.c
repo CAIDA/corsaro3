@@ -605,6 +605,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
     corsaro_plugin_result_t *results = NULL;
     int i;
     int errors = 0;
+    char **sourcefilenames = NULL;
 
     corsaro_log(logger, "commencing merge for all plugins %u:%u.", fin->interval_id, fin->timestamp);
 
@@ -620,6 +621,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
             sizeof(corsaro_file_in_t *));
     results = (corsaro_plugin_result_t *)calloc(1, fin->threads_ended *
             sizeof(corsaro_plugin_result_t));
+    sourcefilenames = (char **)calloc(1, sizeof(char *) * fin->threads_ended);
 
     p = pset->active_plugins;
     while (p != NULL) {
@@ -639,9 +641,9 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
         }
 
         for (i = 0; i < fin->threads_ended; i++) {
-            char *fname = p->derive_output_name(p,
+            sourcefilenames[i] = p->derive_output_name(p,
                     pset->plugin_state[index], fin->timestamp, i);
-            readers[i] = corsaro_file_ropen(logger, fname);
+            readers[i] = corsaro_file_ropen(logger, sourcefilenames[i]);
 
             if (readers[i] == NULL) {
                 corsaro_log(logger,
@@ -724,6 +726,8 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
             if (readers[i] != NULL) {
                 corsaro_file_rclose(readers[i]);
             }
+            remove(sourcefilenames[i]);
+            free(sourcefilenames[i]);
         }
         corsaro_file_close(output);
 
@@ -733,6 +737,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
 
     free(readers);
     free(results);
+    free(sourcefilenames);
     corsaro_stop_plugins(pset);
     corsaro_log(logger, "completed merge for all plugins %u:%u.", fin->interval_id, fin->timestamp);
     return errors;
