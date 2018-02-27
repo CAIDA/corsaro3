@@ -69,6 +69,7 @@ typedef struct corsaro_trace_glob {
     corsaro_file_mode_t outmode;
 
     uint8_t promisc;
+    uint8_t mergeoutput;
     uint8_t logmode;
     uint8_t threads;
     uint8_t plugincount;

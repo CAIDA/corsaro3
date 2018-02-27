@@ -172,8 +172,10 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         corsaro_log(glob->logger, "error while stopping plugins.");
     }
 
-    publish_file_closed_message(trace, t, &tls->lastrotateinterval,
-                    ((uint64_t)tls->next_report) << 32);
+    if (!tls->stopped) {
+        publish_file_closed_message(trace, t, &tls->lastrotateinterval,
+                        ((uint64_t)tls->next_report) << 32);
+    }
 
     free(tls);
 }
@@ -198,10 +200,15 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     if (glob->boundendts && tv.tv_sec >= glob->boundendts) {
         corsaro_push_end_plugins(tls->plugins, tls->current_interval.number,
                 glob->boundendts - 1);
-        publish_file_closed_message(trace, t, &tls->current_interval,
+        corsaro_push_rotate_file_plugins(tls->plugins,
+                tls->current_interval.number + 1,
+                ((uint64_t)glob->boundendts) << 32);
+        publish_file_closed_message(trace, t, &tls->lastrotateinterval,
                 ((uint64_t)glob->boundendts) << 32);
         publish_stop_message(trace, t, ((uint64_t)glob->boundendts) << 32);
         tls->stopped = 1;
+        tls->pkts_outstanding = 0;
+        return packet;
     }
 
 
@@ -294,8 +301,10 @@ static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
     while (wait->finished_intervals) {
         fin = wait->finished_intervals;
 
-        corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins, fin,
-                glob->plugincount);
+        if (glob->mergeoutput) {
+            corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins, fin,
+                    glob->plugincount);
+        }
         wait->finished_intervals = fin->next;
         free(fin);
     }
@@ -329,12 +338,14 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
 
         if (glob->threads == 1) {
             corsaro_fin_interval_t quik;
-            quik.interval_id = msg->interval_num;
-            quik.timestamp = msg->interval_time;
-            quik.threads_ended = 1;
-            quik.next = NULL;
-            corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins,
-                    &quik, glob->plugincount);
+            if (glob->mergeoutput) {
+                quik.interval_id = msg->interval_num;
+                quik.timestamp = msg->interval_time;
+                quik.threads_ended = 1;
+                quik.next = NULL;
+                corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins,
+                        &quik, glob->plugincount);
+            }
             return;
         }
 
@@ -350,8 +361,10 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
             fin->threads_ended ++;
             if (fin->threads_ended == glob->threads) {
                 assert(fin == wait->finished_intervals);
-                corsaro_merge_plugin_outputs(glob->logger,
-                        glob->active_plugins, fin, glob->plugincount);
+                if (glob->mergeoutput) {
+                    corsaro_merge_plugin_outputs(glob->logger,
+                            glob->active_plugins, fin, glob->plugincount);
+                }
                 wait->finished_intervals = fin->next;
                 free(fin);
             }

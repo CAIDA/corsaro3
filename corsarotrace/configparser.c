@@ -55,6 +55,25 @@ static int parse_promisc_mode(corsaro_trace_global_t *glob, char *value) {
 
 }
 
+static int parse_merge_mode(corsaro_trace_global_t *glob, char *value) {
+
+    if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
+            strcmp(value, "on") == 0) {
+        glob->mergeoutput = 1;
+    }
+
+    else if (strcmp(value, "no") == 0 || strcmp(value, "false") == 0 ||
+            strcmp(value, "off") == 0) {
+        glob->mergeoutput = 0;
+    } else {
+        corsaro_log(glob->logger, "invalid mergeoutput mode '%s'", value);
+        return -1;
+    }
+
+    return 0;
+
+}
+
 static int parse_file_mode(corsaro_trace_global_t *glob, char *value) {
     /* TODO support trace mode? */
 
@@ -171,6 +190,13 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "promisc")) {
         if (parse_promisc_mode(glob, (char *)value->data.scalar.value) < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "mergeoutput")) {
+        if (parse_merge_mode(glob, (char *)value->data.scalar.value) < 0) {
             return -1;
         }
     }
@@ -332,6 +358,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->logfilename = NULL;
     glob->threads = 2;
     glob->plugincount = 0;
+    glob->mergeoutput = 1;
 
     glob->trace = NULL;
     glob->filter = NULL;
