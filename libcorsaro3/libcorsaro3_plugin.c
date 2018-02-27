@@ -224,7 +224,7 @@ int corsaro_finish_plugin_config(corsaro_plugin_t *plist,
 
 /* XXX number of arguments is starting to get out of hand */
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist, int count, int api, int threadid) {
+        corsaro_plugin_t *plist, int count, int threadid) {
     int index = 0;
 
     corsaro_plugin_set_t *pset = (corsaro_plugin_set_t *)malloc(
@@ -233,7 +233,7 @@ corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
     pset->active_plugins = plist;
     pset->plugincount = 0;
     pset->plugin_state = (void **) malloc(sizeof(void *) * count);
-    pset->api = api;
+    pset->api = CORSARO_TRACE_API;
     pset->globlogger = logger;
 
     memset(pset->plugin_state, 0, sizeof(void *) * count);
@@ -241,13 +241,36 @@ corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
     while (plist != NULL) {
         assert(index < count);
 
-        if (api == CORSARO_TRACE_API) {
-            pset->plugin_state[index] = plist->init_processing(plist,
-                    threadid);
-        }
-        if (api == CORSARO_READER_API) {
-            pset->plugin_state[index] = plist->init_reading(plist);
-        }
+        pset->plugin_state[index] = plist->init_processing(plist,
+                threadid);
+        index += 1;
+        plist = plist->next;
+        pset->plugincount ++;
+    }
+
+    return pset;
+}
+
+corsaro_plugin_set_t *corsaro_start_reader_plugins(corsaro_logger_t *logger,
+        corsaro_plugin_t *plist, int count, int maxsources) {
+
+    int index = 0;
+
+    corsaro_plugin_set_t *pset = (corsaro_plugin_set_t *)malloc(
+            sizeof(corsaro_plugin_set_t));
+
+    pset->active_plugins = plist;
+    pset->plugincount = 0;
+    pset->plugin_state = (void **) malloc(sizeof(void *) * count);
+    pset->api = CORSARO_READER_API;
+    pset->globlogger = logger;
+
+    memset(pset->plugin_state, 0, sizeof(void *) * count);
+
+    while (plist != NULL) {
+        assert(index < count);
+
+        pset->plugin_state[index] = plist->init_reading(plist, maxsources);
 
         index += 1;
         plist = plist->next;
@@ -255,6 +278,7 @@ corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
     }
 
     return pset;
+
 }
 
 int corsaro_stop_plugins(corsaro_plugin_set_t *pset) {
@@ -495,11 +519,12 @@ static int find_next_merge_result(corsaro_plugin_t *p, void *plocal,
 
         if (results[i].type == CORSARO_RESULT_TYPE_BLANK) {
             /* need a fresh result */
-            ret = p->read_result(p, plocal, readers[i], &(results[i]));
+            ret = p->read_result(p, plocal, readers[i], &(results[i]), i);
             if (ret == -1) {
                 /* some error occurred? */
                 /* close the reader I guess... */
                 corsaro_file_rclose(readers[i]);
+                p->release_result(p, plocal, &(results[i]));
                 readers[i] = NULL;
                 results[i].type = CORSARO_RESULT_TYPE_EOF;
                 continue;
@@ -510,6 +535,7 @@ static int find_next_merge_result(corsaro_plugin_t *p, void *plocal,
             /* Reached EOF for this source. */
             /* TODO delete the file?? */
             corsaro_file_rclose(readers[i]);
+            p->release_result(p, plocal, &(results[i]));
             readers[i] = NULL;
             results[i].type = CORSARO_RESULT_TYPE_EOF;
             continue;
@@ -582,8 +608,8 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
 
     corsaro_log(logger, "commencing merge for all plugins %u:%u.", fin->interval_id, fin->timestamp);
 
-    pset = corsaro_start_plugins(logger, plist, count, CORSARO_READER_API,
-            9999);
+    pset = corsaro_start_reader_plugins(logger, plist, count,
+            fin->threads_ended);
     if (pset == NULL) {
         corsaro_log(logger,
                 "error while starting plugins for merging output.");
@@ -634,6 +660,43 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
                 break;
             }
 
+            /* If the 'earliest' result is an interval marker, all next results
+             * must be interval markers -- so every reader needs to read next
+             * time round.
+             */
+
+            if (is_boundary_result(results[nextresind].type)) {
+                int reserror = 0;
+                for (i = 0; i < fin->threads_ended; i++) {
+                    if (results[i].type == CORSARO_RESULT_TYPE_EOF) {
+                        continue;
+                    }
+                    if (i == nextresind) {
+                        continue;
+                    }
+                    /* Some markers include tallies, so we may need to
+                     * accumulate them correctly.
+                     */
+                    if (p->combine_results(p, pset->plugin_state[index],
+                            &(results[nextresind]), &(results[i])) == -1) {
+                        corsaro_log(logger,
+                                "error while combining %s results for merged result file.",
+                                p->name);
+                        reserror = 1;
+                        break;
+                    }
+                    p->release_result(p, pset->plugin_state[index],
+                            &(results[i]));
+                    results[i].type = CORSARO_RESULT_TYPE_BLANK;
+                }
+                if (reserror) {
+                    errors ++;
+                    break;
+                }
+
+            }
+
+
             if (p->write_result(p, pset->plugin_state[index],
                     &(results[nextresind]), output) < 0) {
                 /* Something went wrong with the writing */
@@ -648,29 +711,10 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
                 break;
             }
 
-
-            /* If the 'earliest' result is an interval marker, all next results
-             * must be interval markers -- so every reader needs to read next
-             * time round.
-             */
-
-            if (is_boundary_result(results[nextresind].type)) {
-                for (i = 0; i < fin->threads_ended; i++) {
-                    if (results[i].type == CORSARO_RESULT_TYPE_EOF) {
-                        continue;
-                    }
-                    p->release_result(p, pset->plugin_state[index],
-                            &(results[i]));
-                    results[i].type = CORSARO_RESULT_TYPE_BLANK;
-                }
-            } else {
-
-                /* Otherwise, 'earliest' is a single result -- just blank that
-                 * result. */
-                p->release_result(p, pset->plugin_state[index],
-                        &(results[nextresind]));
-                results[nextresind].type = CORSARO_RESULT_TYPE_BLANK;
-            }
+            /* Release the result we just wrote */
+            p->release_result(p, pset->plugin_state[index],
+                    &(results[nextresind]));
+            results[nextresind].type = CORSARO_RESULT_TYPE_BLANK;
 
         } while (nextresind < fin->threads_ended);
 

@@ -100,6 +100,11 @@ struct corsaro_flowtuple_result_state_t {
     corsaro_result_freelist_t *ft_freelist;
     corsaro_result_freelist_t *int_freelist;
     corsaro_result_freelist_t *class_freelist;
+    corsaro_result_freelist_t *classend_freelist;
+    corsaro_result_type_t *expected;
+    uint32_t *class_tuples;
+    int maxsources;
+    uint16_t *current_class;
 };
 
 typedef struct corsaro_flowtuple_config {
@@ -297,14 +302,10 @@ static int ascii_dump(corsaro_plugin_t *p,
 
     /*const char *name = class_names[dist];*/
     struct corsaro_flowtuple_class_start class_start;
-    struct corsaro_flowtuple_class_end class_end;
 
     class_start.magic = CORSARO_FLOWTUPLE_MAGIC;
     class_start.class_type = dist;
     class_start.count = kh_size(h);
-
-    class_end.magic = CORSARO_FLOWTUPLE_MAGIC;
-    class_end.class_type = dist;
 
     corsaro_file_printf(state->outfile, "START %s %" PRIu32 "\n",
             class_names[class_start.class_type], class_start.count);
@@ -408,9 +409,10 @@ static int binary_dump(corsaro_plugin_t *p,
     return 0;
 }
 
-void *corsaro_flowtuple_init_reading(corsaro_plugin_t *p) {
+void *corsaro_flowtuple_init_reading(corsaro_plugin_t *p, int sources) {
 
     struct corsaro_flowtuple_result_state_t *state;
+    int i;
 
     state = (struct corsaro_flowtuple_result_state_t *)malloc(sizeof(
             struct corsaro_flowtuple_result_state_t));
@@ -427,6 +429,21 @@ void *corsaro_flowtuple_init_reading(corsaro_plugin_t *p) {
             sizeof(corsaro_interval_t));
     state->class_freelist = corsaro_start_result_freelist(
             sizeof(struct corsaro_flowtuple_class_start));
+    state->classend_freelist = corsaro_start_result_freelist(
+            sizeof(struct corsaro_flowtuple_class_end));
+
+    state->expected = (corsaro_result_type_t *)malloc(
+            sizeof(corsaro_result_type_t) * sources);
+    state->class_tuples = (uint32_t *)malloc(sizeof(uint32_t) * sources);
+    state->current_class = (uint16_t *)malloc(sizeof(uint16_t) * sources);
+
+    for (i = 0; i < sources; i++) {
+        state->expected[i] = CORSARO_RESULT_TYPE_START_INTERVAL;
+        state->class_tuples[i] = 0;
+        state->current_class[i] = 0;
+    }
+
+    state->maxsources = sources;
 
     return state;
 }
@@ -443,6 +460,11 @@ int corsaro_flowtuple_halt_reading(corsaro_plugin_t *p, void *local) {
     corsaro_destroy_result_freelist(state->ft_freelist, NULL, NULL);
     corsaro_destroy_result_freelist(state->int_freelist, NULL, NULL);
     corsaro_destroy_result_freelist(state->class_freelist, NULL, NULL);
+    corsaro_destroy_result_freelist(state->classend_freelist, NULL, NULL);
+
+    free(state->expected);
+    free(state->class_tuples);
+    free(state->current_class);
 
     free(state);
     return 0;
@@ -820,7 +842,7 @@ int corsaro_flowtuple_write_result(corsaro_plugin_t *p, void *local,
     }
 
     if (res->type == CORSARO_RESULT_TYPE_START_GROUP) {
-        struct corsaro_flowtuple_class_start *cs;
+        struct corsaro_flowtuple_class_start *cs, towrite;
 
         cs = (struct corsaro_flowtuple_class_start *)(res->resdata);
 
@@ -829,21 +851,28 @@ int corsaro_flowtuple_write_result(corsaro_plugin_t *p, void *local,
                         class_names[cs->class_type], cs->count);
 
         } else if (out->mode == CORSARO_FILE_MODE_BINARY) {
-            if (corsaro_file_write(out, cs, sizeof(cs)) != sizeof(cs)) {
+            towrite.magic = htonl(cs->magic);
+            towrite.class_type = htons(cs->class_type);
+            towrite.count = htonl(cs->count);
+            if (corsaro_file_write(out, &towrite, sizeof(towrite))
+                        != sizeof(towrite)) {
                 return -1;
             }
         }
     }
 
     if (res->type == CORSARO_RESULT_TYPE_END_GROUP) {
-        struct corsaro_flowtuple_class_end *cs;
+        struct corsaro_flowtuple_class_end *cs, towrite;
 
         cs = (struct corsaro_flowtuple_class_end *)(res->resdata);
 
         if (out->mode == CORSARO_FILE_MODE_ASCII) {
             corsaro_file_printf(out, "END %s\n", class_names[cs->class_type]);
         } else if (out->mode == CORSARO_FILE_MODE_BINARY) {
-            if (corsaro_file_write(out, cs, sizeof(cs)) != sizeof(cs)) {
+            towrite.magic = htonl(cs->magic);
+            towrite.class_type = htons(cs->class_type);
+            if (corsaro_file_write(out, &towrite, sizeof(towrite))
+                    != sizeof(towrite)) {
                 return -1;
             }
         }
@@ -906,7 +935,7 @@ static inline int parse_flowtuple_ascii_result(char *ascline,
             case 2:
                 /* src port */
                 errno = 0;
-                ft->src_port = (uint16_t)(strtol(t, NULL, 10));
+                ft->src_port = ntohs((uint16_t)(strtol(t, NULL, 10)));
                 if (errno != 0) {
                     corsaro_log(logger,
                             "unable to parse flowtuple source port %s", t);
@@ -916,7 +945,7 @@ static inline int parse_flowtuple_ascii_result(char *ascline,
             case 3:
                 /* dest port */
                 errno = 0;
-                ft->dst_port = (uint16_t)(strtol(t, NULL, 10));
+                ft->dst_port = ntohs((uint16_t)(strtol(t, NULL, 10)));
                 if (errno != 0) {
                     corsaro_log(logger,
                             "unable to parse flowtuple dest port %s", t);
@@ -956,7 +985,7 @@ static inline int parse_flowtuple_ascii_result(char *ascline,
             case 7:
                 /* ip length */
                 errno = 0;
-                ft->ip_len = (uint16_t)(strtol(t, NULL, 10));
+                ft->ip_len = ntohs((uint16_t)(strtol(t, NULL, 10)));
                 if (errno != 0) {
                     corsaro_log(logger,
                             "unable to parse flowtuple ip length %s", t);
@@ -966,7 +995,7 @@ static inline int parse_flowtuple_ascii_result(char *ascline,
             case 8:
                 /* packet count */
                 errno = 0;
-                ft->packet_cnt = (uint32_t)(strtoul(t, NULL, 10));
+                ft->packet_cnt = ntohl((uint32_t)(strtoul(t, NULL, 10)));
                 if (errno != 0) {
                     corsaro_log(logger,
                             "unable to parse flowtuple packet count %s", t);
@@ -1082,10 +1111,10 @@ static int read_ascii_result(corsaro_plugin_t *p,
         /* End of class marker */
         char classname[128];
         uint16_t i;
-        struct corsaro_flowtuple_class_start *cs;
+        struct corsaro_flowtuple_class_end *cs;
 
-        cs = (struct corsaro_flowtuple_class_start *)
-                corsaro_acquire_result_from_freelist(state->class_freelist);
+        cs = (struct corsaro_flowtuple_class_end *)
+                corsaro_acquire_result_from_freelist(state->classend_freelist);
         if (cs == NULL) {
             return -1;
         }
@@ -1114,7 +1143,6 @@ static int read_ascii_result(corsaro_plugin_t *p,
         }
 
         res->type = CORSARO_RESULT_TYPE_END_GROUP;
-        cs->count = 0;
 
     } else {
         /* Try to parse this as a flowtuple */
@@ -1140,17 +1168,237 @@ static int read_ascii_result(corsaro_plugin_t *p,
 
 }
 
-static int read_binary_result(corsaro_plugin_t *p,
+static off_t read_binary_interval(corsaro_plugin_t *p,
         struct corsaro_flowtuple_result_state_t *state, corsaro_file_in_t *in,
         corsaro_plugin_result_t *res) {
 
+    corsaro_interval_t *ival;
+    off_t bytesread;
 
+    ival = (corsaro_interval_t *)corsaro_acquire_result_from_freelist(
+            state->int_freelist);
 
-    return 0;
+    if (ival == NULL) {
+        return -1;
+    }
+
+    if ((bytesread = corsaro_file_rread_bytes(p->logger, in, (char *)ival,
+            sizeof(corsaro_interval_t))) != sizeof(corsaro_interval_t)) {
+        return bytesread;
+    }
+
+    /* TODO possibly save some workload and only byteswap when necesary? */
+
+    /* Byteswap because anything interacting with this interval will be
+     * likely expecting host byte order.
+     */
+    ival->corsaro_magic = ntohl(ival->corsaro_magic);
+    ival->magic = ntohl(ival->magic);
+    ival->number = ntohs(ival->number);
+    ival->time = ntohl(ival->time);
+
+    if (ival->corsaro_magic != CORSARO_MAGIC) {
+        corsaro_log(p->logger,
+                "invalid corsaro magic in flowtuple start interval.");
+        return -1;
+    }
+
+    if (ival->magic != CORSARO_MAGIC_INTERVAL) {
+        corsaro_log(p->logger,
+                "invalid interval magic in flowtuple start interval.");
+        return -1;
+    }
+
+    res->resdata = ival;
+    return bytesread;
+}
+
+static off_t read_binary_class_end(corsaro_plugin_t *p,
+        struct corsaro_flowtuple_result_state_t *state, corsaro_file_in_t *in,
+        corsaro_plugin_result_t *res, int sind) {
+
+    struct corsaro_flowtuple_class_end *cs;
+    off_t bytesread;
+
+    cs = (struct corsaro_flowtuple_class_end *)
+        corsaro_acquire_result_from_freelist(state->classend_freelist);
+    if (cs == NULL) {
+        return -1;
+    }
+
+    if ((bytesread = corsaro_file_rread_bytes(p->logger, in, (char *)cs,
+            sizeof(struct corsaro_flowtuple_class_end))) !=
+            sizeof(struct corsaro_flowtuple_class_end)) {
+        corsaro_log(p->logger, "failed to read flowtuple ebd class.");
+        return bytesread;
+    }
+
+    cs->magic = ntohl(cs->magic);
+    cs->class_type = ntohs(cs->class_type);
+    if (cs->magic != CORSARO_FLOWTUPLE_MAGIC) {
+        corsaro_log(p->logger,
+                "invalid corsaro magic in flowtuple end class.");
+        return -1;
+    }
+
+    if (cs->class_type > CORSARO_FLOWTUPLE_CLASS_MAX) {
+        corsaro_log(p->logger,
+                "invalid class id in flowtuple end class.");
+        return -1;
+    }
+
+    res->resdata = cs;
+    if (cs->class_type == CORSARO_FLOWTUPLE_CLASS_MAX) {
+        state->expected[sind] = CORSARO_RESULT_TYPE_END_INTERVAL;
+    } else {
+        state->expected[sind] = CORSARO_RESULT_TYPE_START_GROUP;
+    }
+
+    return bytesread;
+}
+
+static off_t read_binary_class(corsaro_plugin_t *p,
+        struct corsaro_flowtuple_result_state_t *state, corsaro_file_in_t *in,
+        corsaro_plugin_result_t *res, int sind) {
+
+    struct corsaro_flowtuple_class_start *cs;
+    off_t bytesread;
+
+    cs = (struct corsaro_flowtuple_class_start *)
+        corsaro_acquire_result_from_freelist(state->class_freelist);
+    if (cs == NULL) {
+        return -1;
+    }
+
+    if ((bytesread = corsaro_file_rread_bytes(p->logger, in, (char *)cs,
+            sizeof(struct corsaro_flowtuple_class_start))) !=
+            sizeof(struct corsaro_flowtuple_class_start)) {
+        corsaro_log(p->logger, "failed to read flowtuple start class.");
+        return bytesread;
+    }
+
+    cs->magic = ntohl(cs->magic);
+    cs->class_type = ntohs(cs->class_type);
+    cs->count = ntohl(cs->count);
+
+    if (cs->magic != CORSARO_FLOWTUPLE_MAGIC) {
+        corsaro_log(p->logger,
+                "invalid corsaro magic in flowtuple start class.");
+        return -1;
+    }
+
+    if (cs->class_type > CORSARO_FLOWTUPLE_CLASS_MAX) {
+        corsaro_log(p->logger,
+                "invalid class id in flowtuple start class.");
+        return -1;
+    }
+
+    res->resdata = cs;
+    state->current_class[sind] = cs->class_type;
+    state->class_tuples[sind] = cs->count;
+    if (state->class_tuples[sind] == 0) {
+        state->expected[sind] = CORSARO_RESULT_TYPE_END_GROUP;
+    } else {
+        state->expected[sind] = CORSARO_RESULT_TYPE_DATA;
+    }
+
+    return bytesread;
+}
+
+static off_t read_binary_flowtuple(corsaro_plugin_t *p,
+        struct corsaro_flowtuple_result_state_t *state, corsaro_file_in_t *in,
+        corsaro_plugin_result_t *res, int sind) {
+
+    struct corsaro_flowtuple *ft;
+    off_t bytesread;
+    ft = (struct corsaro_flowtuple *)corsaro_acquire_result_from_freelist(
+            state->ft_freelist);
+
+    if (ft == NULL) {
+        return -1;
+    }
+
+    if ((bytesread = corsaro_file_rread_bytes(p->logger, in, (char *)ft,
+                sizeof(struct corsaro_flowtuple))) !=
+                sizeof(struct corsaro_flowtuple)) {
+        corsaro_log(p->logger, "failed to read flowtuple result.");
+        return bytesread;
+    }
+
+    res->resdata = ft;
+
+    assert(state->class_tuples[sind] > 0);
+    state->class_tuples[sind] --;
+
+    if (state->class_tuples[sind] == 0) {
+        state->expected[sind] = CORSARO_RESULT_TYPE_END_GROUP;
+    }
+    return bytesread;
+}
+
+static int read_binary_result(corsaro_plugin_t *p,
+        struct corsaro_flowtuple_result_state_t *state, corsaro_file_in_t *in,
+        corsaro_plugin_result_t *res, int sourceind) {
+
+    off_t ret;
+
+    if (sourceind >= state->maxsources) {
+        corsaro_log(p->logger,
+            "invalid source index for flowtuple read_result: %d (max %d).",
+            sourceind, state->maxsources);
+        return -1;
+    }
+
+    switch(state->expected[sourceind]) {
+        case CORSARO_RESULT_TYPE_START_INTERVAL:
+            if ((ret = read_binary_interval(p, state, in, res)) <= 0) {
+                break;
+            }
+            state->expected[sourceind] = CORSARO_RESULT_TYPE_START_GROUP;
+            res->type = CORSARO_RESULT_TYPE_START_INTERVAL;
+            break;
+        case CORSARO_RESULT_TYPE_START_GROUP:
+            if ((ret = read_binary_class(p, state, in, res, sourceind)) <= 0) {
+                break;
+            }
+            res->type = CORSARO_RESULT_TYPE_START_GROUP;
+            break;
+        case CORSARO_RESULT_TYPE_END_GROUP:
+            if ((ret = read_binary_class_end(p, state, in, res,
+                        sourceind)) <= 0) {
+                break;
+            }
+            res->type = CORSARO_RESULT_TYPE_END_GROUP;
+            break;
+        case CORSARO_RESULT_TYPE_END_INTERVAL:
+            if ((ret = read_binary_interval(p, state, in, res)) <= 0) {
+                break;
+            }
+
+            state->expected[sourceind] = CORSARO_RESULT_TYPE_START_INTERVAL;
+            res->type = CORSARO_RESULT_TYPE_END_INTERVAL;
+            break;
+        case CORSARO_RESULT_TYPE_DATA:
+            if ((ret = read_binary_flowtuple(p, state, in, res, sourceind))
+                        == -1) {
+                break;
+            }
+            res->type = CORSARO_RESULT_TYPE_DATA;
+            break;
+        default:
+            corsaro_log(p->logger,
+                    "unexpected binary flowtuple record type: %d.",
+                    state->expected);
+            return -1;
+    }
+
+    //printf("%d %d %u\n", res->type, ret, state->class_tuples[sourceind]);
+    return (int)ret;
 }
 
 int corsaro_flowtuple_read_result(corsaro_plugin_t *p, void *local,
-        corsaro_file_in_t *in, corsaro_plugin_result_t *res) {
+        corsaro_file_in_t *in, corsaro_plugin_result_t *res,
+        int sourceind) {
 
     int ret;
     corsaro_flowtuple_config_t *conf;
@@ -1164,7 +1412,7 @@ int corsaro_flowtuple_read_result(corsaro_plugin_t *p, void *local,
     if (in->mode == CORSARO_FILE_MODE_ASCII) {
         ret = read_ascii_result(p, state, in, res);
     } else {
-        ret = read_binary_result(p, state, in, res);
+        ret = read_binary_result(p, state, in, res, sourceind);
     }
     if (ret == -1) {
         res->type = CORSARO_RESULT_TYPE_BLANK;
@@ -1180,6 +1428,44 @@ int corsaro_flowtuple_read_result(corsaro_plugin_t *p, void *local,
     }
 
     return 1;
+}
+
+int corsaro_flowtuple_combine_results(corsaro_plugin_t *p, void *local,
+        corsaro_plugin_result_t *dest, corsaro_plugin_result_t *src) {
+
+
+    if (dest->type != src->type) {
+        corsaro_log(p->logger,
+                "cannot combine flowtuple results of different types!");
+        return -1;
+    }
+
+    /* Can't combine two flows  (unless they're the same 5-tuple??) */
+    if (dest->type == CORSARO_RESULT_TYPE_DATA) {
+        corsaro_log(p->logger,
+                "cannot combine flowtuple data results.");
+        return -1;
+    }
+
+    if (dest->type == CORSARO_RESULT_TYPE_START_GROUP) {
+        struct corsaro_flowtuple_class_start *csdest;
+        struct corsaro_flowtuple_class_start *cssrc;
+
+        csdest = (struct corsaro_flowtuple_class_start *)(dest->resdata);
+        cssrc = (struct corsaro_flowtuple_class_start *)(src->resdata);
+
+        if (csdest->class_type != cssrc->class_type) {
+            corsaro_log(p->logger,
+                "cannot combine flowtuple STARTs for different classes.");
+            return -1;
+        }
+
+        csdest->count += cssrc->count;
+        return 0;
+    }
+
+    /* All other result types should require no special actions. */
+    return 0;
 }
 
 int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
@@ -1208,10 +1494,10 @@ int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
 
     if (res1->type == CORSARO_RESULT_TYPE_START_GROUP) {
         struct corsaro_flowtuple_class_start *cs1;
-        struct corsaro_flowtuple_class_start *cs2;
         cs1 = (struct corsaro_flowtuple_class_start *)(res1->resdata);
 
         if (res2->type == CORSARO_RESULT_TYPE_START_GROUP) {
+            struct corsaro_flowtuple_class_start *cs2;
             cs2 = (struct corsaro_flowtuple_class_start *)(res2->resdata);
 
             if (cs2->class_type < cs1->class_type) {
@@ -1221,7 +1507,8 @@ int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
         }
 
         if (res2->type == CORSARO_RESULT_TYPE_END_GROUP) {
-            cs2 = (struct corsaro_flowtuple_class_start *)(res2->resdata);
+            struct corsaro_flowtuple_class_end *cs2;
+            cs2 = (struct corsaro_flowtuple_class_end *)(res2->resdata);
 
             if (cs2->class_type < cs1->class_type) {
                 return 1;
@@ -1232,11 +1519,11 @@ int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
 
     if (res1->type == CORSARO_RESULT_TYPE_END_GROUP) {
         struct corsaro_flowtuple_class_start *cs1;
-        struct corsaro_flowtuple_class_start *cs2;
         cs1 = (struct corsaro_flowtuple_class_start *)(res1->resdata);
 
         if (res2->type == CORSARO_RESULT_TYPE_END_GROUP) {
-            cs2 = (struct corsaro_flowtuple_class_start *)(res2->resdata);
+            struct corsaro_flowtuple_class_end *cs2;
+            cs2 = (struct corsaro_flowtuple_class_end *)(res2->resdata);
 
             if (cs2->class_type < cs1->class_type) {
                 return 1;
@@ -1245,6 +1532,7 @@ int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
         }
 
         if (res2->type == CORSARO_RESULT_TYPE_START_GROUP) {
+            struct corsaro_flowtuple_class_start *cs2;
             cs2 = (struct corsaro_flowtuple_class_start *)(res2->resdata);
 
             /* The <= here is important! Not an error! */
@@ -1277,8 +1565,11 @@ void corsaro_flowtuple_release_result(corsaro_plugin_t *p, void *local,
 
     switch(res->type) {
         case CORSARO_RESULT_TYPE_START_GROUP:
-        case CORSARO_RESULT_TYPE_END_GROUP:
             corsaro_release_result_to_freelist(state->class_freelist,
+                    res->resdata);
+            break;
+        case CORSARO_RESULT_TYPE_END_GROUP:
+            corsaro_release_result_to_freelist(state->classend_freelist,
                     res->resdata);
             break;
         case CORSARO_RESULT_TYPE_START_INTERVAL:

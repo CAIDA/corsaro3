@@ -353,11 +353,9 @@ off_t corsaro_file_rread_bytes(corsaro_logger_t *logger,
         return 0;
     }
 
-    /* Remove the '\n' -- we're mostly using this for parsing */
-    if ((ret = wandio_read(file->wandio, buf, len)) <= 0) {
+    if ((ret = wandio_read(file->wandio, buf, len)) < 0) {
         corsaro_log(logger,
                 "wandio has failed to read bytes from a corsaro file.");
-        return 0;
     }
 
     return ret;

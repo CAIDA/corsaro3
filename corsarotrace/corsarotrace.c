@@ -134,7 +134,7 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
             sizeof(corsaro_trace_local_t));
 
     tls->plugins = corsaro_start_plugins(glob->logger,
-            glob->active_plugins, glob->plugincount, CORSARO_TRACE_API,
+            glob->active_plugins, glob->plugincount,
             trace_get_perpkt_thread_id(t));
 
     tls->next_report = 0;

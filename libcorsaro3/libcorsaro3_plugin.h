@@ -59,14 +59,17 @@
             void *local, uint32_t timestamp, int threadid);              \
     char *plugin##_derive_output_name(corsaro_plugin_t *p, void *local, \
             uint32_t timestamp, int threadid);              \
-    void *plugin##_init_reading(corsaro_plugin_t *p);    \
+    void *plugin##_init_reading(corsaro_plugin_t *p, int sources);    \
     int plugin##_halt_reading(corsaro_plugin_t *p, void *local); \
     int plugin##_write_result(corsaro_plugin_t *p, void *local, \
             corsaro_plugin_result_t *res, corsaro_file_t *out); \
     int plugin##_read_result(corsaro_plugin_t *p, void *local, \
-            corsaro_file_in_t *in, corsaro_plugin_result_t *res); \
+            corsaro_file_in_t *in, corsaro_plugin_result_t *res, \
+            int sourceind); \
     int plugin##_compare_results(corsaro_plugin_t *p, void *local, \
             corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2); \
+    int plugin##_combine_results(corsaro_plugin_t *p, void *local, \
+            corsaro_plugin_result_t *dest, corsaro_plugin_result_t *src); \
     void plugin##_release_result(corsaro_plugin_t *p, void *local, \
             corsaro_plugin_result_t *res);
 
@@ -160,14 +163,16 @@ struct corsaro_plugin {
             uint32_t timestamp, int threadid);
     char *(*derive_output_name)(corsaro_plugin_t *p, void *local,
             uint32_t timestamp, int threadid);
-    void *(*init_reading)(corsaro_plugin_t *p);
+    void *(*init_reading)(corsaro_plugin_t *p, int sources);
     int (*halt_reading)(corsaro_plugin_t *p, void *local);
     int (*write_result)(corsaro_plugin_t *p, void *local,
             corsaro_plugin_result_t *res, corsaro_file_t *out);
     int (*read_result)(corsaro_plugin_t *p, void *local,
-            corsaro_file_in_t *in, corsaro_plugin_result_t *res);
+            corsaro_file_in_t *in, corsaro_plugin_result_t *res, int sourceind);
     int (*compare_results)(corsaro_plugin_t *p, void *local,
             corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2);
+    int (*combine_results)(corsaro_plugin_t *p, void *local,
+            corsaro_plugin_result_t *dest, corsaro_plugin_result_t *src);
     void (*release_result)(corsaro_plugin_t *p, void *local,
             corsaro_plugin_result_t *res);
 
@@ -213,7 +218,9 @@ int corsaro_finish_plugin_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts);
 
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist, int count, int api, int threadid);
+        corsaro_plugin_t *plist, int count, int threadid);
+corsaro_plugin_set_t *corsaro_start_reader_plugins(corsaro_logger_t *logger,
+        corsaro_plugin_t *plist, int count, int maxsources);
 int corsaro_stop_plugins(corsaro_plugin_set_t *pluginset);
 int corsaro_push_end_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
         uint32_t ts);
@@ -250,7 +257,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
   plugin##_init_reading, plugin##_halt_reading,                 \
   plugin##_write_result,                                        \
   plugin##_read_result, plugin##_compare_results,               \
-  plugin##_release_result
+  plugin##_combine_results, plugin##_release_result
 
 #define CORSARO_PLUGIN_GENERATE_TAIL                            \
   NULL, 0, 0, NULL, NULL
