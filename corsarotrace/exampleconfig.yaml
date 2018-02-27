@@ -1,0 +1,45 @@
+# See the documentation for a complete list of available configuration options.
+
+
+# Format for output file names
+outtemplate: "/path/to/output/directory/analysis-%s-%N.%P.gz"
+
+# Location to write log files to (if logmode is set to 'file')
+logfilename: "/path/to/output/directory/test.log"
+
+# Libtrace URI describing where to read packets from.
+inputuri: "ndag:225.0.0.225:9001"
+
+# Output can be either in 'ascii' or 'binary'
+outputmode: ascii
+
+# Compression method to use when writing output files.
+# Use 'none' for uncompressed output.
+compressmethod: gzip
+
+# %N modifiers in outtemplate will be replaced by this string.
+monitorid: mycorsaro
+
+# Size of distribution interval in seconds.
+interval: 300
+
+# Number of intervals to include in each output file.
+rotatefreq: 6
+
+# Compression level to apply when writing compressed output.
+compresslevel: 1
+
+# Number of packet processing threads to use.
+threads: 3
+
+# Set to 'no' to prevent the output of each processing thread from
+# being combined into a single output file.
+mergeoutput: yes
+
+# List of plugins to apply to each captured packet, as well as the
+# plugin-specific configuration
+plugins:
+ - flowtuple:
+     # Sorts the flowtuples before writing them to the output file.
+     # Set to 'no' to disable sorting.
+     sorttuples: yes
