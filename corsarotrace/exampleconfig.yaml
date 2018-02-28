@@ -36,6 +36,9 @@ threads: 3
 # being combined into a single output file.
 mergeoutput: yes
 
+# BPF filter that will control which packets are analysed
+#filter: "tcp port 80"
+
 # List of plugins to apply to each captured packet, as well as the
 # plugin-specific configuration
 plugins:

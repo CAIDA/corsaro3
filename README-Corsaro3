@@ -16,7 +16,7 @@ compatible with tools or analysis programs written using the old Corsaro.
 Requirements
 ============
 
- * libtrace >= 4.0.0 -- download from https://github.com/LibtraceTeam/libtrace
+ * libtrace >= 4.0.3 -- download from https://github.com/LibtraceTeam/libtrace
  * libwandio >= 1.0.4 -- download from https://github.com/wanduow/wandio
  * libyaml -- https://github.com/yaml/libyaml
 
@@ -147,6 +147,8 @@ The full set of supported global config options is:
 
   endboundaryts         Ignore all packets that have a timestamp after the Unix
                         timestamp given by this option.
+
+  filter                Ignore all packets that do not match this BPF filter.
 
   plugins               A sequence that specifies which plugins to use for
                         packet processing, as well as any plugin-specific
