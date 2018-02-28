@@ -63,7 +63,8 @@
 #define END_INTERVAL_MACRO \
     corsaro_push_end_plugins(tls->plugins, tls->current_interval.number,  \
             tls->next_report - 1);                                        \
-    if ((tls->current_interval.number + 1) % glob->rotatefreq == 0) {     \
+    if (glob->rotatefreq > 0 &&                                           \
+            ((tls->current_interval.number + 1) % glob->rotatefreq) == 0) {  \
         corsaro_push_rotate_file_plugins(tls->plugins,                    \
                 tls->current_interval.number + 1, tls->next_report);      \
         publish_file_closed_message(trace, t, &tls->lastrotateinterval,   \
@@ -83,10 +84,12 @@ libtrace_callback_set_t *processing = NULL;
 libtrace_callback_set_t *reporter = NULL;
 
 volatile int corsaro_halted = 0;
+volatile int trace_halted = 0;
 
 static void cleanup_signal(int sig) {
     (void)sig;
     corsaro_halted = 1;
+    trace_halted = 1;
 }
 
 
@@ -130,25 +133,32 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global) {
 
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
-    corsaro_trace_local_t *tls = (corsaro_trace_local_t *)malloc(
-            sizeof(corsaro_trace_local_t));
+    corsaro_trace_local_t *tls;
 
-    tls->plugins = corsaro_start_plugins(glob->logger,
-            glob->active_plugins, glob->plugincount,
-            trace_get_perpkt_thread_id(t));
 
-    tls->next_report = 0;
-    tls->current_interval.number = 0;
-    tls->current_interval.time = 0;
-    tls->lastrotateinterval.number = 0;
-    tls->lastrotateinterval.time = 0;
-    tls->pkts_outstanding = 0;
-    tls->pkts_since_tick = 0;
-    tls->last_ts = 0;
-    tls->stopped = 0;
+    if (glob->currenturi == 0) {
+        tls = (corsaro_trace_local_t *)malloc(
+                sizeof(corsaro_trace_local_t));
 
-    if (tls->plugins == NULL) {
-        corsaro_log(glob->logger, "error while starting plugins.");
+        tls->plugins = corsaro_start_plugins(glob->logger,
+                glob->active_plugins, glob->plugincount,
+                trace_get_perpkt_thread_id(t));
+
+        tls->next_report = 0;
+        tls->current_interval.number = 0;
+        tls->current_interval.time = 0;
+        tls->lastrotateinterval.number = 0;
+        tls->lastrotateinterval.time = 0;
+        tls->pkts_outstanding = 0;
+        tls->pkts_since_tick = 0;
+        tls->last_ts = 0;
+        tls->stopped = 0;
+
+        if (tls->plugins == NULL) {
+            corsaro_log(glob->logger, "error while starting plugins.");
+        }
+    } else {
+        tls = glob->savedlocalstate[trace_get_perpkt_thread_id(t)];
     }
 
     return tls;
@@ -159,25 +169,28 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)local;
 
-
-    if (tls->pkts_outstanding) {
-        if (corsaro_push_end_plugins(tls->plugins,
-                    tls->current_interval.number, tls->last_ts) == -1) {
-            corsaro_log(glob->logger,
-                    "error while pushing final 'end interval' to plugins.");
+    if (glob->currenturi == glob->totaluris - 1) {
+        if (tls->pkts_outstanding) {
+            if (corsaro_push_end_plugins(tls->plugins,
+                        tls->current_interval.number, tls->last_ts) == -1) {
+                corsaro_log(glob->logger,
+                        "error while pushing final 'end interval' to plugins.");
+            }
         }
-    }
 
-    if (corsaro_stop_plugins(tls->plugins) == -1) {
-        corsaro_log(glob->logger, "error while stopping plugins.");
-    }
+        if (corsaro_stop_plugins(tls->plugins) == -1) {
+            corsaro_log(glob->logger, "error while stopping plugins.");
+        }
 
-    if (!tls->stopped) {
-        publish_file_closed_message(trace, t, &tls->lastrotateinterval,
-                        ((uint64_t)tls->next_report) << 32);
-    }
+        if (!tls->stopped) {
+            publish_file_closed_message(trace, t, &tls->lastrotateinterval,
+                            ((uint64_t)tls->next_report) << 32);
+        }
 
-    free(tls);
+        free(tls);
+    } else {
+        glob->savedlocalstate[trace_get_perpkt_thread_id(t)] = tls;
+    }
 }
 
 static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
@@ -309,7 +322,7 @@ static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
         free(fin);
     }
 
-    corsaro_halted = 1;
+    trace_halted = 1;
 }
 
 static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
@@ -392,7 +405,7 @@ int start_trace_input(corsaro_trace_global_t *glob) {
     libtrace_generic_t nothing;
     nothing.ptr = NULL;
 
-    glob->trace = trace_create(glob->inputuri);
+    glob->trace = trace_create(glob->inputuris[glob->currenturi]);
     if (trace_is_err(glob->trace)) {
         libtrace_err_t err = trace_get_err(glob->trace);
         corsaro_log(glob->logger, "unable to create trace object: %s",
@@ -406,8 +419,14 @@ int start_trace_input(corsaro_trace_global_t *glob) {
     }
 
     trace_set_combiner(glob->trace, &combiner_unordered, nothing);
-    trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, NULL, NULL);
+    trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, glob->hasher,
+            glob->hasher_data);
     trace_set_perpkt_threads(glob->trace, glob->threads);
+
+    if (glob->savedlocalstate == NULL) {
+        glob->savedlocalstate = (corsaro_trace_local_t **)malloc(
+                sizeof(corsaro_trace_local_t) * glob->threads);
+    }
 
     processing = trace_create_callback_set();
     trace_set_starting_cb(processing, init_trace_processing);
@@ -438,6 +457,9 @@ int start_trace_input(corsaro_trace_global_t *glob) {
                 err.problem);
         return -1;
     }
+
+    corsaro_log(glob->logger, "successfully started input trace %s",
+            glob->inputuris[glob->currenturi]);
 
     return 0;
 }
@@ -533,32 +555,42 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    sigemptyset(&sig_block_all);
-    if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
-        corsaro_log(glob->logger, "unable to disable signals before starting threads.");
-        return 1;
-    }
+    while (glob->currenturi < glob->totaluris && !corsaro_halted) {
 
-    /* Create trace and start processing threads */
-    if (start_trace_input(glob) < 0) {
-        corsaro_log(glob->logger, "failed to start packet source %s.", glob->inputuri);
-        return 1;
-    }
+        sigemptyset(&sig_block_all);
+        if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
+            corsaro_log(glob->logger, "unable to disable signals before starting threads.");
+            return 1;
+        }
+        trace_halted = 0;
+        /* Create trace and start processing threads */
+        if (start_trace_input(glob) < 0) {
+            corsaro_log(glob->logger, "failed to start packet source %s.",
+                    glob->inputuris[glob->currenturi]);
+            glob->currenturi ++;
+            trace_destroy(glob->trace);
+            glob->trace = NULL;
+            continue;
+        }
 
-    if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
-        corsaro_log(glob->logger, "unable to re-enable signals after starting threads.");
-        return 1;
-    }
+        if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
+            corsaro_log(glob->logger, "unable to re-enable signals after starting threads.");
+            return 1;
+        }
 
-    while (!corsaro_halted) {
-        sleep(1);
-    }
-    if (!trace_has_finished(glob->trace)) {
-        trace_pstop(glob->trace);
-    }
+        while (!trace_halted) {
+            sleep(1);
+        }
+        if (!trace_has_finished(glob->trace)) {
+            trace_pstop(glob->trace);
+        }
+        glob->currenturi ++;
 
-    /* Join on input trace */
-    trace_join(glob->trace);
+        /* Join on input trace */
+        trace_join(glob->trace);
+        trace_destroy(glob->trace);
+        glob->trace = NULL;
+    }
 
     /* Join on merging thread */
     corsaro_log(glob->logger, "all threads have joined, exiting.");

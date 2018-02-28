@@ -27,6 +27,7 @@
 
 #include <errno.h>
 
+#include <libtrace/hash_toeplitz.h>
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_io.h"
@@ -179,12 +180,33 @@ static int grab_corsaro_filename_template(corsaro_trace_global_t *glob,
     return 1;
 }
 
+static int add_uri(corsaro_trace_global_t *glob, char *uri) {
+
+    if (glob->totaluris == glob->alloceduris) {
+        glob->inputuris = (char **)realloc(glob->inputuris,
+                sizeof(char *) * (glob->alloceduris + 10));
+        glob->alloceduris += 10;
+    }
+
+    if (glob->inputuris == NULL) {
+        corsaro_log(glob->logger,
+                "OOM while allocating space for input URIs.");
+        return -1;
+    }
+
+    glob->inputuris[glob->totaluris] = strdup(uri);
+    glob->totaluris ++;
+    return 0;
+}
+
 static int parse_remaining_config(corsaro_trace_global_t *glob,
         yaml_document_t *doc, yaml_node_t *key, yaml_node_t *value) {
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "inputuri")) {
-        glob->inputuri = strdup((char *)value->data.scalar.value);
+        if (add_uri(glob, (char *)value->data.scalar.value) == -1) {
+            return -1;
+        }
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -348,9 +370,12 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->boundstartts = 0;
     glob->boundendts = 0;
     glob->interval = 60;
-    glob->rotatefreq = 0;
+    glob->rotatefreq = 4;
     glob->template =  NULL;
-    glob->inputuri = NULL;
+    glob->inputuris = NULL;
+    glob->currenturi = 0;
+    glob->totaluris = 0;
+    glob->alloceduris = 0;
     glob->filterstring = NULL;
     glob->monitorid = NULL;
     glob->promisc = 0;
@@ -367,6 +392,10 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->outmode = CORSARO_FILE_MODE_DEFAULT;
     glob->compress = CORSARO_FILE_COMPRESS_DEFAULT;
     glob->compresslevel = CORSARO_FILE_COMPRESS_LEVEL_DEFAULT;
+
+    glob->savedlocalstate = NULL;
+    glob->hasher = NULL;
+    glob->hasher_data = NULL;
 
     /* Need to grab the template first, in case we need it for logging.
      * This will mean we read the config file twice... :(
@@ -428,7 +457,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         corsaro_log(glob->logger, "program will likely do nothing.");
     }
 
-    if (glob->inputuri == NULL) {
+    if (glob->totaluris == 0) {
         corsaro_log(glob->logger, "no input URI has been provided, exiting.");
         corsaro_trace_free_global(glob);
         return NULL;
@@ -454,17 +483,34 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     }
 
 
+    glob->hasher = (fn_hasher)toeplitz_hash_packet;
+    glob->hasher_data = calloc(1, sizeof(toeplitz_conf_t));
+
+    /* Bidirectional hash -- set arg to 0 for unidirectional
+     *
+     * XXX is this a desirable config option?
+     */
+    toeplitz_init_config(glob->hasher_data, 1);
+
     return glob;
 
 }
 
 void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
 
+    int i;
     if (glob == NULL) {
         return;
     }
 
     corsaro_cleanse_plugin_list(glob->active_plugins);
+
+    if (glob->inputuris) {
+        for (i = 0; i < glob->totaluris; i++) {
+            free(glob->inputuris[i]);
+        }
+        free(glob->inputuris);
+    }
 
     if (glob->template) {
         free(glob->template);
@@ -480,6 +526,14 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
 
     if (glob->filter) {
         trace_destroy_filter(glob->filter);
+    }
+
+    if (glob->savedlocalstate) {
+        free(glob->savedlocalstate);
+    }
+
+    if (glob->hasher_data) {
+        free(glob->hasher_data);
     }
 
     destroy_corsaro_logger(glob->logger);

@@ -29,6 +29,7 @@
 #define CORSAROTRACE_H_
 
 #include <libtrace.h>
+#include <libtrace_parallel.h>
 #include <libtrace/message_queue.h>
 
 #include "libcorsaro3.h"
@@ -47,16 +48,20 @@ typedef struct corsaro_trace_msg {
     uint32_t interval_time;
 } corsaro_trace_msg_t;
 
+typedef struct corsaro_trace_local corsaro_trace_local_t;
 
 typedef struct corsaro_trace_glob {
     corsaro_plugin_t *active_plugins;
     corsaro_logger_t *logger;
     char *template;
     char *logfilename;
-    char *inputuri;
+    char **inputuris;
     char *filterstring;
     char *monitorid;
 
+    int currenturi;
+    int totaluris;
+    int alloceduris;
     libtrace_t *trace;
     libtrace_filter_t *filter;
     uint32_t boundstartts;
@@ -74,9 +79,13 @@ typedef struct corsaro_trace_glob {
     uint8_t threads;
     uint8_t plugincount;
 
+    corsaro_trace_local_t **savedlocalstate;
+    fn_hasher hasher;
+    void *hasher_data;
+
 } corsaro_trace_global_t;
 
-typedef struct corsaro_trace_local {
+struct corsaro_trace_local {
 
     corsaro_interval_t current_interval;
     corsaro_interval_t lastrotateinterval;
@@ -87,7 +96,7 @@ typedef struct corsaro_trace_local {
     uint32_t last_ts;
     uint8_t stopped;
 
-} corsaro_trace_local_t;
+};
 
 typedef struct corsaro_trace_waiter {
     uint8_t stops_seen;
