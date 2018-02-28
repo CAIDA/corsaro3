@@ -487,6 +487,7 @@ int main(int argc, char *argv[]) {
 
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
+    libtrace_stat_t *stats;
 
     /* Replaced old getopt-based nightmare with a proper YAML config file. */
 
@@ -595,6 +596,22 @@ int main(int argc, char *argv[]) {
 
         /* Join on input trace */
         trace_join(glob->trace);
+        stats = trace_get_statistics(glob->trace, NULL);
+        if (stats->dropped_valid) {
+            corsaro_log(glob->logger, "dropped packet count: %lu",
+                    stats->dropped);
+        } else {
+            corsaro_log(glob->logger, "dropped packet count: unknown");
+        }
+
+        if (stats->missing_valid) {
+            corsaro_log(glob->logger, "missing packet count: %lu",
+                    stats->missing);
+        } else {
+            corsaro_log(glob->logger, "missing packet count: unknown");
+        }
+
+
         trace_destroy(glob->trace);
         glob->trace = NULL;
     }

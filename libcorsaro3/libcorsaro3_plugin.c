@@ -192,6 +192,7 @@ corsaro_plugin_t *corsaro_enable_plugin(corsaro_logger_t *logger,
      */
     copy->logger = logger;
     copy->local_logger = 0;
+    corsaro_log(logger, "enabling %s plugin", copy->name);
     return copy;
 }
 

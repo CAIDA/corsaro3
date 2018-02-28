@@ -34,6 +34,8 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <math.h>
 
 #include "libcorsaro3_log.h"
 /* Yes, I know about the redundancy between this enum and the one
@@ -49,7 +51,11 @@ void corsaro_log(corsaro_logger_t *logger, const char *fmt, ...) {
 
     va_list ap;
     FILE *out = NULL;
-    char bigbuf[2048];
+    char timebuf[1024];
+    char bigbuf[4096];
+    struct tm *tm_info;
+    struct timeval tv;
+    int millisec;
 
     if (logger == NULL) {
         return;
@@ -59,21 +65,33 @@ void corsaro_log(corsaro_logger_t *logger, const char *fmt, ...) {
     if (logger->mode == CORSARO_LOG_SYSLOG) {
         /* syslog is thread-safe, so skip the mutex */
         if (logger->name) {
-            snprintf(bigbuf, sizeof(bigbuf), "[%s] %s", logger->name, fmt);
+            snprintf(bigbuf, sizeof(bigbuf), "%s: %s",
+                logger->name, fmt);
             vsyslog(LOG_DAEMON | LOG_DEBUG, bigbuf, ap);
         } else {
             vsyslog(LOG_DAEMON | LOG_DEBUG, fmt, ap);
         }
     } else {
+        gettimeofday(&tv, NULL);
+        millisec = lrint(tv.tv_usec / 1000.0);
+        if (millisec >= 1000) {
+            millisec -= 1000;
+            tv.tv_sec ++;
+        }
+        tm_info = localtime(&tv.tv_sec);
+        strftime(timebuf, 1024, "%H:%M:%S", tm_info);
+
         if (logger->mode == CORSARO_LOG_STDERR) {
             out = stderr;
         } else {
             out = logger->out;
         }
         pthread_mutex_lock(&logger->mutex);
+        fprintf(out, "[%s.%03d]", timebuf, millisec);
         if (logger->name) {
-            fprintf(out, "%s: ", logger->name);
+            fprintf(out, " %s", logger->name);
         }
+        fprintf(out, ": ");
         vfprintf(out, fmt, ap);
         fprintf(out, "\n");
         pthread_mutex_unlock(&logger->mutex);

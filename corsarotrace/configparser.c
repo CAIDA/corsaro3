@@ -289,6 +289,60 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     return 1;
 }
 
+static void log_configuration(corsaro_trace_global_t *glob) {
+    corsaro_log(glob->logger, "running on monitor %s", glob->monitorid);
+    corsaro_log(glob->logger, "using %d processing threads", glob->threads);
+    corsaro_log(glob->logger, "interval length is set to %u seconds",
+            glob->interval);
+    corsaro_log(glob->logger, "rotating files every %u intervals",
+            glob->rotatefreq);
+
+    if (glob->outmode == CORSARO_FILE_MODE_ASCII) {
+        corsaro_log(glob->logger, "writing output in ASCII format");
+    } else if (glob->outmode == CORSARO_FILE_MODE_BINARY) {
+        corsaro_log(glob->logger, "writing output in binary format");
+    }
+
+    if (glob->compress == CORSARO_FILE_COMPRESS_ZLIB) {
+        corsaro_log(glob->logger, "output files are gzip-compressed (level %d)",
+                glob->compresslevel);
+    } else if (glob->compress == CORSARO_FILE_COMPRESS_BZ2) {
+        corsaro_log(glob->logger,
+                "output files are bzip2-compressed (level %d)",
+                glob->compresslevel);
+    } else if (glob->compress == CORSARO_FILE_COMPRESS_LZO) {
+        corsaro_log(glob->logger,
+                "output files are lzo-compressed (level %d)",
+                glob->compresslevel);
+    } else {
+        corsaro_log(glob->logger, "output files are not compressed");
+    }
+
+    if (glob->filterstring) {
+        corsaro_log(glob->logger, "applying BPF filter '%s'",
+                glob->filterstring);
+    }
+
+    if (glob->boundstartts != 0) {
+        corsaro_log(glob->logger, "ignoring all packets before timestamp %u",
+                glob->boundstartts);
+    }
+
+    if (glob->boundendts != 0) {
+        corsaro_log(glob->logger, "stopping at timestamp %u",
+                glob->boundendts);
+    }
+
+    if (glob->promisc) {
+        corsaro_log(glob->logger, "enabling promiscuous mode on all inputs");
+    }
+
+    if (!glob->mergeoutput) {
+        corsaro_log(glob->logger,
+                "disabled merging of per-thread output files");
+    }
+}
+
 static int parse_corsaro_trace_config(corsaro_trace_global_t *glob,
         char *configfile,
         int (*parsefunc)(corsaro_trace_global_t *,
@@ -445,6 +499,8 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         corsaro_cleanse_plugin_list(allplugins);
         return NULL;
     }
+
+    log_configuration(glob);
 
     /* Ok to cleanse this now, the config parsing above should have made
      * copies of all the plugins that we need.
