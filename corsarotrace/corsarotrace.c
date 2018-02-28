@@ -322,6 +322,7 @@ static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
         free(fin);
     }
 
+    free(wait);
     trace_halted = 1;
 }
 
@@ -359,6 +360,7 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
                 corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins,
                         &quik, glob->plugincount);
             }
+            free(msg);
             return;
         }
 
@@ -397,6 +399,7 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
         }
 
     }
+    free(msg);
 
 }
 
@@ -428,16 +431,20 @@ int start_trace_input(corsaro_trace_global_t *glob) {
                 sizeof(corsaro_trace_local_t) * glob->threads);
     }
 
-    processing = trace_create_callback_set();
-    trace_set_starting_cb(processing, init_trace_processing);
-    trace_set_stopping_cb(processing, halt_trace_processing);
-    trace_set_packet_cb(processing, per_packet);
-    trace_set_tick_interval_cb(processing, process_tick);
+    if (!processing) {
+        processing = trace_create_callback_set();
+        trace_set_starting_cb(processing, init_trace_processing);
+        trace_set_stopping_cb(processing, halt_trace_processing);
+        trace_set_packet_cb(processing, per_packet);
+        trace_set_tick_interval_cb(processing, process_tick);
+    }
 
-    reporter = trace_create_callback_set();
-    trace_set_starting_cb(reporter, init_waiter);
-    trace_set_stopping_cb(reporter, halt_waiter);
-    trace_set_result_cb(reporter, handle_trace_msg);
+    if (!reporter) {
+        reporter = trace_create_callback_set();
+        trace_set_starting_cb(reporter, init_waiter);
+        trace_set_stopping_cb(reporter, halt_waiter);
+        trace_set_result_cb(reporter, handle_trace_msg);
+    }
 
     if (glob->filterstring) {
         glob->filter = trace_create_filter(glob->filterstring);

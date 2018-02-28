@@ -512,6 +512,10 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
         free(glob->inputuris);
     }
 
+    if (glob->monitorid) {
+        free(glob->monitorid);
+    }
+
     if (glob->template) {
         free(glob->template);
     }

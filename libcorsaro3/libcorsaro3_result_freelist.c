@@ -65,10 +65,11 @@ void corsaro_destroy_result_freelist(corsaro_result_freelist_t *list,
     n = list->avail->head;
 
     while (n) {
-        void *itemdata = n->data;
+        void **itemdata = n->data;
         if (callback) {
-            callback(provided, itemdata);
+            callback(provided, *itemdata);
         }
+        free(*itemdata);
         n = n->next;
     }
 

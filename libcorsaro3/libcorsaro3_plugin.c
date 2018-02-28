@@ -298,6 +298,8 @@ int corsaro_stop_plugins(corsaro_plugin_set_t *pset) {
         p = p->next;
         index ++;
     }
+    free(pset->plugin_state);
+    free(pset);
     return 0;
 }
 
