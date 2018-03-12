@@ -81,7 +81,6 @@ static int use_compact_schema = 0;
 
 enum {
   FIELD_TIME,
-  FIELD_CLASS,
   FIELD_SRC_IP,
   FIELD_DST_IP,
   FIELD_SRC_PORT,
@@ -244,8 +243,7 @@ static int create_avro_writer(uint32_t time, uint64_t batch_id)
     }                                                                   \
   } while(0)
 
-static int fill_record_compact(corsaro_flowtuple_t *tuple,
-                               uint8_t class, uint32_t time)
+static int fill_record_compact(corsaro_flowtuple_t *tuple, uint32_t time)
 {
   avro_value_t val;
   uint32_t tmp;
@@ -254,9 +252,6 @@ static int fill_record_compact(corsaro_flowtuple_t *tuple,
 
   /* time (4) */
   SET_BYTES_FIELD(FIELD_TIME, &time, 4);
-
-  /* class (1) */
-  SET_BYTES_FIELD(FIELD_CLASS, &class, 1);
 
   /* src_ip (4) */
   SET_BYTES_FIELD(FIELD_SRC_IP, &tuple->src_ip, 4);
@@ -303,8 +298,7 @@ static int fill_record_compact(corsaro_flowtuple_t *tuple,
     }                                                                   \
   } while(0)
 
-static int fill_record(corsaro_flowtuple_t *tuple,
-                       uint8_t class, uint32_t time)
+static int fill_record(corsaro_flowtuple_t *tuple, uint32_t time)
 {
   avro_value_t val;
 
@@ -312,14 +306,6 @@ static int fill_record(corsaro_flowtuple_t *tuple,
 
   /* time (long) */
   SET_FIELD(long, FIELD_TIME, time);
-
-  /* class (enum) */
-  if (avro_value_get_by_index(&a_record, FIELD_CLASS, &val, NULL) != 0 ||
-      avro_value_set_enum(&val, class) != 0) {
-    fprintf(stderr, "ERROR: Could not set value for field %d (%s)\n",
-            FIELD_CLASS, avro_strerror());
-    goto err;
-  }
 
   /* src_ip (long) */
   SET_FIELD(long, FIELD_SRC_IP, ntohl(tuple->src_ip));
@@ -354,8 +340,7 @@ static int fill_record(corsaro_flowtuple_t *tuple,
   return -1;
 }
 
-static int write_record(corsaro_flowtuple_t *tuple,
-                        uint8_t class, uint32_t time)
+static int write_record(corsaro_flowtuple_t *tuple, uint32_t time)
 {
   /* maybe rotate the output file (batch size or new minute) */
   if (a_writer_init != 0 &&
@@ -391,11 +376,11 @@ static int write_record(corsaro_flowtuple_t *tuple,
   }
 
   if (use_compact_schema != 0) {
-    if (fill_record_compact(tuple, class, time) != 0) {
+    if (fill_record_compact(tuple, time) != 0) {
       goto err;
     }
   } else {
-    if (fill_record(tuple, class, time) != 0) {
+    if (fill_record(tuple, time) != 0) {
       goto err;
     }
   }
@@ -422,8 +407,6 @@ static int process_flowtuple_file(char *ftfile)
   corsaro_interval_t *interval;
   uint32_t time;
   corsaro_flowtuple_t *tuple;
-  corsaro_flowtuple_class_start_t *class_start;
-  corsaro_flowtuple_class_type_t class;
 
   if (init_corsaro(ftfile) != 0) {
     goto err;
@@ -439,11 +422,6 @@ static int process_flowtuple_file(char *ftfile)
       break;
 
     case CORSARO_IN_RECORD_TYPE_FLOWTUPLE_CLASS_START:
-      class_start =
-        (corsaro_flowtuple_class_start_t *)corsaro_in_get_record_data(record);
-      class = class_start->class_type;
-      break;
-
     case CORSARO_IN_RECORD_TYPE_IO_INTERVAL_END:
     case CORSARO_IN_RECORD_TYPE_FLOWTUPLE_CLASS_END:
       /* just ignore these */
@@ -451,7 +429,7 @@ static int process_flowtuple_file(char *ftfile)
 
     case CORSARO_IN_RECORD_TYPE_FLOWTUPLE_FLOWTUPLE:
       tuple = (corsaro_flowtuple_t *)corsaro_in_get_record_data(record);
-      if (write_record(tuple, class, time) != 0) {
+      if (write_record(tuple, time) != 0) {
         goto err;
       }
       break;

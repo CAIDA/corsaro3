@@ -5,7 +5,6 @@
     "doc": "A Corsaro FlowTuple record. All byte fields are in network byte order.",
     "fields": [
         {"name": "time", "type": "bytes", "size": 4},
-        {"name": "class", "type": "bytes", "size": 1},
         {"name": "src_ip", "type": "bytes", "size": 4},
         {"name": "dst_ip", "type": "bytes", "size": 4},
         {"name": "src_port", "type": "bytes", "size": 2},
