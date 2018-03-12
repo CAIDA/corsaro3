@@ -57,7 +57,6 @@
 #include <signal.h>
 #include <sys/socket.h>
 
-#include "lt_inttypes.h"
 #include "libtrace.h"
 
 struct libtrace_t *trace;
