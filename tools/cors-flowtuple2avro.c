@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <wandio.h>
 #include "corsaro.h"
 #include "corsaro_io.h"
 #include "corsaro_log.h"
@@ -44,9 +45,8 @@
  *
  */
 
-/* Rotate output files every 10M records, but note that we also force a rotate
-   at the minute boundary. */
-#define DEFAULT_ROTATE_RECORD_CNT (10*1000000)
+/** Default to rotating output files every 60s */
+#define DEFAULT_ROTATE_SECONDS 60
 
 /** The corsaro_in object for reading the input file */
 static corsaro_in_t *corsaro = NULL;
@@ -66,10 +66,12 @@ static int a_writer_init = 0;
 static avro_value_iface_t *a_class = NULL;
 static avro_value_t a_record = {0};
 
-static uint64_t record_cnt = 0;
-static uint64_t batch_cnt = 0;
-static uint32_t current_minute = 0;
-static int batch_size = DEFAULT_ROTATE_RECORD_CNT;
+static uint32_t batch_len = DEFAULT_ROTATE_SECONDS;
+static uint32_t current_batch = 0;
+
+static char next_done_fname[1024];
+
+#define RECORD_BATCH(time) ((time/batch_len)*batch_len)
 
 /* Auto-generated schema include file
  * built by make using:
@@ -92,6 +94,30 @@ enum {
   FIELD_PKT_CNT,
 };
 
+static int close_avro_writer()
+{
+  iow_t *df = NULL;
+
+  /* close the writer */
+  errno = 0;
+  if (avro_file_writer_close(a_writer) != 0 || errno != 0) {
+    fprintf(stderr, "ERROR: Could not close file (%s) (errno:%d)\n",
+            avro_strerror(), errno);
+    goto err;
+  }
+  /* write a "done" file */
+  if ((df = wandio_wcreate(next_done_fname, WANDIO_COMPRESS_NONE, 0, O_CREAT)) ==
+      NULL) {
+    goto err;
+  }
+  wandio_wdestroy(df);
+
+  a_writer_init = 0;
+
+ err:
+    return -1;
+}
+
 static void avro_clean()
 {
   if (avro_init == 0) {
@@ -108,8 +134,7 @@ static void avro_clean()
   avro_schema_decref(a_schema);
 
   if (a_writer_init != 0) {
-    avro_file_writer_close(a_writer);
-    a_writer_init = 0;
+    close_avro_writer();
   }
 
   avro_init = 0;
@@ -195,13 +220,10 @@ static int init_avro()
   return 0;
 }
 
-static int create_avro_writer(uint32_t time, uint64_t batch_id)
+static int create_avro_writer(uint32_t time)
 {
   char buf[1024];
   char *fname = NULL;
-
-  /* print the batch number into the buffer */
-  snprintf(buf, 1024, "%"PRIu64, batch_id);
 
   /* build the file name */
   if ((fname = corsaro_generate_file_name(avro_template, NULL,
@@ -210,6 +232,8 @@ static int create_avro_writer(uint32_t time, uint64_t batch_id)
             avro_template);
     goto err;
   }
+  strcpy(next_done_fname, fname);
+  strcat(next_done_fname, ".DONE");
 
   fprintf(stderr, "INFO: Creating new avro file (%s)\n", fname);
 
@@ -224,7 +248,7 @@ static int create_avro_writer(uint32_t time, uint64_t batch_id)
 
   free(fname);
   a_writer_init = 1;
-  current_minute = (time/60)*60;
+  current_batch = RECORD_BATCH(time);
 
   return 0;
 
@@ -342,28 +366,13 @@ static int fill_record(corsaro_flowtuple_t *tuple, uint32_t time)
 
 static int write_record(corsaro_flowtuple_t *tuple, uint32_t time)
 {
-  /* maybe rotate the output file (batch size or new minute) */
-  if (a_writer_init != 0 &&
-      ((batch_size > 0 && (++record_cnt % batch_size) == 0)
-       || ((time/60)*60) != current_minute)) {
-    /* close the writer */
-    errno = 0;
-    if (avro_file_writer_close(a_writer) != 0 || errno != 0) {
-      fprintf(stderr, "ERROR: Could not close file (%s) (errno:%d)\n",
-              avro_strerror(), errno);
-      goto err;
-    }
-    a_writer_init = 0;
-    if (((time/60)*60) != current_minute) {
-      record_cnt = 0;
-      batch_cnt = 0;
-    } else {
-      batch_cnt++;
-    }
+  /* maybe rotate the output file */
+  if (a_writer_init != 0 && RECORD_BATCH(time) != current_batch) {
+    close_avro_writer();
   }
 
   if (a_writer_init == 0 &&
-      create_avro_writer(time, batch_cnt) != 0) {
+      create_avro_writer(time) != 0) {
     goto err;
   }
   assert(a_writer_init != 0);
@@ -463,10 +472,10 @@ static void usage()
           "usage: cors-flowtuple2avro [-cn] -t template ft-file [ft-file ...]\n"
           "Available options are:\n"
           "    -c                 encode using the compact FlowTuple schema\n"
-          "    -n <batch-size>    rotate avro file after at most n tuples "
+          "    -n <batch-len>    rotate avro file after at n seconds "
           "(default: %d)\n"
           "    -t <template>      Avro file name template (required)\n",
-          DEFAULT_ROTATE_RECORD_CNT
+          DEFAULT_ROTATE_SECONDS
   );
   fprintf(stderr,
           "\nNote: Avro file name template should contain '%%N' which will be "
@@ -496,7 +505,7 @@ int main(int argc, char **argv)
       break;
 
     case 'n':
-      batch_size = atoi(optarg);
+      batch_len = atoi(optarg);
       break;
 
     case 't':
@@ -533,14 +542,10 @@ int main(int argc, char **argv)
     goto err;
   }
 
-  if (strstr(avro_template, "%N") == NULL && batch_size > 0) {
-    fprintf(stderr, "ERROR: Avro file template must contain '%%N'\n");
+  if (strstr(avro_template, "%s") == NULL) {
+    fprintf(stderr, "ERROR: Avro file template must contain '%%s'\n");
     usage();
     goto err;
-  }
-
-  if (strstr(avro_template, "%s") == NULL) {
-    fprintf(stderr, "WARN: Avro file template should contain '%%s'\n");
   }
 
   if (init_avro() != 0) {
