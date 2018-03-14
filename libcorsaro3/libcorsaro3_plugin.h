@@ -33,13 +33,14 @@
 
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
-#include "libcorsaro3_io.h"
+#include "libcorsaro3_avro.h"
 
 /** Convenience macros that define all the function prototypes for the corsaro
  * plugin API
  */
 #define CORSARO_PLUGIN_GENERATE_PROTOTYPES(plugin)          \
     corsaro_plugin_t *plugin##_alloc(void);                 \
+    const char *plugin##_get_avro_schema(void);             \
     int plugin##_parse_config(corsaro_plugin_t *p, yaml_document_t *doc, \
             yaml_node_t *options);                          \
     int plugin##_finalise_config(corsaro_plugin_t *p,       \
@@ -55,16 +56,14 @@
             libtrace_packet_t *packet, corsaro_packet_state_t *pstate); \
     int plugin##_rotate_output(corsaro_plugin_t *p, void *local, \
             corsaro_interval_t *rot_start);                 \
-    corsaro_file_t *plugin##_open_output_file(corsaro_plugin_t *p, \
-            void *local, uint32_t timestamp, int threadid);              \
     char *plugin##_derive_output_name(corsaro_plugin_t *p, void *local, \
             uint32_t timestamp, int threadid);              \
     void *plugin##_init_reading(corsaro_plugin_t *p, int sources);    \
     int plugin##_halt_reading(corsaro_plugin_t *p, void *local); \
     int plugin##_write_result(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *res, corsaro_file_t *out); \
+            corsaro_plugin_result_t *res, corsaro_avro_writer_t *out); \
     int plugin##_read_result(corsaro_plugin_t *p, void *local, \
-            corsaro_file_in_t *in, corsaro_plugin_result_t *res, \
+            corsaro_avro_reader_t *in, corsaro_plugin_result_t *res, \
             int sourceind); \
     int plugin##_compare_results(corsaro_plugin_t *p, void *local, \
             corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2); \
@@ -85,11 +84,7 @@ typedef enum corsaro_plugin_id {
 typedef enum corsaro_result_type {
     CORSARO_RESULT_TYPE_BLANK,
     CORSARO_RESULT_TYPE_EOF,
-    CORSARO_RESULT_TYPE_START_INTERVAL,
-    CORSARO_RESULT_TYPE_END_INTERVAL,
     CORSARO_RESULT_TYPE_DATA,
-    CORSARO_RESULT_TYPE_START_GROUP,
-    CORSARO_RESULT_TYPE_END_GROUP,
 } corsaro_result_type_t;
 
 enum {
@@ -103,9 +98,6 @@ typedef struct corsaro_plugin_result corsaro_plugin_result_t;
 typedef struct corsaro_plugin_proc_options {
     char *template;
     char *monitorid;
-    corsaro_file_mode_t outmode;
-    corsaro_file_compress_t compress;
-    int compresslevel;
 } corsaro_plugin_proc_options_t;
 
 /** Corsaro state for a packet
@@ -142,6 +134,7 @@ struct corsaro_plugin {
     const uint32_t magic;
 
     /* Callbacks for general functionality */
+    const char *(*get_avro_schema)(void);
     int (*parse_config)(corsaro_plugin_t *p, yaml_document_t *doc,
             yaml_node_t *options);
     int (*finalise_config)(corsaro_plugin_t *p,
@@ -159,16 +152,15 @@ struct corsaro_plugin {
             libtrace_packet_t *packet, corsaro_packet_state_t *pstate);
     int (*rotate_output)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *rot_start);
-    corsaro_file_t *(*open_output_file)(corsaro_plugin_t *p, void *local,
-            uint32_t timestamp, int threadid);
     char *(*derive_output_name)(corsaro_plugin_t *p, void *local,
             uint32_t timestamp, int threadid);
     void *(*init_reading)(corsaro_plugin_t *p, int sources);
     int (*halt_reading)(corsaro_plugin_t *p, void *local);
     int (*write_result)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *res, corsaro_file_t *out);
+            corsaro_plugin_result_t *res, corsaro_avro_writer_t *out);
     int (*read_result)(corsaro_plugin_t *p, void *local,
-            corsaro_file_in_t *in, corsaro_plugin_result_t *res, int sourceind);
+            corsaro_avro_reader_t *in, corsaro_plugin_result_t *res,
+            int sourceind);
     int (*compare_results)(corsaro_plugin_t *p, void *local,
             corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2);
     int (*combine_results)(corsaro_plugin_t *p, void *local,
@@ -203,7 +195,8 @@ struct corsaro_plugin_result {
 
     corsaro_plugin_t *plugin;
     corsaro_result_type_t type;
-    void *resdata;
+    avro_value_t *avrofmt;
+    void *pluginfmt;
 };
 
 corsaro_plugin_t *corsaro_load_all_plugins(corsaro_logger_t *logger);
@@ -238,20 +231,18 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
 
 #define CORSARO_INIT_PLUGIN_PROC_OPTS(opts) \
   opts.template = NULL; \
-  opts.monitorid = NULL; \
-  opts.outmode = CORSARO_FILE_MODE_UNKNOWN; \
-  opts.compress = CORSARO_FILE_COMPRESS_UNSET; \
-  opts.compresslevel = -1;
+  opts.monitorid = NULL; 
 
 #define CORSARO_PLUGIN_GENERATE_BASE_PTRS(plugin)               \
-  plugin##_parse_config, plugin##_finalise_config,              \
+  plugin##_get_avro_schema, plugin##_parse_config,              \
+  plugin##_finalise_config,              \
   plugin##_destroy_self
 
 #define CORSARO_PLUGIN_GENERATE_TRACE_PTRS(plugin)              \
   plugin##_init_processing, plugin##_halt_processing,           \
   plugin##_start_interval, plugin##_end_interval,               \
   plugin##_process_packet, plugin##_rotate_output,              \
-  plugin##_open_output_file, plugin##_derive_output_name
+  plugin##_derive_output_name
 
 #define CORSARO_PLUGIN_GENERATE_READ_PTRS(plugin)               \
   plugin##_init_reading, plugin##_halt_reading,                 \

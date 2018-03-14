@@ -80,6 +80,7 @@ struct corsaro_interval {
     uint32_t magic;
     uint32_t number;
     uint32_t time;
+    uint8_t isstart;
 };
 
 struct corsaro_fin_interval {

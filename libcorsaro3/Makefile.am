@@ -36,6 +36,8 @@ libcorsaro3_la_SOURCES = 	\
 	libcorsaro3_log.h 		\
 	libcorsaro3_plugin.c 	        \
 	libcorsaro3_plugin.h            \
+        libcorsaro3_avro.c              \
+        libcorsaro3_avro.h              \
         libcorsaro3_io.c                \
         libcorsaro3_file.c              \
         libcorsaro3_io.h                \
