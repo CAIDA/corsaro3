@@ -131,7 +131,7 @@ struct corsaro_plugin {
     /* Static identifying information for the plugin */
     const char *name;
     const corsaro_plugin_id_t id;
-    const uint32_t magic;
+    const uint32_t magic;           /* XXX Don't really use this anymore */
 
     /* Callbacks for general functionality */
     const char *(*get_avro_schema)(void);
