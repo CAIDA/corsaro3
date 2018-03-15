@@ -30,7 +30,6 @@
 #include <libtrace/hash_toeplitz.h>
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_plugin.h"
-#include "libcorsaro3_io.h"
 #include "corsarotrace.h"
 
 #include <yaml.h>

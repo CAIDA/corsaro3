@@ -35,7 +35,6 @@
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_plugin.h"
-#include "libcorsaro3_io.h"
 
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
