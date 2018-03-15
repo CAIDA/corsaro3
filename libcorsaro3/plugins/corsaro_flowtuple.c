@@ -546,7 +546,6 @@ int corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
                 return -1;
             }
             for (j = 0; j < kh_size(h); j++) {
-                sorted_keys[j]->interval_ts = state->last_interval_start;
                 av = corsaro_populate_avro_item(state->writer,
                         sorted_keys[j], flowtuple_to_avro);
                 if (av == NULL) {
@@ -571,7 +570,6 @@ int corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
                     continue;
                 }
                 ft = (struct corsaro_flowtuple *) kh_key(h, i);
-                ft->interval_ts = state->last_interval_start;
                 av = corsaro_populate_avro_item(state->writer,
                         kh_key(h, i), flowtuple_to_avro);
                 if (av == NULL) {
@@ -655,9 +653,10 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
         return 0;
     }
 
-    t.ip_len = ip_hdr->ip_len;
+    t.ip_len = ntohs(ip_hdr->ip_len);
     t.src_ip = ntohl(ip_hdr->ip_src.s_addr);
     t.dst_ip = ntohl(ip_hdr->ip_dst.s_addr);
+    t.interval_ts = state->last_interval_start;
 
     t.protocol = ip_hdr->ip_p;
     t.tcp_flags = 0; /* in case we don't find a tcp header */
