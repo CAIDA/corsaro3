@@ -69,10 +69,6 @@ typedef struct corsaro_trace_glob {
     uint32_t interval;
     uint32_t rotatefreq;
 
-    int compresslevel;
-    corsaro_file_compress_t compress;
-    corsaro_file_mode_t outmode;
-
     uint8_t promisc;
     uint8_t mergeoutput;
     uint8_t logmode;

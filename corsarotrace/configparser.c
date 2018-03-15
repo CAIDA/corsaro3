@@ -244,26 +244,8 @@ static void log_configuration(corsaro_trace_global_t *glob) {
     corsaro_log(glob->logger, "rotating files every %u intervals",
             glob->rotatefreq);
 
-    if (glob->outmode == CORSARO_FILE_MODE_ASCII) {
-        corsaro_log(glob->logger, "writing output in ASCII format");
-    } else if (glob->outmode == CORSARO_FILE_MODE_BINARY) {
-        corsaro_log(glob->logger, "writing output in binary format");
-    }
 
-    if (glob->compress == CORSARO_FILE_COMPRESS_ZLIB) {
-        corsaro_log(glob->logger, "output files are gzip-compressed (level %d)",
-                glob->compresslevel);
-    } else if (glob->compress == CORSARO_FILE_COMPRESS_BZ2) {
-        corsaro_log(glob->logger,
-                "output files are bzip2-compressed (level %d)",
-                glob->compresslevel);
-    } else if (glob->compress == CORSARO_FILE_COMPRESS_LZO) {
-        corsaro_log(glob->logger,
-                "output files are lzo-compressed (level %d)",
-                glob->compresslevel);
-    } else {
-        corsaro_log(glob->logger, "output files are not compressed");
-    }
+    corsaro_log(glob->logger, "output files are compressed Avro format");
 
     if (glob->filterstring) {
         corsaro_log(glob->logger, "applying BPF filter '%s'",
@@ -389,10 +371,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->trace = NULL;
     glob->filter = NULL;
     glob->logger = NULL;
-
-    glob->outmode = CORSARO_FILE_MODE_DEFAULT;
-    glob->compress = CORSARO_FILE_COMPRESS_DEFAULT;
-    glob->compresslevel = CORSARO_FILE_COMPRESS_LEVEL_DEFAULT;
 
     glob->savedlocalstate = NULL;
     glob->hasher = NULL;
