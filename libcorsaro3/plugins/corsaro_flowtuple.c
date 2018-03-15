@@ -818,18 +818,6 @@ void corsaro_flowtuple_release_result(corsaro_plugin_t *p, void *local,
 /*
  * Hashes the flowtuple based on the following table
  *
- * With slash eight optimization:
- *         --------------------------------
- *         |           SRC_IP * 59        |
- * ----------------------------------------
- * |       |     DST_IP << 8      | PROTO |
- * ----------------------------------------
- *         | SRC_PORT <<16 |   DST_PORT   |
- *         --------------------------------
- *         |  TTL  |TCP_FLG|     LEN      |
- *         --------------------------------
- *
- * Without slash eight optimization:
  *         --------------------------------
  *         |           SRC_IP * 59        |
  *         --------------------------------
@@ -843,20 +831,11 @@ void corsaro_flowtuple_release_result(corsaro_plugin_t *p, void *local,
 khint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft)
 {
   khint32_t h = (khint32_t)ft->src_ip * 59;
-#ifdef CORSARO_SLASH_EIGHT
-  CORSARO_FLOWTUPLE_SHIFT_AND_XOR((ft->dst_ip.b << 24) | (ft->dst_ip.c << 16) |
-                                  (ft->dst_ip.d << 8) | (ft->protocol));
-#else
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR(ft->dst_ip);
-#endif
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR(ft->src_port << 16);
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR(ft->dst_port);
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR((ft->ttl << 24) | (ft->tcp_flags << 16));
-#ifdef CORSARO_SLASH_EIGHT
-  CORSARO_FLOWTUPLE_SHIFT_AND_XOR(ft->ip_len);
-#else
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR((ft->protocol << 8) | (ft->ip_len));
-#endif
   return h;
 }
 
