@@ -35,10 +35,8 @@
 #include <errno.h>
 #include <yaml.h>
 
-#include "libcorsaro3_result_freelist.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_avro.h"
-#include "libcorsaro3_io.h"
 #include "corsaro_flowtuple.h"
 #include "utils.h"
 
