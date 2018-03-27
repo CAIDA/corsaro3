@@ -389,25 +389,6 @@ int corsaro_push_rotate_file_plugins(corsaro_plugin_set_t *pset,
     return 0;
 }
 
-static int write_next_result(corsaro_plugin_t *p, void *plocal,
-        corsaro_avro_writer_t *writer, corsaro_plugin_result_t *res) {
-
-    if (res->type != CORSARO_RESULT_TYPE_DATA) {
-        return 0;
-    }
-
-    if (res->avrofmt != NULL) {
-        return corsaro_append_avro_writer(writer, res->avrofmt);
-    }
-
-    if (res->pluginfmt != NULL) {
-        return p->write_result(p, plocal, res, writer);
-    }
-
-    corsaro_log(p->logger, "tried to write empty %s result?", p->name);
-    return -1;
-}
-
 /** "Distinct" merge is intended to be used when each result in the interim
  *  files can be considered complete, i.e. there is no possibility of there
  *  being results in the other interim files that should be merged or
