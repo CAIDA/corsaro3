@@ -60,18 +60,38 @@
             uint32_t timestamp, int threadid);              \
     void *plugin##_init_reading(corsaro_plugin_t *p, int sources);    \
     int plugin##_halt_reading(corsaro_plugin_t *p, void *local); \
-    int plugin##_write_result(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *res, corsaro_avro_writer_t *out); \
-    int plugin##_read_result(corsaro_plugin_t *p, void *local, \
-            corsaro_avro_reader_t *in, corsaro_plugin_result_t *res, \
-            int sourceind); \
     int plugin##_compare_results(corsaro_plugin_t *p, void *local, \
             corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2); \
-    int plugin##_combine_results(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *dest, corsaro_plugin_result_t *src); \
     void plugin##_release_result(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *res);
+            corsaro_plugin_result_t *res);                  \
+    void *plugin##_open_interim_file_reader(corsaro_plugin_t *p, \
+            void *local, const char *filename);                          \
+    void plugin##_close_interim_file(corsaro_plugin_t *p, void *local, \
+            void *file);                                    \
+    void *plugin##_open_merged_output_file(corsaro_plugin_t *p, void *local, \
+            const char *filename);                          \
+    void plugin##_close_merged_output_file(corsaro_plugin_t *p, void *local, \
+            void *file);                                    \
+    int plugin##_write_result(corsaro_plugin_t *p, void *local, \
+            corsaro_plugin_result_t *res, void *file); \
+    int plugin##_read_result(corsaro_plugin_t *p, void *local, \
+            void *file, corsaro_plugin_result_t *res); \
+    int plugin##_update_merge(corsaro_plugin_t *p, void *local, \
+            corsaro_plugin_result_t *res);          \
+    int plugin##_get_merged_result(corsaro_plugin_t *p, void *local, \
+            corsaro_plugin_result_t *writer);
 
+
+typedef enum {
+    CORSARO_MERGE_TYPE_OVERLAPPING,
+    CORSARO_MERGE_TYPE_DISTINCT
+} corsaro_merge_style_t;
+
+typedef enum {
+    CORSARO_INTERIM_AVRO,
+    CORSARO_INTERIM_PLUGIN,
+    CORSARO_INTERIM_TRACE
+} corsaro_interim_format_t;
 
 
 typedef enum corsaro_plugin_id {
@@ -132,6 +152,9 @@ struct corsaro_plugin {
     const char *name;
     const corsaro_plugin_id_t id;
     const uint32_t magic;           /* XXX Don't really use this anymore */
+    const corsaro_interim_format_t interimfmt;
+    const corsaro_interim_format_t finalfmt;
+    const corsaro_merge_style_t mergestyle;
 
     /* Callbacks for general functionality */
     const char *(*get_avro_schema)(void);
@@ -154,22 +177,32 @@ struct corsaro_plugin {
             corsaro_interval_t *rot_start);
     char *(*derive_output_name)(corsaro_plugin_t *p, void *local,
             uint32_t timestamp, int threadid);
+
+    /* Callbacks for reading and merging results */
     void *(*init_reading)(corsaro_plugin_t *p, int sources);
     int (*halt_reading)(corsaro_plugin_t *p, void *local);
-    int (*write_result)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *res, corsaro_avro_writer_t *out);
-    int (*read_result)(corsaro_plugin_t *p, void *local,
-            corsaro_avro_reader_t *in, corsaro_plugin_result_t *res,
-            int sourceind);
     int (*compare_results)(corsaro_plugin_t *p, void *local,
             corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2);
-    int (*combine_results)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *dest, corsaro_plugin_result_t *src);
     void (*release_result)(corsaro_plugin_t *p, void *local,
             corsaro_plugin_result_t *res);
 
-    /* Callbacks for reading results */
-    /* TODO */
+    void *(*open_interim_file_reader)(corsaro_plugin_t *p, void *local,
+            const char *filename);
+    void (*close_interim_file)(corsaro_plugin_t *p, void *local,
+            void *file);
+    void *(*open_merged_output_file)(corsaro_plugin_t *p, void *local,
+            const char *filename);
+    void (*close_merged_output_file)(corsaro_plugin_t *p, void *local,
+            void *file);
+    int (*write_result)(corsaro_plugin_t *p, void *local,
+            corsaro_plugin_result_t *res, void *out);
+    int (*read_result)(corsaro_plugin_t *p, void *local,
+            void *in, corsaro_plugin_result_t *res);
+    int (*update_merge)(corsaro_plugin_t *p, void *local,
+            corsaro_plugin_result_t *res);
+    int (*get_merged_result)(corsaro_plugin_t *p, void *local,
+            corsaro_plugin_result_t *res);
+
 
     /* High level global state variables */
     void *config;       // plugin-specific global config goes here
@@ -197,6 +230,7 @@ struct corsaro_plugin_result {
     corsaro_result_type_t type;
     avro_value_t *avrofmt;
     void *pluginfmt;
+    libtrace_packet_t *packet;
 };
 
 corsaro_plugin_t *corsaro_load_all_plugins(corsaro_logger_t *logger);
@@ -244,11 +278,33 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
   plugin##_process_packet, plugin##_rotate_output,              \
   plugin##_derive_output_name
 
-#define CORSARO_PLUGIN_GENERATE_READ_PTRS(plugin)               \
+#define CORSARO_PLUGIN_GENERATE_BASE_READ_PTRS(plugin)          \
   plugin##_init_reading, plugin##_halt_reading,                 \
+  plugin##_compare_results, plugin##_release_result
+
+#define CORSARO_PLUGIN_GENERATE_READ_STD_DISTINCT(plugin)       \
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+
+#define CORSARO_PLUGIN_GENERATE_READ_STD_OVERLAP(plugin)        \
+  NULL, NULL, NULL, NULL, NULL, NULL,                           \
+  plugin##_update_merge, plugin##_get_merged_result
+
+#define CORSARO_PLUGIN_GENERATE_READ_CUSTOM_DISTINCT(plugin)    \
+  plugin##_open_interim_file_reader,                            \
+  plugin##_close_interim_file,                                  \
+  plugin##_open_merged_output_file,                             \
+  plugin##_close_merged_output_file,                            \
   plugin##_write_result,                                        \
-  plugin##_read_result, plugin##_compare_results,               \
-  plugin##_combine_results, plugin##_release_result
+  plugin##_read_result, NULL, NULL
+
+#define CORSARO_PLUGIN_GENERATE_READ_CUSTOM_OVERLAP(plugin)    \
+  plugin##_open_interim_file_reader,                            \
+  plugin##_close_interim_file,                                  \
+  plugin##_open_merged_output_file,                             \
+  plugin##_close_merged_output_file,                            \
+  plugin##_write_result,                                        \
+  plugin##_read_result, plugin##_update_merge,                  \
+  plugin##_get_merged_result
 
 #define CORSARO_PLUGIN_GENERATE_TAIL                            \
   NULL, 0, 0, NULL, NULL

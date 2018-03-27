@@ -244,8 +244,6 @@ static void log_configuration(corsaro_trace_global_t *glob) {
             glob->rotatefreq);
 
 
-    corsaro_log(glob->logger, "output files are compressed Avro format");
-
     if (glob->filterstring) {
         corsaro_log(glob->logger, "applying BPF filter '%s'",
                 glob->filterstring);

@@ -119,9 +119,13 @@ static corsaro_plugin_t corsaro_flowtuple_plugin = {
     PLUGIN_NAME,
     CORSARO_PLUGIN_ID_FLOWTUPLE,
     CORSARO_FLOWTUPLE_MAGIC,
+    CORSARO_INTERIM_AVRO,
+    CORSARO_INTERIM_AVRO,
+    CORSARO_MERGE_TYPE_DISTINCT,
     CORSARO_PLUGIN_GENERATE_BASE_PTRS(corsaro_flowtuple),
     CORSARO_PLUGIN_GENERATE_TRACE_PTRS(corsaro_flowtuple),
-    CORSARO_PLUGIN_GENERATE_READ_PTRS(corsaro_flowtuple),
+    CORSARO_PLUGIN_GENERATE_BASE_READ_PTRS(corsaro_flowtuple),
+    CORSARO_PLUGIN_GENERATE_READ_STD_DISTINCT(corsaro_flowtuple),
     CORSARO_PLUGIN_GENERATE_TAIL
 
 };
@@ -699,56 +703,6 @@ int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local,
         corsaro_close_avro_writer(state->writer);
     }
     return 0;
-}
-
-int corsaro_flowtuple_write_result(corsaro_plugin_t *p, void *local,
-        corsaro_plugin_result_t *res, corsaro_avro_writer_t *out) {
-
-    avro_value_t av;
-
-    if (res->type == CORSARO_RESULT_TYPE_EOF) {
-        return 0;
-    }
-
-    if (res->type == CORSARO_RESULT_TYPE_BLANK) {
-        return 0;
-    }
-
-    assert(res->pluginfmt);
-    if (flowtuple_to_avro(p->logger, &av, res->pluginfmt) == -1) {
-        corsaro_log(p->logger,
-                "could not convert flowtuple result into avro for output.");
-        return -1;
-    }
-
-    return 1;
-}
-
-int corsaro_flowtuple_read_result(corsaro_plugin_t *p, void *local,
-        corsaro_avro_reader_t *in, corsaro_plugin_result_t *res,
-        int sourceind) {
-
-    int ret;
-    corsaro_result_type_t restype = CORSARO_RESULT_TYPE_BLANK;
-
-    res->plugin = p;
-    res->avrofmt = NULL;
-    res->pluginfmt = NULL;
-
-    ret = corsaro_read_next_avro_record(in, &(res->avrofmt));
-
-    if (ret == -1) {
-        res->type = CORSARO_RESULT_TYPE_BLANK;
-        return -1;
-    }
-
-    if (ret == 0) {
-        res->type = CORSARO_RESULT_TYPE_EOF;
-        return 0;
-    }
-
-    res->type = CORSARO_RESULT_TYPE_DATA;
-    return 1;
 }
 
 int corsaro_flowtuple_combine_results(corsaro_plugin_t *p, void *local,
