@@ -74,6 +74,9 @@
 typedef struct corsaro_fin_interval corsaro_fin_interval_t;
 typedef struct corsaro_interval corsaro_interval_t;
 
+#define CORSARO_IO_PLUGIN_PATTERN 'P'
+#define CORSARO_IO_MONITOR_PATTERN 'N'
+#define CORSARO_IO_TRACE_FORMAT_PATTERN 'f'
 
 struct corsaro_interval {
     uint32_t corsaro_magic;

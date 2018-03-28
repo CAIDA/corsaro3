@@ -294,12 +294,6 @@ static char *stradd(const char *str, char *bufp, char *buflim)
     return bufp;
 }
 
-/** The character to replace with the name of the plugin */
-#define CORSARO_IO_PLUGIN_PATTERN 'P'
-
- /** The character to replace with the monitor name */
-#define CORSARO_IO_MONITOR_PATTERN 'N'
-
 char *corsaro_generate_avro_file_name(const char *template,
         const char *plugin,
         const char *monitorname,
