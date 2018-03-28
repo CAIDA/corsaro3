@@ -98,7 +98,8 @@ typedef enum corsaro_plugin_id {
     CORSARO_PLUGIN_ID_FLOWTUPLE = 20,
     CORSARO_PLUGIN_ID_DOS = 30,
     CORSARO_PLUGIN_ID_REPORT = 100,
-    CORSARO_PLUGIN_ID_MAX = CORSARO_PLUGIN_ID_REPORT
+    CORSARO_PLUGIN_ID_WDCAP = 200,
+    CORSARO_PLUGIN_ID_MAX = CORSARO_PLUGIN_ID_WDCAP
 } corsaro_plugin_id_t;
 
 typedef enum corsaro_result_type {

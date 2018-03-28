@@ -22,8 +22,9 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-SUBDIRS = common docs libcorsaro tools libcorsaro3 corsarotrace
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro -I$(top_srcdir)/common \
+SUBDIRS = common docs tools libcorsaro3 corsarotrace #libcorsaro
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro \
+        -I$(top_srcdir)/common \
 	-I$(top_srcdir)/libcorsaro/plugins
 
 bin_PROGRAMS = corsaro

@@ -278,6 +278,7 @@ ED_WITH_PLUGIN([corsaro_pcap],[pcap],[PCAP],[no])
 ED_WITH_PLUGIN([corsaro_flowtuple],[flowtuple],[SIXT],[yes])
 
 # optional plugins
+ED_WITH_PLUGIN([corsaro_wdcap],[wdcap],[WDCAP],[no])
 ED_WITH_PLUGIN([corsaro_dos],[dos],[DOS],[no])
 ED_WITH_PLUGIN([corsaro_smee],[smee],[SMEE],[no])
 ED_WITH_PLUGIN([corsaro_tagstats],[tagstats],[TAGSTATS],[no])

@@ -35,6 +35,10 @@
 #include "corsaro_flowtuple.h"
 #endif
 
+#ifdef WITH_PLUGIN_WDCAP
+#include "corsaro_wdcap.h"
+#endif
+
 #define PLUGIN_INIT_ADD(plugin)                                                \
 {                                                                              \
     tail = add_plugin(logger, tail, plugin##_alloc(), 1);                      \

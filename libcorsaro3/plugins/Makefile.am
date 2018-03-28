@@ -40,6 +40,11 @@ PLUGIN_SRC+=corsaro_flowtuple.c corsaro_flowtuple.h
 include_HEADERS+=corsaro_flowtuple.h
 endif
 
+if WITH_PLUGIN_WDCAP
+PLUGIN_SRC+=corsaro_wdcap.c corsaro_wdcap.h
+include_HEADERS+=corsaro_wdcap.h
+endif
+
 libcorsaro3plugins_la_SOURCES = \
         $(PLUGIN_SRC)
 
