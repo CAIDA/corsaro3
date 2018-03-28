@@ -705,20 +705,6 @@ int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
-int corsaro_flowtuple_combine_results(corsaro_plugin_t *p, void *local,
-        corsaro_plugin_result_t *dest, corsaro_plugin_result_t *src) {
-
-
-    if (dest->type != src->type) {
-        corsaro_log(p->logger,
-                "cannot combine flowtuple results of different types!");
-        return -1;
-    }
-
-    /* Can't combine two flows  (unless they're the same 5-tuple??) */
-    return 0;
-}
-
 int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
         corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2) {
 
