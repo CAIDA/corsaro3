@@ -32,10 +32,13 @@
 
 #include "libcorsaro3_log.h"
 
+#define CORSARO_TRACE_COMPRESS_LEVEL 6
+#define CORSARO_TRACE_COMPRESS_METHOD  TRACE_OPTION_COMPRESSTYPE_ZLIB
+
 libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
         char *tracename);
 libtrace_out_t *corsaro_create_trace_writer(corsaro_logger_t *logger,
-        char *tracename);
+        char *tracename, int level, trace_option_compresstype_t method);
 void corsaro_destroy_trace_reader(libtrace_t *trace);
 void corsaro_destroy_trace_writer(libtrace_out_t *trace);
 int corsaro_read_next_packet(corsaro_logger_t *logger,

@@ -143,7 +143,8 @@ corsaro_merge_writer_t *corsaro_create_merge_writer(corsaro_plugin_t *p,
             break;
         case CORSARO_INTERIM_TRACE:
             writer->w.trace = corsaro_create_trace_writer(p->logger,
-                    outputfilename);
+                    outputfilename, CORSARO_TRACE_COMPRESS_LEVEL,
+                    CORSARO_TRACE_COMPRESS_METHOD);
             if (writer->w.trace == NULL) {
                 corsaro_log(p->logger,
                         "unable to create packet trace writer for %s output.",
@@ -182,7 +183,7 @@ void corsaro_close_merge_writer(corsaro_merge_writer_t *writer,
 int corsaro_read_next_merge_result(corsaro_merge_reader_t *reader,
         corsaro_plugin_t *p, void *local, corsaro_plugin_result_t *res) {
 
-    int ret;
+    int ret = -1;
 
     res->plugin = p;
     res->avrofmt = NULL;
@@ -198,6 +199,7 @@ int corsaro_read_next_merge_result(corsaro_merge_reader_t *reader,
             ret = p->read_result(p, local, reader->r.plugin, res);
             break;
         case CORSARO_INTERIM_TRACE:
+            res->packet = trace_create_packet();
             ret = corsaro_read_next_packet(p->logger, reader->r.trace,
                     res->packet);
             break;

@@ -59,7 +59,7 @@ libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
 }
 
 libtrace_out_t *corsaro_create_trace_writer(corsaro_logger_t *logger,
-        char *tracename) {
+        char *tracename, int level, trace_option_compresstype_t method) {
 
     /* Relying on libtrace to be able to auto-detect the format here */
     libtrace_out_t *trace;
@@ -71,6 +71,26 @@ libtrace_out_t *corsaro_create_trace_writer(corsaro_logger_t *logger,
         corsaro_log(logger,
                 "error while opening trace file %s for reading: %s",
                 tracename, err.problem);
+        trace_destroy_output(trace);
+        return NULL;
+    }
+
+    if (trace_config_output(trace, TRACE_OPTION_OUTPUT_COMPRESS,
+                &(level)) == -1) {
+        err = trace_get_err_output(trace);
+        corsaro_log(logger,
+                "error while setting compress level %d for trace file %s: %s",
+                level, tracename, err.problem);
+        trace_destroy_output(trace);
+        return NULL;
+    }
+
+    if (trace_config_output(trace, TRACE_OPTION_OUTPUT_COMPRESSTYPE,
+                &(method)) == -1) {
+        err = trace_get_err_output(trace);
+        corsaro_log(logger,
+                "error while setting compress method %d for trace file %s: %s",
+                method, tracename, err.problem);
         trace_destroy_output(trace);
         return NULL;
     }
