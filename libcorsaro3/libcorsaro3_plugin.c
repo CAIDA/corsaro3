@@ -162,6 +162,7 @@ void corsaro_cleanse_plugin_list(corsaro_plugin_t *plist) {
     corsaro_plugin_t *p = plist;
 
     while (plist != NULL) {
+        p = plist;
         plist = p->next;
         p->destroy_self(p);
         free(p);
@@ -436,7 +437,6 @@ static int perform_distinct_merge(corsaro_plugin_t *p, void *plocal,
 
             if (results[i].type == CORSARO_RESULT_TYPE_EOF) {
                 /* Reached EOF for this source. */
-                /* TODO delete the file?? */
                 corsaro_close_merge_reader(readers[i], p, plocal);
                 p->release_result(p, plocal, &(results[i]));
                 readers[i] = NULL;
@@ -537,6 +537,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
         int nextresind;
 
         corsaro_log(logger, "commencing merge for plugin %s", p->name);
+        memset(results, 0, fin->threads_ended * sizeof(corsaro_plugin_result_t));
         outname = p->derive_output_name(p, pset->plugin_state[index],
                 fin->timestamp, -1);
         if (outname == NULL) {
@@ -550,6 +551,11 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
 
         output = corsaro_create_merge_writer(p, pset->plugin_state[index],
                 outname, p->finalfmt);
+        if (output == NULL) {
+            errors ++;
+            p = p->next;
+            index ++;
+        }
 
         for (i = 0; i < fin->threads_ended; i++) {
             sourcefilenames[i] = p->derive_output_name(p,
@@ -582,6 +588,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
             if (readers[i] != NULL) {
                 corsaro_close_merge_reader(readers[i], p,
                         pset->plugin_state[index]);
+                readers[i] = NULL;
             }
             remove(sourcefilenames[i]);
             free(sourcefilenames[i]);
