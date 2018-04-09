@@ -42,6 +42,7 @@ typedef struct wdcapstate {
     libtrace_out_t *writer;
     int threadid;
     uint32_t interval_start_ts;
+    char *interimfilename;
 } wdcapstate_t;
 
 typedef struct corsaro_wdcap_config {
@@ -56,13 +57,9 @@ static corsaro_plugin_t corsaro_wdcap_plugin = {
     PLUGIN_NAME,
     CORSARO_PLUGIN_ID_WDCAP,
     CORSARO_WDCAP_MAGIC,
-    CORSARO_INTERIM_TRACE,
-    CORSARO_INTERIM_TRACE,
-    CORSARO_MERGE_TYPE_DISTINCT,
     CORSARO_PLUGIN_GENERATE_BASE_PTRS(corsaro_wdcap),
     CORSARO_PLUGIN_GENERATE_TRACE_PTRS(corsaro_wdcap),
-    CORSARO_PLUGIN_GENERATE_BASE_READ_PTRS(corsaro_wdcap),
-    CORSARO_PLUGIN_GENERATE_READ_STD_DISTINCT(corsaro_wdcap),
+    CORSARO_PLUGIN_GENERATE_MERGE_PTRS(corsaro_wdcap),
     CORSARO_PLUGIN_GENERATE_TAIL
 };
 
@@ -176,6 +173,7 @@ void *corsaro_wdcap_init_processing(corsaro_plugin_t *p, int threadid) {
     state->interval_start_ts = 0;
     state->threadid = threadid;
     state->writer = NULL;       // for now...
+    state->interimfilename = NULL;
     return state;
 }
 
@@ -335,7 +333,7 @@ int corsaro_wdcap_open_output_file(corsaro_plugin_t *p, void *local,
                 "unable to open output file for wdcap plugin");
         ret = -1;
     }
-    free(name);
+    state->interimfilename = name;
     return ret;
 }
 
@@ -357,27 +355,21 @@ int corsaro_wdcap_start_interval(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
-int corsaro_wdcap_end_interval(corsaro_plugin_t *p, void *local,
+void *corsaro_wdcap_end_interval(corsaro_plugin_t *p, void *local,
         corsaro_interval_t *int_end) {
-
-    return 0;
-}
-
-int corsaro_wdcap_rotate_output(corsaro_plugin_t *p, void *local,
-        corsaro_interval_t *rot_start) {
 
     wdcapstate_t *state = (wdcapstate_t *)local;
     if (state == NULL) {
         corsaro_log(p->logger,
-                "unexpected NULL state in corsaro_wdcap_rotate_interval.");
-        return -1;
+                "unexpected NULL state in corsaro_wdcap_end_interval.");
+        return NULL;
     }
 
     if (state->writer) {
         corsaro_destroy_trace_writer(state->writer);
         state->writer = NULL;
     }
-    return 0;
+    return state->interimfilename;
 }
 
 int corsaro_wdcap_process_packet(corsaro_plugin_t *p, void *local,
@@ -411,44 +403,188 @@ int corsaro_wdcap_process_packet(corsaro_plugin_t *p, void *local,
     return corsaro_write_packet(p->logger, state->writer, packet);
 }
 
-int corsaro_wdcap_compare_results(corsaro_plugin_t *p, void *local,
-        corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2) {
+struct corsaro_wdcap_merge_state_t {
 
-    uint64_t ts1, ts2;
+    libtrace_out_t *writer;
 
-    assert(res1->packet != NULL && res2->packet != NULL);
+};
 
-    ts1 = trace_get_erf_timestamp(res1->packet);
-    ts2 = trace_get_erf_timestamp(res2->packet);
+int corsaro_wdcap_rotate_output(corsaro_plugin_t *p, void *local) {
 
-    if (ts1 < ts2) {
+    struct corsaro_wdcap_merge_state_t *m;
+
+    m = (struct corsaro_wdcap_merge_state_t *)local;
+
+    if (m == NULL) {
         return -1;
-    } else if (ts1 > ts2) {
-        return 1;
     }
 
+    if (m->writer) {
+        corsaro_destroy_trace_writer(m->writer);
+    }
+    m->writer = NULL;
     return 0;
 }
 
-void corsaro_wdcap_release_result(corsaro_plugin_t *p, void *local,
-        corsaro_plugin_result_t *res) {
+typedef struct corsaro_wdcap_interim_reader {
+    libtrace_t *source;
+    libtrace_packet_t *nextp;
+    uint64_t nextp_ts;
+    int status;
+} corsaro_wdcap_interim_reader_t;
 
-    if (res->packet) {
-        trace_destroy_packet(res->packet);
+enum {
+    CORSARO_WDCAP_INTERIM_NOPACKET = 0,
+    CORSARO_WDCAP_INTERIM_PACKET = 1,
+    CORSARO_WDCAP_INTERIM_EOF = 2
+};
+
+static int choose_next_merge_packet(corsaro_plugin_t *p,
+        corsaro_wdcap_interim_reader_t *inputs, int inpcount) {
+
+    int i, candind = -1;
+
+    for (i = 0; i < inpcount; i++) {
+        if (inputs[i].status == CORSARO_WDCAP_INTERIM_EOF) {
+            continue;
+        }
+
+        if (inputs[i].status == CORSARO_WDCAP_INTERIM_NOPACKET) {
+            int ret = corsaro_read_next_packet(p->logger,
+                    inputs[i].source, inputs[i].nextp);
+            if (ret <= 0) {
+                inputs[i].status = CORSARO_WDCAP_INTERIM_EOF;
+                continue;
+            }
+            inputs[i].nextp_ts = trace_get_erf_timestamp(inputs[i].nextp);
+            inputs[i].status = CORSARO_WDCAP_INTERIM_PACKET;
+        }
+
+        if (candind == -1) {
+            candind = i;
+            continue;
+        }
+
+        if (inputs[i].nextp_ts < inputs[candind].nextp_ts) {
+            candind = i;
+        }
+
     }
-    res->packet = NULL;
 
-    /* avrofmt and pluginfmt should still be NULL */
+    return candind;
 }
 
-void *corsaro_wdcap_init_reading(corsaro_plugin_t *p, int sources) {
+int corsaro_wdcap_merge_interval_results(corsaro_plugin_t *p, void *local,
+        void **tomerge, corsaro_fin_interval_t *fin) {
 
-    /* We shouldn't need any special state to merge traces? */
-    return NULL;
+
+    corsaro_wdcap_interim_reader_t *inputs;
+    struct corsaro_wdcap_merge_state_t *m;
+    int i, ret = 0;
+    int candind = -1;
+
+    m = (struct corsaro_wdcap_merge_state_t *)local;
+
+    if (m == NULL) {
+        return -1;
+    }
+
+    inputs = (corsaro_wdcap_interim_reader_t *)(calloc(fin->threads_ended,
+            sizeof(corsaro_wdcap_interim_reader_t)));
+
+    for (i = 0; i < fin->threads_ended; i++) {
+        inputs[i].source = corsaro_create_trace_reader(p->logger,
+                (char *)(tomerge[i]));
+        if (inputs[i].source == NULL) {
+            ret = -1;
+            goto fail;
+        }
+
+        inputs[i].nextp = trace_create_packet();
+        inputs[i].nextp_ts = (uint64_t)(-1);
+        inputs[i].status = CORSARO_WDCAP_INTERIM_NOPACKET;
+        if (inputs[i].nextp == NULL) {
+            ret = -1;
+            goto fail;
+        }
+    }
+
+    if (!m->writer) {
+        char *fname = p->derive_output_name(p, local, fin->timestamp, -1);
+        m->writer = corsaro_create_trace_writer(p->logger, fname,
+                CORSARO_TRACE_COMPRESS_LEVEL, CORSARO_TRACE_COMPRESS_METHOD);
+        free(fname);
+        if (!m->writer) {
+            ret = -1;
+            goto fail;
+        }
+    }
+
+    do {
+        candind = choose_next_merge_packet(p, inputs, fin->threads_ended);
+        if (candind == -1) {
+            break;
+        }
+
+        if (corsaro_write_packet(p->logger, m->writer, inputs[candind].nextp)
+                < 0) {
+            ret = -1;
+            goto fail;
+        }
+        inputs[candind].status = CORSARO_WDCAP_INTERIM_NOPACKET;
+    } while (candind != -1);
+
+fail:
+    if (inputs) {
+        for (i = 0; i < fin->threads_ended; i++) {
+            if (inputs[i].nextp) {
+                trace_destroy_packet(inputs[i].nextp);
+            }
+            if (inputs[i].source) {
+                char *tok, *uri;
+                corsaro_destroy_trace_reader(inputs[i].source);
+                uri = (char *)(tomerge[i]);
+
+                tok = strchr(uri, ':');
+                if (tok == NULL) {
+                    tok = uri;
+                } else {
+                    tok ++;
+                }
+                remove(tok);
+            }
+            free(tomerge[i]);
+        }
+        free(inputs);
+    }
+    return ret;
 }
 
-int corsaro_wdcap_halt_reading(corsaro_plugin_t *p, void *local) {
+void *corsaro_wdcap_init_merging(corsaro_plugin_t *p, int sources) {
 
+    struct corsaro_wdcap_merge_state_t *m;
+    int i;
+
+    m = (struct corsaro_wdcap_merge_state_t *)calloc(1,
+            sizeof(struct corsaro_wdcap_merge_state_t));
+    m->writer = NULL;
+
+    return m;
+}
+
+int corsaro_wdcap_halt_merging(corsaro_plugin_t *p, void *local) {
+
+    struct corsaro_wdcap_merge_state_t *m;
+
+    m = (struct corsaro_wdcap_merge_state_t *)local;
+
+    if (m == NULL) {
+        return 0;
+    }
+    if (m->writer) {
+        corsaro_destroy_trace_writer(m->writer);
+    }
+    free(m);
     return 0;
 }
 
