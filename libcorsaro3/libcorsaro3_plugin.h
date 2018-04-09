@@ -31,9 +31,9 @@
 #include <yaml.h>
 #include <libtrace.h>
 
+#include "libcorsaro3_avro.h"
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
-#include "libcorsaro3_avro.h"
 
 /** Convenience macros that define all the function prototypes for the corsaro
  * plugin API
@@ -50,48 +50,17 @@
     int plugin##_halt_processing(corsaro_plugin_t *p, void *local); \
     int plugin##_start_interval(corsaro_plugin_t *p, void *local, \
             corsaro_interval_t *int_start);                 \
-    int plugin##_end_interval(corsaro_plugin_t *p, void *local, \
+    void *plugin##_end_interval(corsaro_plugin_t *p, void *local, \
             corsaro_interval_t *int_end);                   \
     int plugin##_process_packet(corsaro_plugin_t *p, void *local, \
             libtrace_packet_t *packet, corsaro_packet_state_t *pstate); \
-    int plugin##_rotate_output(corsaro_plugin_t *p, void *local, \
-            corsaro_interval_t *rot_start);                 \
     char *plugin##_derive_output_name(corsaro_plugin_t *p, void *local, \
             uint32_t timestamp, int threadid);              \
-    void *plugin##_init_reading(corsaro_plugin_t *p, int sources);    \
-    int plugin##_halt_reading(corsaro_plugin_t *p, void *local); \
-    int plugin##_compare_results(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2); \
-    void plugin##_release_result(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *res);                  \
-    void *plugin##_open_interim_file_reader(corsaro_plugin_t *p, \
-            void *local, const char *filename);                          \
-    void plugin##_close_interim_file(corsaro_plugin_t *p, void *local, \
-            void *file);                                    \
-    void *plugin##_open_merged_output_file(corsaro_plugin_t *p, void *local, \
-            const char *filename);                          \
-    void plugin##_close_merged_output_file(corsaro_plugin_t *p, void *local, \
-            void *file);                                    \
-    int plugin##_write_result(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *res, void *file); \
-    int plugin##_read_result(corsaro_plugin_t *p, void *local, \
-            void *file, corsaro_plugin_result_t *res); \
-    int plugin##_update_merge(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *res);          \
-    int plugin##_get_merged_result(corsaro_plugin_t *p, void *local, \
-            corsaro_plugin_result_t *writer);
-
-
-typedef enum {
-    CORSARO_MERGE_TYPE_OVERLAPPING,
-    CORSARO_MERGE_TYPE_DISTINCT
-} corsaro_merge_style_t;
-
-typedef enum {
-    CORSARO_INTERIM_AVRO,
-    CORSARO_INTERIM_PLUGIN,
-    CORSARO_INTERIM_TRACE
-} corsaro_interim_format_t;
+    void *plugin##_init_merging(corsaro_plugin_t *p, int sources);    \
+    int plugin##_halt_merging(corsaro_plugin_t *p, void *local); \
+    int plugin##_merge_interval_results(corsaro_plugin_t *p, void *local, \
+            void **tomerge, corsaro_fin_interval_t *fin);                    \
+    int plugin##_rotate_output(corsaro_plugin_t *p, void *local);
 
 
 typedef enum corsaro_plugin_id {
@@ -102,15 +71,9 @@ typedef enum corsaro_plugin_id {
     CORSARO_PLUGIN_ID_MAX = CORSARO_PLUGIN_ID_WDCAP
 } corsaro_plugin_id_t;
 
-typedef enum corsaro_result_type {
-    CORSARO_RESULT_TYPE_BLANK,
-    CORSARO_RESULT_TYPE_EOF,
-    CORSARO_RESULT_TYPE_DATA,
-} corsaro_result_type_t;
-
 enum {
     CORSARO_TRACE_API = 0,
-    CORSARO_READER_API = 1
+    CORSARO_MERGING_API = 1
 };
 
 typedef struct corsaro_plugin corsaro_plugin_t;
@@ -153,9 +116,6 @@ struct corsaro_plugin {
     const char *name;
     const corsaro_plugin_id_t id;
     const uint32_t magic;           /* XXX Don't really use this anymore */
-    const corsaro_interim_format_t interimfmt;
-    const corsaro_interim_format_t finalfmt;
-    const corsaro_merge_style_t mergestyle;
 
     /* Callbacks for general functionality */
     const char *(*get_avro_schema)(void);
@@ -170,39 +130,20 @@ struct corsaro_plugin {
     int (*halt_processing)(corsaro_plugin_t *p, void *local);
     int (*start_interval)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *int_start);
-    int (*end_interval)(corsaro_plugin_t *p, void *local,
+    void *(*end_interval)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *int_end);
     int (*process_packet)(corsaro_plugin_t *p, void *local,
             libtrace_packet_t *packet, corsaro_packet_state_t *pstate);
-    int (*rotate_output)(corsaro_plugin_t *p, void *local,
-            corsaro_interval_t *rot_start);
     char *(*derive_output_name)(corsaro_plugin_t *p, void *local,
             uint32_t timestamp, int threadid);
 
     /* Callbacks for reading and merging results */
-    void *(*init_reading)(corsaro_plugin_t *p, int sources);
-    int (*halt_reading)(corsaro_plugin_t *p, void *local);
-    int (*compare_results)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2);
-    void (*release_result)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *res);
-
-    void *(*open_interim_file_reader)(corsaro_plugin_t *p, void *local,
-            const char *filename);
-    void (*close_interim_file)(corsaro_plugin_t *p, void *local,
-            void *file);
-    void *(*open_merged_output_file)(corsaro_plugin_t *p, void *local,
-            const char *filename);
-    void (*close_merged_output_file)(corsaro_plugin_t *p, void *local,
-            void *file);
-    int (*write_result)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *res, void *out);
-    int (*read_result)(corsaro_plugin_t *p, void *local,
-            void *in, corsaro_plugin_result_t *res);
-    int (*update_merge)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *res);
-    int (*get_merged_result)(corsaro_plugin_t *p, void *local,
-            corsaro_plugin_result_t *res);
+    void *(*init_merging)(corsaro_plugin_t *p, int sources);
+    int (*halt_merging)(corsaro_plugin_t *p, void *local);
+    int (*merge_interval_results)(corsaro_plugin_t *p, void *local,
+            void **tomerge, corsaro_fin_interval_t *fin);
+    int (*rotate_output)(corsaro_plugin_t *p, void *local);
+    
 
 
     /* High level global state variables */
@@ -225,15 +166,6 @@ typedef struct corsaro_running_plugins {
     uint8_t api;
 } corsaro_plugin_set_t;
 
-struct corsaro_plugin_result {
-
-    corsaro_plugin_t *plugin;
-    corsaro_result_type_t type;
-    avro_value_t *avrofmt;
-    void *pluginfmt;
-    libtrace_packet_t *packet;
-};
-
 corsaro_plugin_t *corsaro_load_all_plugins(corsaro_logger_t *logger);
 void corsaro_cleanse_plugin_list(corsaro_plugin_t *plist);
 corsaro_plugin_t *corsaro_find_plugin(corsaro_plugin_t *plist, char *name);
@@ -247,21 +179,20 @@ int corsaro_finish_plugin_config(corsaro_plugin_t *p,
 
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
         corsaro_plugin_t *plist, int count, int threadid);
-corsaro_plugin_set_t *corsaro_start_reader_plugins(corsaro_logger_t *logger,
+corsaro_plugin_set_t *corsaro_start_merging_plugins(corsaro_logger_t *logger,
         corsaro_plugin_t *plist, int count, int maxsources);
 int corsaro_stop_plugins(corsaro_plugin_set_t *pluginset);
-int corsaro_push_end_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
+void **corsaro_push_end_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
         uint32_t ts);
 int corsaro_push_start_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
         uint32_t ts);
 int corsaro_push_packet_plugins(corsaro_plugin_set_t *pluginset,
         libtrace_packet_t *packet);
-int corsaro_push_rotate_file_plugins(corsaro_plugin_set_t *pset,
-        uint32_t intervalid, uint32_t ts);
 
-
+int corsaro_rotate_plugin_output(corsaro_logger_t *logger,
+        corsaro_plugin_set_t *pset);
 int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
-        corsaro_plugin_t *plugins, corsaro_fin_interval_t *fin, int count);
+        corsaro_plugin_set_t *pset, corsaro_fin_interval_t *fin);
 
 
 #define CORSARO_INIT_PLUGIN_PROC_OPTS(opts) \
@@ -276,36 +207,11 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
 #define CORSARO_PLUGIN_GENERATE_TRACE_PTRS(plugin)              \
   plugin##_init_processing, plugin##_halt_processing,           \
   plugin##_start_interval, plugin##_end_interval,               \
-  plugin##_process_packet, plugin##_rotate_output,              \
-  plugin##_derive_output_name
+  plugin##_process_packet, plugin##_derive_output_name
 
-#define CORSARO_PLUGIN_GENERATE_BASE_READ_PTRS(plugin)          \
-  plugin##_init_reading, plugin##_halt_reading,                 \
-  plugin##_compare_results, plugin##_release_result
-
-#define CORSARO_PLUGIN_GENERATE_READ_STD_DISTINCT(plugin)       \
-  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-
-#define CORSARO_PLUGIN_GENERATE_READ_STD_OVERLAP(plugin)        \
-  NULL, NULL, NULL, NULL, NULL, NULL,                           \
-  plugin##_update_merge, plugin##_get_merged_result
-
-#define CORSARO_PLUGIN_GENERATE_READ_CUSTOM_DISTINCT(plugin)    \
-  plugin##_open_interim_file_reader,                            \
-  plugin##_close_interim_file,                                  \
-  plugin##_open_merged_output_file,                             \
-  plugin##_close_merged_output_file,                            \
-  plugin##_write_result,                                        \
-  plugin##_read_result, NULL, NULL
-
-#define CORSARO_PLUGIN_GENERATE_READ_CUSTOM_OVERLAP(plugin)    \
-  plugin##_open_interim_file_reader,                            \
-  plugin##_close_interim_file,                                  \
-  plugin##_open_merged_output_file,                             \
-  plugin##_close_merged_output_file,                            \
-  plugin##_write_result,                                        \
-  plugin##_read_result, plugin##_update_merge,                  \
-  plugin##_get_merged_result
+#define CORSARO_PLUGIN_GENERATE_MERGE_PTRS(plugin)          \
+  plugin##_init_merging, plugin##_halt_merging,                 \
+  plugin##_merge_interval_results, plugin##_rotate_output       
 
 #define CORSARO_PLUGIN_GENERATE_TAIL                            \
   NULL, 0, 0, NULL, NULL

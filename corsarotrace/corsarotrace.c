@@ -60,26 +60,6 @@
  */
 
 
-#define END_INTERVAL_MACRO \
-    corsaro_push_end_plugins(tls->plugins, tls->current_interval.number,  \
-            tls->next_report - 1);                                        \
-    if (glob->rotatefreq > 0 &&                                           \
-            ((tls->current_interval.number + 1) % glob->rotatefreq) == 0) {  \
-        corsaro_push_rotate_file_plugins(tls->plugins,                    \
-                tls->current_interval.number + 1, tls->next_report);      \
-        publish_file_closed_message(trace, t, &tls->lastrotateinterval,   \
-                ((uint64_t)tls->next_report) << 32);                      \
-        tls->lastrotateinterval.number = tls->current_interval.number + 1;  \
-        tls->lastrotateinterval.time = tls->next_report;                  \
-    }                                                                     \
-    tls->current_interval.number ++;                                      \
-    tls->current_interval.time = tls->next_report;                        \
-    corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,\
-            tls->current_interval.time);                                  \
-    tls->next_report += glob->interval;                                   \
-    tls->pkts_outstanding = 0;
-
-
 libtrace_callback_set_t *processing = NULL;
 libtrace_callback_set_t *reporter = NULL;
 
@@ -94,7 +74,28 @@ static void cleanup_signal(int sig) {
 
 
 static void publish_file_closed_message(libtrace_t *trace,
-        libtrace_thread_t *t, corsaro_interval_t *interval, uint64_t ts) {
+        libtrace_thread_t *t, uint32_t last_interval, uint32_t rotatets) {
+
+    corsaro_trace_msg_t *msg = NULL;
+    libtrace_generic_t topub;
+
+    msg = (corsaro_trace_msg_t *)malloc(sizeof(corsaro_trace_msg_t));
+
+    msg->type = CORSARO_TRACE_MSG_ROTATE;
+    msg->interval_num = last_interval;
+    msg->interval_time = rotatets - 1;
+    msg->plugindata = NULL;
+
+    topub.ptr = msg;
+
+    trace_publish_result(trace, t, ((uint64_t)rotatets) << 32, topub,
+            RESULT_USER);
+
+}
+
+static void publish_interval_ended(libtrace_t *trace,
+        libtrace_thread_t *t, uint32_t interval_num, uint32_t interval_ts,
+        uint32_t endts, int plugincount, void **plugin_data) {
 
     corsaro_trace_msg_t *msg = NULL;
     libtrace_generic_t topub;
@@ -102,12 +103,14 @@ static void publish_file_closed_message(libtrace_t *trace,
     msg = (corsaro_trace_msg_t *)malloc(sizeof(corsaro_trace_msg_t));
 
     msg->type = CORSARO_TRACE_MSG_MERGE;
-    msg->interval_num = interval->number;
-    msg->interval_time = interval->time;
+    msg->interval_num = interval_num;
+    msg->interval_time = interval_ts;
+    msg->plugindata = plugin_data;
 
     topub.ptr = msg;
 
-    trace_publish_result(trace, t, ts, topub, RESULT_USER);
+    trace_publish_result(trace, t, ((uint64_t)endts) << 32, topub,
+            RESULT_USER);
 
 }
 
@@ -122,10 +125,30 @@ static void publish_stop_message(libtrace_t *trace, libtrace_thread_t *t,
     msg->type = CORSARO_TRACE_MSG_STOP;
     msg->interval_num = 0;
     msg->interval_time = 0;
+    msg->plugindata = NULL;
 
     topub.ptr = msg;
 
     trace_publish_result(trace, t, ts, topub, RESULT_USER);
+}
+
+static inline int corsarotrace_interval_end(corsaro_logger_t *logger,
+        libtrace_t *trace,
+        libtrace_thread_t *t, corsaro_trace_local_t *tls, uint32_t ts) {
+    void **interval_data;
+    interval_data = corsaro_push_end_plugins(tls->plugins,
+            tls->current_interval.number, ts);
+
+    if (interval_data == NULL) {
+        corsaro_log(logger,
+                "error while pushing 'end interval' to plugins.");
+        return -1;
+    } else {
+        publish_interval_ended(trace, t, tls->current_interval.number,
+                tls->current_interval.time, ts,
+                tls->plugins->plugincount, interval_data);
+    }
+    return 0;
 }
 
 
@@ -147,8 +170,6 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         tls->next_report = 0;
         tls->current_interval.number = 0;
         tls->current_interval.time = 0;
-        tls->lastrotateinterval.number = 0;
-        tls->lastrotateinterval.time = 0;
         tls->pkts_outstanding = 0;
         tls->pkts_since_tick = 0;
         tls->last_ts = 0;
@@ -171,10 +192,9 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
 
     if (glob->currenturi == glob->totaluris - 1) {
         if (tls->pkts_outstanding) {
-            if (corsaro_push_end_plugins(tls->plugins,
-                        tls->current_interval.number, tls->last_ts) == -1) {
-                corsaro_log(glob->logger,
-                        "error while pushing final 'end interval' to plugins.");
+            if (corsarotrace_interval_end(glob->logger, trace, t, tls,
+                        tls->last_ts) == -1) {
+                /* do something?? */
             }
         }
 
@@ -183,8 +203,8 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         }
 
         if (!tls->stopped) {
-            publish_file_closed_message(trace, t, &tls->lastrotateinterval,
-                            ((uint64_t)tls->next_report) << 32);
+            publish_file_closed_message(trace, t, tls->current_interval.number,
+                            tls->next_report);
         }
 
         free(tls);
@@ -211,13 +231,12 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     if (glob->boundendts && tv.tv_sec >= glob->boundendts) {
-        corsaro_push_end_plugins(tls->plugins, tls->current_interval.number,
-                glob->boundendts - 1);
-        corsaro_push_rotate_file_plugins(tls->plugins,
-                tls->current_interval.number + 1,
-                ((uint64_t)glob->boundendts) << 32);
-        publish_file_closed_message(trace, t, &tls->lastrotateinterval,
-                ((uint64_t)glob->boundendts) << 32);
+        if (corsarotrace_interval_end(glob->logger, trace, t, tls,
+                    glob->boundendts) == -1) {
+            /* do something?? */
+        }
+        publish_file_closed_message(trace, t, tls->current_interval.number,
+                glob->boundendts);
         publish_stop_message(trace, t, ((uint64_t)glob->boundendts) << 32);
         tls->stopped = 1;
         tls->pkts_outstanding = 0;
@@ -252,7 +271,21 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     /* check if we have passed the end of an interval */
     while (tls->next_report && tv.tv_sec >= tls->next_report) {
-        END_INTERVAL_MACRO
+        if (corsarotrace_interval_end(glob->logger, trace, t, tls,
+                    glob->boundendts) == -1) {
+            /* do something?? */
+        }
+        if (glob->rotatefreq > 0 &&
+                ((tls->current_interval.number + 1) % glob->rotatefreq) == 0) {
+            publish_file_closed_message(trace, t, tls->current_interval.number,
+                    tls->next_report);
+        }
+        tls->current_interval.number ++;
+        tls->current_interval.time = tls->next_report;
+        corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
+            tls->current_interval.time);
+        tls->next_report += glob->interval;
+        tls->pkts_outstanding = 0;
     }
 
     tls->pkts_outstanding ++;
@@ -282,7 +315,22 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
      */
 
     if (tls->pkts_since_tick == 0) {
-        END_INTERVAL_MACRO
+
+        if (corsarotrace_interval_end(glob->logger, trace, t, tls,
+                    glob->boundendts) == -1) {
+            /* do something?? */
+        }
+        if (glob->rotatefreq > 0 &&
+                ((tls->current_interval.number + 1) % glob->rotatefreq) == 0) {
+            publish_file_closed_message(trace, t, tls->current_interval.number,
+                    tls->next_report);
+        }
+        tls->current_interval.number ++;
+        tls->current_interval.time = tls->next_report;
+        corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
+            tls->current_interval.time);
+        tls->next_report += glob->interval;
+        tls->pkts_outstanding = 0;
         corsaro_log(glob->logger,
                 "forced an interval to end within idle processing thread.");
     }
@@ -299,6 +347,9 @@ static void *init_waiter(libtrace_t *trace, libtrace_thread_t *t,
 
     wait->stops_seen = 0;
     wait->finished_intervals = NULL;
+    wait->next_rotate_interval = 0;
+    wait->pluginset = corsaro_start_merging_plugins(glob->logger,
+            glob->active_plugins, glob->plugincount, glob->threads);
 
     return wait;
 }
@@ -315,12 +366,13 @@ static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
         fin = wait->finished_intervals;
 
         if (glob->mergeoutput) {
-            corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins, fin,
-                    glob->plugincount);
+            corsaro_merge_plugin_outputs(glob->logger, wait->pluginset, fin);
         }
         wait->finished_intervals = fin->next;
         free(fin);
     }
+
+    corsaro_stop_plugins(wait->pluginset);
 
     free(wait);
     trace_halted = 1;
@@ -346,6 +398,25 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
         }
     }
 
+    if (msg->type == CORSARO_TRACE_MSG_ROTATE) {
+        corsaro_fin_interval_t *fin = wait->finished_intervals;
+
+        if (fin == NULL && wait->next_rotate_interval <= msg->interval_num) {
+            corsaro_rotate_plugin_output(glob->logger, wait->pluginset);
+            wait->next_rotate_interval = msg->interval_num + 1;
+            free(msg);
+            return;
+        }
+
+        while (fin != NULL) {
+            if (fin->interval_id == msg->interval_num) {
+                fin->rotate_after = 1;
+                break;
+            }
+        }
+        assert(fin != NULL);
+    }
+
     if (msg->type == CORSARO_TRACE_MSG_MERGE) {
         corsaro_fin_interval_t *fin = wait->finished_intervals;
         corsaro_fin_interval_t *prev = NULL;
@@ -357,8 +428,12 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
                 quik.timestamp = msg->interval_time;
                 quik.threads_ended = 1;
                 quik.next = NULL;
-                corsaro_merge_plugin_outputs(glob->logger, glob->active_plugins,
-                        &quik, glob->plugincount);
+                quik.rotate_after = 0;
+                quik.thread_plugin_data = (void ***)(calloc(glob->threads,
+                    sizeof(void **)));
+                quik.thread_plugin_data[0] = msg->plugindata;
+                corsaro_merge_plugin_outputs(glob->logger, wait->pluginset,
+                        &quik);
             }
             free(msg);
             return;
@@ -373,12 +448,18 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
         }
 
         if (fin != NULL) {
+            fin->thread_plugin_data[fin->threads_ended] = msg->plugindata;
             fin->threads_ended ++;
             if (fin->threads_ended == glob->threads) {
                 assert(fin == wait->finished_intervals);
                 if (glob->mergeoutput) {
                     corsaro_merge_plugin_outputs(glob->logger,
-                            glob->active_plugins, fin, glob->plugincount);
+                            wait->pluginset, fin);
+                }
+                if (fin->rotate_after) {
+                    corsaro_rotate_plugin_output(glob->logger,
+                            wait->pluginset);
+                    wait->next_rotate_interval = msg->interval_num + 1;
                 }
                 wait->finished_intervals = fin->next;
                 free(fin);
@@ -390,6 +471,10 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
             fin->timestamp = msg->interval_time;
             fin->threads_ended = 1;
             fin->next = NULL;
+            fin->rotate_after = 0;
+            fin->thread_plugin_data = (void ***)(calloc(glob->threads,
+                    sizeof(void **)));
+            fin->thread_plugin_data[0] = msg->plugindata;
 
             if (prev) {
                 prev->next = fin;

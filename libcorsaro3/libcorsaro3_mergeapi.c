@@ -29,78 +29,8 @@
 #include "libcorsaro3_mergeapi.h"
 #include "libcorsaro3_plugin.h"
 
-corsaro_merge_reader_t *corsaro_create_merge_reader(corsaro_plugin_t *p,
-        void *local, char *sourcefilename, corsaro_interim_format_t fmt) {
-
-    corsaro_merge_reader_t *reader;
-
-    reader = (corsaro_merge_reader_t *)malloc(sizeof(corsaro_merge_reader_t));
-
-    reader->fmt = fmt;
-    reader->logger = p->logger;
-
-    switch(fmt) {
-        case CORSARO_INTERIM_AVRO:
-            reader->r.avro = corsaro_create_avro_reader(p->logger,
-                    sourcefilename);
-            if (reader->r.avro == NULL) {
-                corsaro_log(p->logger,
-                        "unable to create AVRO reader for %s output.",
-                        p->name);
-                free(reader);
-                return NULL;
-            }
-            break;
-        case CORSARO_INTERIM_PLUGIN:
-            reader->r.plugin = p->open_interim_file_reader(p, local,
-                    sourcefilename);
-            if (reader->r.plugin == NULL) {
-                corsaro_log(p->logger,
-                        "unable to create merge reader for %s output.",
-                        p->name);
-                free(reader);
-                return NULL;
-            }
-            break;
-        case CORSARO_INTERIM_TRACE:
-            reader->r.trace = corsaro_create_trace_reader(p->logger,
-                    sourcefilename);
-            if (reader->r.trace == NULL) {
-                corsaro_log(p->logger,
-                        "unable to create packet trace reader for %s output.",
-                        p->name);
-                free(reader);
-                return NULL;
-            }
-            break;
-        default:
-            corsaro_log(p->logger, "unknown interim file format %d", fmt);
-            free(reader);
-            return NULL;
-    }
-
-    return reader;
-}
-
-void corsaro_close_merge_reader(corsaro_merge_reader_t *reader,
-        corsaro_plugin_t *p, void *local) {
-    switch(reader->fmt) {
-        case CORSARO_INTERIM_AVRO:
-            corsaro_destroy_avro_reader(reader->r.avro);
-            break;
-        case CORSARO_INTERIM_PLUGIN:
-            p->close_interim_file(p, local, reader->r.plugin);
-            break;
-        case CORSARO_INTERIM_TRACE:
-            corsaro_destroy_trace_reader(reader->r.trace);
-            break;
-
-    }
-    free(reader);
-}
-
 corsaro_merge_writer_t *corsaro_create_merge_writer(corsaro_plugin_t *p,
-        void *local, char *outputfilename, corsaro_interim_format_t fmt) {
+        void *local, char *outputfilename, corsaro_output_format_t fmt) {
 
 
     corsaro_merge_writer_t *writer;
@@ -111,7 +41,7 @@ corsaro_merge_writer_t *corsaro_create_merge_writer(corsaro_plugin_t *p,
     writer->logger = p->logger;
 
     switch(fmt) {
-        case CORSARO_INTERIM_AVRO:
+        case CORSARO_OUTPUT_AVRO:
             writer->w.avro = corsaro_create_avro_writer(p->logger,
                     p->get_avro_schema());
             if (writer->w.avro == NULL) {
@@ -130,7 +60,7 @@ corsaro_merge_writer_t *corsaro_create_merge_writer(corsaro_plugin_t *p,
                 return NULL;
             }
             break;
-        case CORSARO_INTERIM_PLUGIN:
+        case CORSARO_OUTPUT_PLUGIN:
             writer->w.plugin = p->open_merged_output_file(p, local,
                     outputfilename);
             if (writer->w.plugin == NULL) {
@@ -141,7 +71,7 @@ corsaro_merge_writer_t *corsaro_create_merge_writer(corsaro_plugin_t *p,
                 return NULL;
             }
             break;
-        case CORSARO_INTERIM_TRACE:
+        case CORSARO_OUTPUT_TRACE:
             writer->w.trace = corsaro_create_trace_writer(p->logger,
                     outputfilename, CORSARO_TRACE_COMPRESS_LEVEL,
                     CORSARO_TRACE_COMPRESS_METHOD);
@@ -166,57 +96,18 @@ void corsaro_close_merge_writer(corsaro_merge_writer_t *writer,
         corsaro_plugin_t *p, void *local) {
 
     switch(writer->fmt) {
-        case CORSARO_INTERIM_AVRO:
+        case CORSARO_OUTPUT_AVRO:
             corsaro_destroy_avro_writer(writer->w.avro);
             break;
-        case CORSARO_INTERIM_PLUGIN:
+        case CORSARO_OUTPUT_PLUGIN:
             p->close_merged_output_file(p, local, writer->w.plugin);
             break;
-        case CORSARO_INTERIM_TRACE:
+        case CORSARO_OUTPUT_TRACE:
             corsaro_destroy_trace_writer(writer->w.trace);
             break;
 
     }
     free(writer);
-}
-
-int corsaro_read_next_merge_result(corsaro_merge_reader_t *reader,
-        corsaro_plugin_t *p, void *local, corsaro_plugin_result_t *res) {
-
-    int ret = -1;
-
-    res->plugin = p;
-    res->avrofmt = NULL;
-    res->pluginfmt = NULL;
-    res->packet = NULL;
-
-    switch(reader->fmt) {
-        case CORSARO_INTERIM_AVRO:
-            ret = corsaro_read_next_avro_record(reader->r.avro,
-                    &(res->avrofmt));
-            break;
-        case CORSARO_INTERIM_PLUGIN:
-            ret = p->read_result(p, local, reader->r.plugin, res);
-            break;
-        case CORSARO_INTERIM_TRACE:
-            res->packet = trace_create_packet();
-            ret = corsaro_read_next_packet(p->logger, reader->r.trace,
-                    res->packet);
-            break;
-    }
-
-    if (ret == -1) {
-        res->type = CORSARO_RESULT_TYPE_BLANK;
-        return -1;
-    }
-
-    if (ret == 0) {
-        res->type = CORSARO_RESULT_TYPE_EOF;
-        return 0;
-    }
-
-    res->type = CORSARO_RESULT_TYPE_DATA;
-    return 1;
 }
 
 int corsaro_write_next_merge_result(corsaro_merge_writer_t *writer,
@@ -230,15 +121,15 @@ int corsaro_write_next_merge_result(corsaro_merge_writer_t *writer,
      * Hopefully not...
      */
 
-    if (res->avrofmt && writer->fmt == CORSARO_INTERIM_AVRO) {
+    if (res->avrofmt && writer->fmt == CORSARO_OUTPUT_AVRO) {
         return corsaro_append_avro_writer(writer->w.avro, res->avrofmt);
     }
 
-    if (res->pluginfmt && writer->fmt == CORSARO_INTERIM_PLUGIN) {
+    if (res->pluginfmt && writer->fmt == CORSARO_OUTPUT_PLUGIN) {
         return p->write_result(p, local, res, writer->w.plugin);
     }
 
-    if (res->packet && writer->fmt == CORSARO_INTERIM_TRACE) {
+    if (res->packet && writer->fmt == CORSARO_OUTPUT_TRACE) {
         return corsaro_write_packet(p->logger, writer->w.trace, res->packet);
     }
 

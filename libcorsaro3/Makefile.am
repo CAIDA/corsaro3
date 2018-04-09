@@ -38,12 +38,8 @@ libcorsaro3_la_SOURCES = 	\
 	libcorsaro3_plugin.h            \
         libcorsaro3_avro.c              \
         libcorsaro3_avro.h              \
-        libcorsaro3_result_freelist.h   \
-        libcorsaro3_result_freelist.c   \
         libcorsaro3_trace.c             \
         libcorsaro3_trace.h             \
-        libcorsaro3_mergeapi.c          \
-        libcorsaro3_mergeapi.h          \
         libcorsaro3.h
 
 libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \

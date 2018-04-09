@@ -34,7 +34,9 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <yaml.h>
+#include <sys/mman.h>
 
+#include "libcorsaro3.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_avro.h"
 #include "corsaro_flowtuple.h"
@@ -44,6 +46,8 @@
    'sixtuple' */
 /** The magic number for this plugin when not using /8 opts - "SIXU" */
 #define CORSARO_FLOWTUPLE_MAGIC 0x53495855
+
+#define CORSARO_FLOWTUPLE_MMAP_SIZE 4096
 
 /** Initialize the sorting functions and datatypes */
 KSORT_INIT(sixt, struct corsaro_flowtuple *, corsaro_flowtuple_lt);
@@ -86,6 +90,18 @@ struct corsaro_flowtuple_state_t {
     /** The ID of the thread running this plugin instance */
     int threadid;
 
+};
+
+typedef struct corsaro_flowtuple_iterator {
+    khiter_t khiter;
+    int sortiter;
+    kh_sixt_t *hmap;
+    struct corsaro_flowtuple *nextft;
+    corsaro_result_type_t state;
+    struct corsaro_flowtuple **sorted_keys;
+} corsaro_flowtuple_iterator_t;
+
+struct corsaro_flowtuple_merge_state_t {
     corsaro_avro_writer_t *writer;
 };
 
@@ -119,13 +135,9 @@ static corsaro_plugin_t corsaro_flowtuple_plugin = {
     PLUGIN_NAME,
     CORSARO_PLUGIN_ID_FLOWTUPLE,
     CORSARO_FLOWTUPLE_MAGIC,
-    CORSARO_INTERIM_AVRO,
-    CORSARO_INTERIM_AVRO,
-    CORSARO_MERGE_TYPE_DISTINCT,
     CORSARO_PLUGIN_GENERATE_BASE_PTRS(corsaro_flowtuple),
     CORSARO_PLUGIN_GENERATE_TRACE_PTRS(corsaro_flowtuple),
-    CORSARO_PLUGIN_GENERATE_BASE_READ_PTRS(corsaro_flowtuple),
-    CORSARO_PLUGIN_GENERATE_READ_STD_DISTINCT(corsaro_flowtuple),
+    CORSARO_PLUGIN_GENERATE_MERGE_PTRS(corsaro_flowtuple),
     CORSARO_PLUGIN_GENERATE_TAIL
 
 };
@@ -409,14 +421,6 @@ void corsaro_flowtuple_destroy_self(corsaro_plugin_t *p) {
     p->config = NULL;
 }
 
-void *corsaro_flowtuple_init_reading(corsaro_plugin_t *p, int sources) {
-    return NULL;
-}
-
-int corsaro_flowtuple_halt_reading(corsaro_plugin_t *p, void *local) {
-    return 0;
-}
-
 void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
 
     struct corsaro_flowtuple_state_t *state;
@@ -432,14 +436,6 @@ void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
 
     state->last_interval_start = 0;
     state->threadid = threadid;
-    state->writer = corsaro_create_avro_writer(p->logger,
-            FLOWTUPLE_RESULT_SCHEMA);
-    if (state->writer == NULL) {
-        free(state);
-        return NULL;
-    }
-
-    /* defer opening the output file until we start the first interval */
 
     state->st_hash = kh_init(sixt);
 
@@ -457,7 +453,6 @@ int corsaro_flowtuple_halt_processing(corsaro_plugin_t *p, void *local) {
     }
 
     kh_destroy(sixt, state->st_hash);
-    corsaro_destroy_avro_writer(state->writer);
     free(state);
 
     return 0;
@@ -482,32 +477,6 @@ char *corsaro_flowtuple_derive_output_name(corsaro_plugin_t *p,
 
 }
 
-int corsaro_flowtuple_open_output_file(corsaro_plugin_t *p,
-        void *local, uint32_t timestamp, int threadid) {
-
-    corsaro_flowtuple_config_t *conf;
-    struct corsaro_flowtuple_state_t *state;
-    char *outname = NULL;
-    int ret = 0;
-
-    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_open_output_file", -1);
-
-    outname = corsaro_flowtuple_derive_output_name(p, local, timestamp,
-            threadid);
-    if (outname == NULL) {
-        return -1;
-    }
-
-    if (corsaro_start_avro_writer(state->writer, outname) < 0) {
-        corsaro_log(p->logger, "failed to open flowtuple output file %s",
-                outname);
-        ret = -1;
-    }
-    free(outname);
-    return ret;
-
-}
-
 int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
         corsaro_interval_t *int_start) {
 
@@ -517,79 +486,23 @@ int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
     FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_start_interval", -1);
 
     state->last_interval_start = int_start->time;
-    if (!corsaro_is_avro_writer_active(state->writer)) {
-        if (corsaro_flowtuple_open_output_file(p, local,
-                int_start->time, state->threadid) == -1) {
-            return -1;
-        }
-    }
     return 0;
 }
 
-int corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
+void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
         corsaro_interval_t *int_end) {
 
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
     kh_sixt_t *h;
-    int j;
-    struct corsaro_flowtuple **sorted_keys;
-    khiter_t i = 0;
-    avro_value_t *av;
 
-    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_end_interval", -1);
+    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_end_interval", NULL);
     h = state->st_hash;
 
-    if (kh_size(h) > 0) {
-        if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
-            /* sort the hash before dumping */
-            if (sort_hash(p->logger, h, &sorted_keys) != 0) {
-                corsaro_log(p->logger, "could not sort flowtuple keys");
-                return -1;
-            }
-            for (j = 0; j < kh_size(h); j++) {
-                av = corsaro_populate_avro_item(state->writer,
-                        sorted_keys[j], flowtuple_to_avro);
-                if (av == NULL) {
-                    corsaro_log(p->logger,
-                            "could not convert flowtuple to Avro record");
-                    return -1;
-                }
-                if (corsaro_append_avro_writer(state->writer, av) < 0) {
-                    corsaro_log(p->logger,
-                            "could not write flowtuple to Avro output file");
-                    return -1;
-                }
-                /* this actually frees the flowtuples themselves */
-                free(sorted_keys[j]);
-            }
-            free(sorted_keys);
-        } else {
-            /* do not sort the hash */
-            for (i = kh_begin(h); i != kh_end(h); ++i) {
-                struct corsaro_flowtuple *ft;
-                if (!kh_exist(h, i)) {
-                    continue;
-                }
-                ft = (struct corsaro_flowtuple *) kh_key(h, i);
-                av = corsaro_populate_avro_item(state->writer,
-                        kh_key(h, i), flowtuple_to_avro);
-                if (av == NULL) {
-                    corsaro_log(p->logger,
-                            "could not convert flowtuple to Avro record");
-                    return -1;
-                }
-                if (corsaro_append_avro_writer(state->writer, av) < 0) {
-                    corsaro_log(p->logger,
-                            "could not write flowtuple to Avro output file");
-                    return -1;
-                }
-                free(kh_key(h, i));
-            }
-        }
-        kh_clear(sixt, state->st_hash);
-    }
-
+    /* Replace the hash map with an empty one -- the merging process
+     * will free up everything associated with the old hash map. */
+    state->st_hash = kh_init(sixt);
+    return h;
 }
 
 /** Either add the given flowtuple to the hash, or increment the current count
@@ -690,67 +603,193 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
-int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local,
-        corsaro_interval_t *rot_start) {
+void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
+    struct corsaro_flowtuple_merge_state_t *m;
 
-    corsaro_flowtuple_config_t *conf;
-    struct corsaro_flowtuple_state_t *state;
+    m = (struct corsaro_flowtuple_merge_state_t *)calloc(1,
+            sizeof(struct corsaro_flowtuple_merge_state_t));
 
-    FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_rotate_output", -1);
+    m->writer = corsaro_create_avro_writer(p->logger, p->get_avro_schema());
 
-    if (state->writer != NULL && corsaro_is_avro_writer_active(state->writer)) {
-        /* we're gonna have to wait for this to close */
-        corsaro_close_avro_writer(state->writer);
+    if (!m->writer) {
+        corsaro_log(p->logger,
+                "error while creating avro writer for flowtuple plugin!");
+        free(m);
+        return NULL;
     }
+
+    return m;
+}
+
+int corsaro_flowtuple_halt_merging(corsaro_plugin_t *p, void *local) {
+
+    struct corsaro_flowtuple_merge_state_t *m;
+
+    m = (struct corsaro_flowtuple_merge_state_t *)local;
+    if (m == NULL) {
+        return 0;
+    }
+
+    if (m->writer) {
+        corsaro_destroy_avro_writer(m->writer);
+    }
+
     return 0;
 }
 
-int corsaro_flowtuple_compare_results(corsaro_plugin_t *p, void *local,
-        corsaro_plugin_result_t *res1, corsaro_plugin_result_t *res2) {
+static int choose_next_merge_ft(corsaro_plugin_t *p,
+        corsaro_flowtuple_iterator_t *inputs, int inpcount) {
 
     corsaro_flowtuple_config_t *conf;
+    int candind = -1;
+    int i;
 
     conf = (corsaro_flowtuple_config_t *)(p->config);
-    if (res1->type == CORSARO_RESULT_TYPE_DATA) {
-        khint32_t hash1, hash2;
+
+    for (i = 0; i < inpcount; i++) {
+        if (inputs[i].state == CORSARO_RESULT_TYPE_EOF) {
+            continue;
+        }
+
+        while (inputs[i].nextft == NULL) {
+            if (inputs[i].sorted_keys == NULL) {
+                if (inputs[i].khiter == kh_end(inputs[i].hmap)) {
+                    inputs[i].state = CORSARO_RESULT_TYPE_EOF;
+                    break;
+                }
+
+                if (kh_exist(inputs[i].hmap, inputs[i].khiter)) {
+                    inputs[i].nextft = (struct corsaro_flowtuple *)kh_key(
+                            inputs[i].hmap, inputs[i].khiter);
+                }
+                inputs[i].khiter ++;
+            } else {
+                if (inputs[i].sortiter == kh_size(inputs[i].hmap)) {
+                    inputs[i].state = CORSARO_RESULT_TYPE_EOF;
+                    break;
+                }
+                inputs[i].nextft = inputs[i].sorted_keys[inputs[i].sortiter];
+                inputs[i].sortiter ++;
+            }
+        }
+
+
+        if (inputs[i].state == CORSARO_RESULT_TYPE_EOF) {
+            continue;
+        }
+
+        if (candind == -1) {
+            candind = i;
+            continue;
+        }
 
         if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_DISABLED) {
-            /* order doesn't matter, just pick res1 */
-            return -1;
+            /* order doesn't matter, just pick the first usable result */
+            break;
         }
 
-        if (res1->pluginfmt == NULL) {
-            res1->pluginfmt = (void *)avro_to_flowtuple(p->logger,
-                    res1->avrofmt);
+        if (corsaro_flowtuple_lt(inputs[i].nextft, inputs[candind].nextft)) {
+            candind = i;
         }
-        if (res2->pluginfmt == NULL) {
-            res2->pluginfmt = (void *)avro_to_flowtuple(p->logger,
-                    res2->avrofmt);
-        }
-
-        if (corsaro_flowtuple_lt((struct corsaro_flowtuple *)(res1->pluginfmt),
-                (struct corsaro_flowtuple *)(res2->pluginfmt))) {
-            return -1;
-        }
-
-        return 1;
     }
 
-    /* Hopefully we don't get here? */
+    return candind;
+}
+
+
+int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
+        void **tomerge, corsaro_fin_interval_t *fin) {
+
+    struct corsaro_flowtuple_merge_state_t *m;
+    corsaro_flowtuple_config_t *conf;
+    corsaro_flowtuple_iterator_t *inputs;
+    int i, candind;
+    avro_value_t *avrores;
+
+    conf = (corsaro_flowtuple_config_t *)(p->config);
+    m = (struct corsaro_flowtuple_merge_state_t *)local;
+    if (m == NULL || m->writer == NULL) {
+        return -1;
+    }
+
+    /* First step, open an output file if we need one */
+    if (!corsaro_is_avro_writer_active(m->writer)) {
+        char *outname = p->derive_output_name(p, local, fin->timestamp, -1);
+        if (outname == NULL) {
+            return -1;
+        }
+        if (corsaro_start_avro_writer(m->writer, outname) == -1) {
+            free(outname);
+            return -1;
+        }
+        free(outname);
+    }
+
+    inputs = (corsaro_flowtuple_iterator_t *)calloc(fin->threads_ended,
+            sizeof(corsaro_flowtuple_iterator_t));
+
+    for (i = 0; i < fin->threads_ended; i++) {
+        inputs[i].hmap = (kh_sixt_t *)(tomerge[i]);
+        inputs[i].khiter = kh_begin(inputs[i].hmap);
+        inputs[i].nextft = NULL;
+        inputs[i].state = CORSARO_RESULT_TYPE_DATA;
+        if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
+            if (sort_hash(p->logger, inputs[i].hmap,
+                    &(inputs[i].sorted_keys)) != 0) {
+                corsaro_log(p->logger,
+                        "could not sort flowtuple keys for input %d", i);
+                inputs[i].sorted_keys = NULL;
+                inputs[i].sortiter = -1;
+            } else {
+                inputs[i].sortiter = 0;
+            }
+        } else {
+            inputs[i].sorted_keys = NULL;
+            inputs[i].sortiter = -1;
+        }
+    }
+
+    do {
+        candind = choose_next_merge_ft(p, inputs, fin->threads_ended);
+        if (candind == -1) {
+            break;
+        }
+
+        avrores = corsaro_populate_avro_item(m->writer, inputs[candind].nextft,
+                flowtuple_to_avro);
+        if (avrores == NULL) {
+            corsaro_log(p->logger,
+                    "error while converting flowtuple to avro format, skipping.");
+        } else {
+            if (corsaro_append_avro_writer(m->writer, avrores) == -1) {
+
+            }
+        }
+
+        free(inputs[candind].nextft);
+        inputs[candind].nextft = NULL;
+    } while (candind != -1);
+
+    /* All inputs are exhausted */
+    for (i = 0; i < fin->threads_ended; i++) {
+        kh_destroy(sixt, inputs[i].hmap);
+    }
+    free(inputs);
+
+    /* Don't close the file -- rotate_output will deal with that */
+
     return 0;
 }
 
-void corsaro_flowtuple_release_result(corsaro_plugin_t *p, void *local,
-        corsaro_plugin_result_t *res) {
+int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local) {
 
-
-    if (res->pluginfmt) {
-        free(res->pluginfmt);
+    struct corsaro_flowtuple_merge_state_t *m;
+    m = (struct corsaro_flowtuple_merge_state_t *)local;
+    if (m == NULL || m->writer == NULL) {
+        return -1;
     }
 
-    res->type = CORSARO_RESULT_TYPE_BLANK;
-    res->pluginfmt = NULL;
-    res->avrofmt = NULL;
+    return corsaro_close_avro_writer(m->writer);
 }
 
 /*

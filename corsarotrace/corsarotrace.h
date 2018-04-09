@@ -39,12 +39,14 @@
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
     CORSARO_TRACE_MSG_STOP = 1,
+    CORSARO_TRACE_MSG_ROTATE = 2,
 };
 
 typedef struct corsaro_trace_msg {
     uint8_t type;
     uint32_t interval_num;
     uint32_t interval_time;
+    void **plugindata;
 } corsaro_trace_msg_t;
 
 typedef struct corsaro_trace_local corsaro_trace_local_t;
@@ -96,6 +98,8 @@ struct corsaro_trace_local {
 typedef struct corsaro_trace_waiter {
     uint8_t stops_seen;
     corsaro_fin_interval_t *finished_intervals;
+    uint32_t next_rotate_interval;
+    corsaro_plugin_set_t *pluginset;
 
 } corsaro_trace_waiter_t;
 

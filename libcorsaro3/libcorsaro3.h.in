@@ -78,6 +78,24 @@ typedef struct corsaro_interval corsaro_interval_t;
 #define CORSARO_IO_MONITOR_PATTERN 'N'
 #define CORSARO_IO_TRACE_FORMAT_PATTERN 'f'
 
+typedef enum {
+    CORSARO_MERGE_TYPE_OVERLAPPING,
+    CORSARO_MERGE_TYPE_DISTINCT
+} corsaro_merge_style_t;
+
+typedef enum {
+    CORSARO_OUTPUT_AVRO,
+    CORSARO_OUTPUT_PLUGIN,
+    CORSARO_OUTPUT_TRACE
+} corsaro_output_format_t;
+
+typedef enum corsaro_result_type {
+    CORSARO_RESULT_TYPE_BLANK,
+    CORSARO_RESULT_TYPE_EOF,
+    CORSARO_RESULT_TYPE_DATA,
+} corsaro_result_type_t;
+
+
 struct corsaro_interval {
     uint32_t corsaro_magic;
     uint32_t magic;
@@ -90,6 +108,8 @@ struct corsaro_fin_interval {
     uint32_t interval_id;
     uint32_t timestamp;
     uint16_t threads_ended;
+    uint8_t rotate_after;
+    void ***thread_plugin_data;
     corsaro_fin_interval_t *next;
 };
 

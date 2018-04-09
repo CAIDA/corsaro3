@@ -36,7 +36,7 @@
 typedef struct corsaro_merge_reader {
 
     corsaro_logger_t *logger;
-    corsaro_interim_format_t fmt;
+    corsaro_output_format_t fmt;
     union {
         libtrace_t *trace;
         corsaro_avro_reader_t *avro;
@@ -48,7 +48,7 @@ typedef struct corsaro_merge_reader {
 typedef struct corsaro_merge_writer {
 
     corsaro_logger_t *logger;
-    corsaro_interim_format_t fmt;
+    corsaro_output_format_t fmt;
     union {
         libtrace_out_t *trace;
         corsaro_avro_writer_t *avro;
@@ -58,14 +58,14 @@ typedef struct corsaro_merge_writer {
 } corsaro_merge_writer_t;
 
 corsaro_merge_reader_t *corsaro_create_merge_reader(corsaro_plugin_t *p,
-        void *local, char *sourcefilename, corsaro_interim_format_t fmt);
+        void *local, char *sourcefilename, corsaro_output_format_t fmt);
 void corsaro_close_merge_reader(corsaro_merge_reader_t *reader,
         corsaro_plugin_t *p, void *local);
 int corsaro_read_next_merge_result(corsaro_merge_reader_t *reader,
         corsaro_plugin_t *p, void *local, corsaro_plugin_result_t *res);
 
 corsaro_merge_writer_t *corsaro_create_merge_writer(corsaro_plugin_t *p,
-        void *local, char *outputfilename, corsaro_interim_format_t fmt);
+        void *local, char *outputfilename, corsaro_output_format_t fmt);
 void corsaro_close_merge_writer(corsaro_merge_writer_t *writer,
         corsaro_plugin_t *p, void *local);
 int corsaro_write_next_merge_result(corsaro_merge_writer_t *writer,
