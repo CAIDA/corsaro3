@@ -194,6 +194,7 @@ int corsaro_rotate_plugin_output(corsaro_logger_t *logger,
 int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
         corsaro_plugin_set_t *pset, corsaro_fin_interval_t *fin);
 
+int corsaro_is_backscatter_packet(libtrace_packet_t *packet);
 
 #define CORSARO_INIT_PLUGIN_PROC_OPTS(opts) \
   opts.template = NULL; \

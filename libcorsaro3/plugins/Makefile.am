@@ -45,6 +45,11 @@ PLUGIN_SRC+=corsaro_wdcap.c corsaro_wdcap.h
 include_HEADERS+=corsaro_wdcap.h
 endif
 
+if WITH_PLUGIN_DOS
+PLUGIN_SRC+=corsaro_dos.c corsaro_dos.h
+include_HEADERS+=corsaro_dos.h
+endif
+
 libcorsaro3plugins_la_SOURCES = \
         $(PLUGIN_SRC)
 

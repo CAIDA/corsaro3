@@ -38,6 +38,10 @@
 #include "corsaro_wdcap.h"
 #endif
 
+#ifdef WITH_PLUGIN_DOS
+#include "corsaro_dos.h"
+#endif
+
 #define PLUGIN_INIT_ADD(plugin)                                                \
 {                                                                              \
     tail = add_plugin(logger, tail, plugin##_alloc(), 1);                      \
@@ -459,5 +463,48 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
     return errors;
 
 }
+
+int corsaro_is_backscatter_packet(libtrace_packet_t *packet) {
+    void *temp = NULL;
+    uint8_t proto;
+    uint32_t remaining;
+
+    libtrace_tcp_t *tcp_hdr = NULL;
+    libtrace_icmp_t *icmp_hdr = NULL;
+
+    /* get the transport header */
+    if ((temp = trace_get_transport(packet, &proto, &remaining)) == NULL) {
+        /* not enough payload */
+        return 0;
+    }
+
+    /* check for tcp */
+    if (proto == TRACE_IPPROTO_TCP && remaining >= 4) {
+        tcp_hdr = (libtrace_tcp_t *)temp;
+
+        /* look for SYNACK or RST */
+        if ((tcp_hdr->syn && tcp_hdr->ack) || tcp_hdr->rst) {
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+    /* check for icmp */
+    else if (proto == TRACE_IPPROTO_ICMP && remaining >= 2) {
+        icmp_hdr = (libtrace_icmp_t *)temp;
+        if (icmp_hdr->type == 0 || icmp_hdr->type == 3 ||
+                icmp_hdr->type == 4 || icmp_hdr->type == 5 ||
+                icmp_hdr->type == 11 || icmp_hdr->type == 12 ||
+                icmp_hdr->type == 14 || icmp_hdr->type == 16 ||
+                icmp_hdr->type == 18) {
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+
+    return 0;
+}
+
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
