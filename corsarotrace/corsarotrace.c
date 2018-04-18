@@ -413,6 +413,7 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
                 fin->rotate_after = 1;
                 break;
             }
+            fin = fin->next;
         }
         assert(fin != NULL);
     }
