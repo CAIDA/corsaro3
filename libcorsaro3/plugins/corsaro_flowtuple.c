@@ -633,7 +633,7 @@ int corsaro_flowtuple_halt_merging(corsaro_plugin_t *p, void *local) {
     if (m->writer) {
         corsaro_destroy_avro_writer(m->writer);
     }
-
+    free(m);
     return 0;
 }
 
