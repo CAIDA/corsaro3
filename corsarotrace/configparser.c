@@ -117,7 +117,8 @@ static int parse_plugin_config(corsaro_trace_global_t *glob,
 
             if (corsaro_configure_plugin(p, doc, value) == -1) {
                 corsaro_log(glob->logger,
-                        "Error while parsing configuration options for plugin '%s'");
+                        "Error while parsing configuration options for plugin '%s'",
+                        p->name);
                 corsaro_disable_plugin(p);
                 continue;
             }
