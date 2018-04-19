@@ -751,11 +751,13 @@ static void attack_vector_update_ppm_window(corsaro_dos_config_t *conf,
     ppm->buckets[0] ++;
 }
 
-static inline void copy_ppm_buckets(attack_vector_t *origav,
-        attack_vector_t *newav) {
+static inline void copy_ppm_buckets(corsaro_dos_config_t *conf,
+        attack_vector_t *origav, attack_vector_t *newav, uint32_t endts) {
 
     libtrace_list_node_t *n;
     expired_ppm_bucket_t *buck, buckcopy;
+    uint32_t lastts = 0;
+
 
     n = origav->ppm_bucket_list->head;
 
@@ -767,6 +769,25 @@ static inline void copy_ppm_buckets(attack_vector_t *origav,
         buckcopy.count = buck->count;
 
         libtrace_list_push_back(newav->ppm_bucket_list, &buckcopy);
+        lastts = buck->ts;
+    }
+
+    /* If this vector hasn't been updated for a while, we're going
+     * to need to pad the list with zeroes for the empty windows
+     * at the end of the interval period.
+     */
+
+    if (lastts == 0) {
+        return;
+    }
+
+    lastts += conf->ppm_window_slide;
+
+    while (lastts < endts) {
+        buckcopy.ts = lastts;
+        buckcopy.count = 0;
+        libtrace_list_push_back(newav->ppm_bucket_list, &buckcopy);
+        lastts += conf->ppm_window_slide;
     }
 }
 
@@ -807,8 +828,9 @@ static inline void copy_flowtuples(kh_ft_t *orig, kh_ft_t *copy) {
     }
 }
 
-static kh_av_t *copy_attack_hash_table(corsaro_logger_t *logger,
-        kh_av_t *origmap, uint32_t lastrot) {
+static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
+        corsaro_logger_t *logger,
+        kh_av_t *origmap, uint32_t lastrot, uint32_t endts) {
 
     kh_av_t *newmap = NULL;
     khiter_t i;
@@ -848,7 +870,7 @@ static kh_av_t *copy_attack_hash_table(corsaro_logger_t *logger,
         memcpy(newav->initial_packet, origav->initial_packet,
                 origav->initial_packet_len);
 
-        copy_ppm_buckets(origav, newav);
+        copy_ppm_buckets(conf, origav, newav, endts);
 
         copy_32hash(origav->attack_ip_hash, newav->attack_ip_hash);
         copy_32hash(origav->attack_port_hash, newav->attack_port_hash);
@@ -873,9 +895,10 @@ static kh_av_t *copy_attack_hash_table(corsaro_logger_t *logger,
 }
 
 static struct corsaro_dos_state_t *copy_attack_state(corsaro_plugin_t *p,
-        struct corsaro_dos_state_t *orig) {
+        struct corsaro_dos_state_t *orig, uint32_t endts) {
 
     struct corsaro_dos_state_t *copy = NULL;
+    corsaro_dos_config_t *conf = (corsaro_dos_config_t *)(p->config);
 
     copy = (struct corsaro_dos_state_t *)calloc(1,
             sizeof(struct corsaro_dos_state_t));
@@ -889,12 +912,12 @@ static struct corsaro_dos_state_t *copy_attack_state(corsaro_plugin_t *p,
     copy->threadid = orig->threadid;
     copy->lastpktts = orig->lastpktts;
 
-    copy->attack_hash_tcp = copy_attack_hash_table(p->logger,
-            orig->attack_hash_tcp, orig->last_rotation);
-    copy->attack_hash_udp = copy_attack_hash_table(p->logger,
-            orig->attack_hash_udp, orig->last_rotation);
-    copy->attack_hash_icmp = copy_attack_hash_table(p->logger,
-            orig->attack_hash_icmp, orig->last_rotation);
+    copy->attack_hash_tcp = copy_attack_hash_table(conf, p->logger,
+            orig->attack_hash_tcp, orig->last_rotation, endts);
+    copy->attack_hash_udp = copy_attack_hash_table(conf, p->logger,
+            orig->attack_hash_udp, orig->last_rotation, endts);
+    copy->attack_hash_icmp = copy_attack_hash_table(conf, p->logger,
+            orig->attack_hash_icmp, orig->last_rotation, endts);
 
     return copy;
 }
@@ -914,7 +937,7 @@ void *corsaro_dos_end_interval(corsaro_plugin_t *p, void *local,
         return NULL;
     }
 
-    deepcopy = copy_attack_state(p, state);
+    deepcopy = copy_attack_state(p, state, int_end->time);
     if (deepcopy == NULL) {
         corsaro_log(p->logger,
                 "corsaro_dos_end_interval: unable to deep copy current attack state");
