@@ -190,6 +190,9 @@ typedef struct attack_vector {
     /** The number of bytes that comprise this vector */
     uint64_t byte_cnt;
 
+    /** Maximum PPM rate seen during this interval */
+    uint32_t maxppminterval;
+
     /** The sliding window packet rate state */
     ppm_window_t ppm_window;
 
@@ -395,6 +398,8 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
             vec->mismatches);
     CORSARO_AVRO_SET_FIELD(long, av, field, 9, "byte_cnt", "dos",
             vec->byte_cnt);
+    CORSARO_AVRO_SET_FIELD(long, av, field, 10, "max_ppm_interval", "dos",
+            vec->maxppminterval);
     CORSARO_AVRO_SET_FIELD(long, av, field, 11, "start_time_sec", "dos",
             vec->start_time.tv_sec);
     CORSARO_AVRO_SET_FIELD(int, av, field, 12, "start_time_usec", "dos",
@@ -421,11 +426,6 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
                 avro_strerror());
         return -1;
     }
-
-    /* Find the max PPM to put into max_ppm_interval */
-    maxppm = calculate_maximum_ppm(vec->config, vec->ppm_bucket_list);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 10, "max_ppm_interval", "dos",
-            maxppm);
 
     return 0;
 
@@ -861,6 +861,11 @@ static kh_av_t *copy_attack_hash_table(corsaro_logger_t *logger,
          */
         kh_clear(ft, origav->interval_flows);
 
+        /* Clear the ppm bucket list */
+        libtrace_list_deinit(origav->ppm_bucket_list);
+        origav->ppm_bucket_list =
+                libtrace_list_init(sizeof(expired_ppm_bucket_t));
+
         kh_put(av, newmap, newav, &khret);
     }
 
@@ -1053,9 +1058,6 @@ static inline attack_vector_t *match_packet_to_vector(
     } else if (srcproto == TRACE_IPPROTO_UDP) {
         attack_hash = state->attack_hash_udp;
     } else {
-        corsaro_log(logger,
-                "dos: unexpected protocol in match_packet_to_vector: %u",
-                srcproto);
         return NULL;
     }
 
@@ -1188,6 +1190,10 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
     vector = match_packet_to_vector(p->logger, packet, state, srcproto,
             &findme, &tv);
 
+    if (!vector) {
+        return 0;
+    }
+
     if (vector->attacker_ip == 0) {
         /* New vector, grab addresses from IP header */
         vector->attacker_ip = ntohl(ip_hdr->ip_dst.s_addr);
@@ -1242,8 +1248,13 @@ static int write_attack_vectors(corsaro_logger_t *logger,
         }
 
         vec = kh_key(attack_hash, i);
+
+        vec->maxppminterval = calculate_maximum_ppm(conf,
+                vec->ppm_bucket_list);
         vec->attimestamp = ts;
         vec->config = conf;
+
+        /* TODO check vector meets minimum requirements */
         avro = corsaro_populate_avro_item(writer, vec, dos_to_avro);
         if (avro == NULL) {
             corsaro_log(logger,
