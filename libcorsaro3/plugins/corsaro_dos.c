@@ -305,7 +305,7 @@ static const char DOS_RESULT_SCHEMA[] =
         {\"name\":\"latest_time_sec\", \"type\": \"long\"}, \
         {\"name\":\"latest_time_usec\", \"type\": \"int\"}, \
         {\"name\":\"initial_packet\", \"type\": \"bytes\"}, \
-        {\"name\":\"thread_cnt\", \"type\": \"int\"}, \
+        {\"name\":\"thread_cnt\", \"type\": \"int\"} \
         ]}";
 
 
@@ -1351,7 +1351,7 @@ static int combine_ft_set(kh_ft_t *dest, kh_ft_t *src) {
         }
 
         toadd = kh_key(src, i);
-        find = kh_get(ft, dest, existing);
+        find = kh_get(ft, dest, toadd);
         if (find == kh_end(dest)) {
             /* This flow doesn't exist, so just insert it */
             find = kh_put(ft, dest, toadd, &khret);
@@ -1363,6 +1363,7 @@ static int combine_ft_set(kh_ft_t *dest, kh_ft_t *src) {
             continue;
         }
 
+        existing = kh_key(dest, find);
         /* Flow already exists, so try to combine */
         existing->total_packet_count += toadd->total_packet_count;
 
@@ -1433,7 +1434,7 @@ static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
         }
 
         toadd = kh_key(srcmap, i);
-        find = kh_get(av, destmap, existing);
+        find = kh_get(av, destmap, toadd);
 
         if (find == kh_end(destmap)) {
             /* Target is not already present, so we can just add it */
@@ -1449,7 +1450,7 @@ static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
         /* Target already exists in destmap, so we need to merge the
          * two results.
          */
-
+        existing = kh_key(destmap, find);
         existing->thread_cnt ++;
         existing->packet_cnt += toadd->packet_cnt;
         existing->mismatches += toadd->mismatches;
