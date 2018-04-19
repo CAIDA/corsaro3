@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <sys/time.h>
 
 #include "libcorsaro3_avro.h"
 #include "libcorsaro3.h"

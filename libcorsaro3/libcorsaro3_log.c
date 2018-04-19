@@ -34,7 +34,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <sys/time.h>
 #include <math.h>
 
 #include "libcorsaro3_log.h"
