@@ -773,6 +773,7 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
     /* All inputs are exhausted */
     for (i = 0; i < fin->threads_ended; i++) {
         kh_destroy(sixt, inputs[i].hmap);
+        free(inputs[i].sorted_keys);
     }
     free(inputs);
 
