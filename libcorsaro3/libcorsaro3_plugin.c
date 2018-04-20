@@ -115,6 +115,7 @@ static corsaro_plugin_t *add_plugin(corsaro_logger_t *logger,
     }
 
     memcpy(copy, p, sizeof(corsaro_plugin_t));
+    copy->next = NULL;
 
     /* This used to be optional, but probably no harm in checking each time. */
     if (firstload) {
@@ -448,9 +449,6 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
                     "unable to merge interval results for plugin %s",
                     p->name);
             errors ++;
-            p = p->next;
-            index ++;
-            continue;
         }
 
         p = p->next;
