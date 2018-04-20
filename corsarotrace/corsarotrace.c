@@ -265,7 +265,6 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
                 "received a packet from *before* our current interval!");
         corsaro_log(glob->logger,
                 "skipping packet, but this is probably a b00g.");
-        exit(1);
         return packet;
     }
 
@@ -433,8 +432,11 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
                 quik.thread_plugin_data = (void ***)(calloc(glob->threads,
                     sizeof(void **)));
                 quik.thread_plugin_data[0] = msg->plugindata;
+
                 corsaro_merge_plugin_outputs(glob->logger, wait->pluginset,
                         &quik);
+                free(msg->plugindata);
+                free(quik.thread_plugin_data);
             }
             free(msg);
             return;
@@ -449,6 +451,8 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
         }
 
         if (fin != NULL) {
+            int i;
+
             fin->thread_plugin_data[fin->threads_ended] = msg->plugindata;
             fin->threads_ended ++;
             if (fin->threads_ended == glob->threads) {
@@ -463,6 +467,10 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
                     wait->next_rotate_interval = msg->interval_num + 1;
                 }
                 wait->finished_intervals = fin->next;
+                for (i = 0; i < glob->threads; i++) {
+                    free(fin->thread_plugin_data[i]);
+                }
+                free(fin->thread_plugin_data);
                 free(fin);
             }
         } else {
@@ -483,7 +491,6 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
                 wait->finished_intervals = fin;
             }
         }
-
     }
     free(msg);
 
