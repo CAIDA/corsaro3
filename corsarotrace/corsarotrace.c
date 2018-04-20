@@ -246,18 +246,18 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     if (tls->current_interval.time == 0) {
         /* First non-ignored packet */
-        tls->current_interval.time = tv.tv_sec;
-        tls->lastrotateinterval.time = tv.tv_sec;
-        corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
-                tv.tv_sec);
-
-        if (glob->interval >= 0) {
-            tls->next_report = tv.tv_sec + glob->interval;
-            tls->next_report =
-                    (tls->next_report / glob->interval) * glob->interval;
-        } else {
-            tls->next_report = 0;
+        if (glob->interval <= 0) {
+            corsaro_log(glob->logger,
+                    "interval has somehow been assigned a bad value of %u\n",
+                    glob->interval);
+            exit(1);
         }
+
+        tls->current_interval.time = tv.tv_sec - (tv.tv_sec % glob->interval);
+        tls->lastrotateinterval.time = tls->current_interval.time;
+        corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
+                tls->current_interval.time);
+        tls->next_report = tls->current_interval.time + glob->interval;
     }
 
     if (tv.tv_sec < tls->current_interval.time) {
