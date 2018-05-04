@@ -214,6 +214,9 @@ typedef struct attack_vector {
     /** List containing all expired PPM buckets */
     libtrace_list_t *ppm_bucket_list;
 
+    /** List of timestamps for all packets associated with this attack */
+    libtrace_list_t *packet_timestamps;
+
     uint32_t attimestamp;
 
     /** The number of processing threads that saw this vector -- mostly
@@ -222,6 +225,7 @@ typedef struct attack_vector {
     uint32_t thread_cnt;
 
     corsaro_dos_config_t *config;
+
 
 } attack_vector_t;
 
@@ -488,6 +492,10 @@ static attack_vector_t *attack_vector_init(int ppmbuckets) {
     av->ppm_window.buckets = (uint64_t *)calloc(ppmbuckets, sizeof(uint64_t));
     av->config = NULL;
 
+    /* don't init here, since we'll often be assigning an already existing
+     * instance to this pointer */
+    av->packet_timestamps = NULL;
+
     return av;
 }
 
@@ -498,6 +506,10 @@ static void attack_vector_free(attack_vector_t *av) {
 
     if (av == NULL) {
         return;
+    }
+
+    if (av->packet_timestamps) {
+        libtrace_list_deinit(av->packet_timestamps);
     }
 
     if (av->ppm_bucket_list) {
@@ -903,6 +915,7 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         newav->mismatches = origav->mismatches;
         newav->start_time = origav->start_time;
         newav->latest_time = origav->latest_time;
+        newav->packet_timestamps = origav->packet_timestamps;
 
         newav->initial_packet = (uint8_t *)malloc(origav->initial_packet_len);
         memcpy(newav->initial_packet, origav->initial_packet,
@@ -925,6 +938,7 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         libtrace_list_deinit(origav->ppm_bucket_list);
         origav->ppm_bucket_list =
                 libtrace_list_init(sizeof(expired_ppm_bucket_t));
+        origav->packet_timestamps = libtrace_list_init(sizeof(double));
         origav->ppm_window.window_start = endts;
         origav->ppm_window.buckets[0] = 0;
         kh_put(av, newmap, newav, &khret);
@@ -1169,6 +1183,7 @@ static attack_vector_t *match_packet_to_vector(
     memcpy(vector->initial_packet, pkt_buf, vector->initial_packet_len);
     vector->target_ip = findme->target_ip;
     vector->protocol = srcproto;
+    vector->packet_timestamps = libtrace_list_init(sizeof(double));
 
     /* Will get populated on return */
     vector->attacker_ip = 0;
@@ -1197,6 +1212,7 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
     attack_vector_t findme, *vector;
     attack_flow_t thisflow;
     struct timeval tv;
+    double tssecs;
     int khret;
 
     conf = (corsaro_dos_config_t *)(p->config);
@@ -1286,6 +1302,9 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
     vector->packet_cnt ++;
     vector->byte_cnt += thisflow.pkt_len;
     vector->latest_time = tv;
+
+    tssecs = trace_get_seconds(packet);
+    libtrace_list_push_back(vector->packet_timestamps, &tssecs);
     attack_vector_update_ppm_window(conf, vector, &tv);
 
     /* add the attacker ip to the hash */
@@ -1335,6 +1354,24 @@ static int write_flowtuples(corsaro_logger_t *logger,
     return 0;
 }
 
+static int write_iat_bins(corsaro_logger_t *logger, libtrace_list_t *tslist,
+        uint32_t bints, uint8_t proto, uint32_t targetip) {
+
+    libtrace_list_node_t *n;
+    double lastts = 0.0;
+    double thists = 0.0;
+
+    n = tslist->head;
+    while (n) {
+        thists = *((double *)(n->data));
+        if (lastts > 0.0) {
+            printf("%u %u %u   %.8f %.8f\n", bints, targetip, proto, lastts, thists - lastts);
+        }
+        lastts = thists;
+        n = n->next;
+    }
+}
+
 static int write_attack_vectors(corsaro_logger_t *logger,
         corsaro_dos_merge_state_t *mstate, kh_av_t *attack_hash,
         uint32_t ts, corsaro_dos_config_t *conf) {
@@ -1372,6 +1409,11 @@ static int write_attack_vectors(corsaro_logger_t *logger,
 
         if (write_flowtuples(logger, mstate->ftwriter, vec->target_ip, ts,
                 vec->protocol, vec->interval_flows) < 0) {
+            return -1;
+        }
+
+        if (write_iat_bins(logger, vec->packet_timestamps, ts, vec->protocol,
+                    vec->target_ip)< 0) {
             return -1;
         }
     }
@@ -1539,6 +1581,56 @@ static int combine_ppm_list(libtrace_list_t *a, libtrace_list_t *b) {
     return 0;
 }
 
+static int combine_timestamp_lists(libtrace_list_t **dest, libtrace_list_t *src,
+        corsaro_logger_t *logger) {
+
+    libtrace_list_t *newlist = libtrace_list_init(sizeof(double));
+    libtrace_list_node_t *a, *b;
+
+    /* Not the most efficient approach, but will do for now... */
+
+    if (dest) {
+        a = (*dest)->head;
+    } else {
+        a = NULL;
+    }
+
+    if (src) {
+        b = src->head;
+    } else {
+        b = NULL;
+    }
+
+    while (a || b) {
+        double ats, bts;
+        if (a != NULL) {
+            ats = *((double *)(a->data));
+        } else {
+            ats = 0.0;
+        }
+
+        if (b != NULL) {
+            bts = *((double *)(b->data));
+        } else {
+            bts = 0.0;
+        }
+
+        if (ats <= 0.0001 || (bts > 0.0001 && bts < ats)) {
+            assert(bts >= 0.001);
+            libtrace_list_push_back(newlist, &bts);
+            b = b->next;
+        } else {
+            assert(ats >= 0.001);
+            libtrace_list_push_back(newlist, &ats);
+            a = a->next;
+        }
+    }
+
+    libtrace_list_deinit(*dest);
+    *dest = newlist;
+    return 0;
+}
+
 static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
         corsaro_logger_t *logger) {
 
@@ -1598,6 +1690,9 @@ static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
         combine_ft_set(existing->interval_flows, toadd->interval_flows);
 
         combine_ppm_list(existing->ppm_bucket_list, toadd->ppm_bucket_list);
+
+        combine_timestamp_lists(&(existing->packet_timestamps),
+                toadd->packet_timestamps, logger);
 
         kh_del(av, srcmap, i);
         attack_vector_free(toadd);
