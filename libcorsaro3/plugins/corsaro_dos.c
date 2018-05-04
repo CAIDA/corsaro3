@@ -355,9 +355,51 @@ static inline int flow_list_to_avro(corsaro_logger_t *logger,
 uint32_t calculate_maximum_ppm(corsaro_dos_config_t *conf,
         libtrace_list_t *buckets) {
 
-    /* TODO */
+    uint32_t maxppm = 0;
+    uint32_t currentwin = 0;
+    int i, itemsperwin;
+    libtrace_list_node_t *winstart;
+    libtrace_list_node_t *winend;
+    expired_ppm_bucket_t *pwin;
 
-    return 0;
+    itemsperwin = (conf->ppm_window_size / conf->ppm_window_slide);
+    if (itemsperwin <= 0) {
+        return 0;
+    }
+
+    winstart = buckets->head;
+    if (winstart == NULL) {
+        return 0;
+    }
+    winend = buckets->head;
+
+    for (i = 0; i < itemsperwin; i++) {
+        pwin = (expired_ppm_bucket_t *)(winend->data);
+        currentwin += pwin->count;
+        if (winend->next == NULL) {
+            break;
+        }
+        winend = winend->next;
+    }
+
+    do {
+        if (currentwin > maxppm) {
+            maxppm = currentwin;
+        }
+
+        pwin = (expired_ppm_bucket_t *)(winstart->data);
+        if (pwin->count > currentwin) {
+            assert(pwin->count <= currentwin);
+        }
+        currentwin -= pwin->count;
+        winstart = winstart->next;
+
+        pwin = (expired_ppm_bucket_t *)(winend->data);
+        currentwin += pwin->count;
+        winend = winend->next;
+    } while (winend != NULL && winstart != NULL);
+
+    return maxppm;
 }
 
 /** Writes a single attack vector to an output file using the AVRO format.
