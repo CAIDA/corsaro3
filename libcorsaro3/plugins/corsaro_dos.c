@@ -1380,6 +1380,8 @@ static int write_attack_vectors(corsaro_logger_t *logger,
     khiter_t i;
     attack_vector_t *vec;
     avro_value_t *avro;
+    double duration;
+    struct timeval tvdiff;
 
     for (i = kh_begin(attack_hash); i != kh_end(attack_hash); ++i) {
         if (!kh_exist(attack_hash, i)) {
@@ -1393,7 +1395,20 @@ static int write_attack_vectors(corsaro_logger_t *logger,
         vec->attimestamp = ts;
         vec->config = conf;
 
-        /* TODO check vector meets minimum requirements */
+        if (vec->maxppminterval < conf->attack_min_ppm) {
+            continue;
+        }
+
+        if (vec->packet_cnt < conf->attack_min_packets) {
+            continue;
+        }
+
+        timersub(&vec->latest_time, &vec->start_time, &tvdiff);
+        duration = tvdiff.tv_sec + ((double)(tvdiff.tv_usec) / 1000000);
+        if (duration < conf->attack_min_duration) {
+            continue;
+        }
+
         avro = corsaro_populate_avro_item(mstate->mainwriter, vec, dos_to_avro);
         if (avro == NULL) {
             corsaro_log(logger,
