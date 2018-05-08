@@ -146,10 +146,6 @@ corsaro_plugin_t *corsaro_flowtuple_alloc(void) {
       return &corsaro_flowtuple_plugin;
 }
 
-const char *corsaro_flowtuple_get_avro_schema(void) {
-    return FLOWTUPLE_RESULT_SCHEMA;
-}
-
 static int flowtuple_to_avro(corsaro_logger_t *logger, avro_value_t *av,
         void *flowtuple) {
     struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)flowtuple;
@@ -609,7 +605,8 @@ void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
     m = (struct corsaro_flowtuple_merge_state_t *)calloc(1,
             sizeof(struct corsaro_flowtuple_merge_state_t));
 
-    m->writer = corsaro_create_avro_writer(p->logger, p->get_avro_schema());
+    m->writer = corsaro_create_avro_writer(p->logger,
+            FLOWTUPLE_RESULT_SCHEMA);
 
     if (!m->writer) {
         corsaro_log(p->logger,

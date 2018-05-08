@@ -40,7 +40,6 @@
  */
 #define CORSARO_PLUGIN_GENERATE_PROTOTYPES(plugin)          \
     corsaro_plugin_t *plugin##_alloc(void);                 \
-    const char *plugin##_get_avro_schema(void);             \
     int plugin##_parse_config(corsaro_plugin_t *p, yaml_document_t *doc, \
             yaml_node_t *options);                          \
     int plugin##_finalise_config(corsaro_plugin_t *p,       \
@@ -118,7 +117,6 @@ struct corsaro_plugin {
     const uint32_t magic;           /* XXX Don't really use this anymore */
 
     /* Callbacks for general functionality */
-    const char *(*get_avro_schema)(void);
     int (*parse_config)(corsaro_plugin_t *p, yaml_document_t *doc,
             yaml_node_t *options);
     int (*finalise_config)(corsaro_plugin_t *p,
@@ -201,7 +199,7 @@ int corsaro_is_backscatter_packet(libtrace_packet_t *packet);
   opts.monitorid = NULL; 
 
 #define CORSARO_PLUGIN_GENERATE_BASE_PTRS(plugin)               \
-  plugin##_get_avro_schema, plugin##_parse_config,              \
+  plugin##_parse_config,              \
   plugin##_finalise_config,              \
   plugin##_destroy_self
 

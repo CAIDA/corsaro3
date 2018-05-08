@@ -67,9 +67,6 @@ corsaro_plugin_t *corsaro_wdcap_alloc(void) {
     return &corsaro_wdcap_plugin;
 }
 
-const char *corsaro_wdcap_get_avro_schema(void) {
-    return NULL;
-}
 
 int corsaro_wdcap_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
         yaml_node_t *options) {

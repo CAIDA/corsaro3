@@ -318,10 +318,6 @@ corsaro_plugin_t *corsaro_dos_alloc(void) {
     return &(corsaro_dos_plugin);
 }
 
-const char *corsaro_dos_get_avro_schema(void) {
-    return DOS_RESULT_SCHEMA;
-}
-
 /** Convert the set of flowtuples associated with an attack vector into an
  *  AVRO array that is suitable for writing to an interim (i.e. pre-merge)
  *  output file.
@@ -1220,7 +1216,7 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
 
     if (state == NULL) {
         corsaro_log(p->logger,
-                "corsaro_dos_end_interval: dos thread-local state is NULL!");
+                "corsaro_dos_process_packet dos thread-local state is NULL!");
         return -1;
     }
 
