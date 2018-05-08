@@ -40,6 +40,41 @@ typedef struct corsaro_filter {
 
 } corsaro_filter_t;
 
+typedef enum {
+
+    CORSARO_FILTERID_SPOOFED,
+    CORSARO_FILTERID_ERRATIC,
+    CORSARO_FILTERID_ROUTED,
+
+    CORSARO_FILTERID_ABNORMAL_PROTOCOL,
+    CORSARO_FILTERID_TTL_200,
+    CORSARO_FILTERID_FRAGMENT,
+    CORSARO_FILTERID_LAST_SRC_IP_0,
+    CORSARO_FILTERID_LAST_SRC_IP_255,
+    CORSARO_FILTERID_SAME_SRC_DEST_IP,
+    CORSARO_FILTERID_UDP_PORT_0,
+    CORSARO_FILTERID_TCP_PORT_0,
+    CORSARO_FILTERID_RFC5735,
+    CORSARO_FILTERID_BACKSCATTER,
+    CORSARO_FILTERID_BITTORRENT,
+    CORSARO_FILTERID_UDP_0X31,
+    CORSARO_FILTERID_UDP_IPLEN_96,
+    CORSARO_FILTERID_PORT_53,
+    CORSARO_FILTERID_TCP_PORT_23,
+    CORSARO_FILTERID_TCP_PORT_80,
+    CORSARO_FILTERID_TCP_PORT_5000,
+    CORSARO_FILTERID_DNS_RESP_NONSTANDARD,
+    CORSARO_FILTERID_NETBIOS_QUERY_NAME,
+
+    CORSARO_FILTERID_MAX
+} corsaro_builtin_filter_id_t;
+
+int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
+        corsaro_builtin_filter_id_t filtid, libtrace_packet_t *packet);
+const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
+        corsaro_builtin_filter_id_t filtid);
+
+/* Custom filter API, where extra filters can be specified in a file */
 libtrace_list_t *corsaro_create_filters(corsaro_logger_t *logger, char *fname);
 void corsaro_destroy_filters(libtrace_list_t *filtlist);
 

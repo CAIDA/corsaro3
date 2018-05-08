@@ -949,6 +949,132 @@ int corsaro_apply_netbios_name_filter(corsaro_logger_t *logger,
     return _apply_netbios_name_filter(logger, packet);
 }
 
+
+const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
+        corsaro_builtin_filter_id_t filtid) {
+
+    char unknown[2048];
+
+    if (filtid < 0 || filtid >= CORSARO_FILTERID_MAX) {
+        corsaro_log(logger, "Attempted to get name for invalid filter using id %d",
+                filtid);
+        return NULL;
+    }
+
+    switch(filtid) {
+        case CORSARO_FILTERID_SPOOFED:
+            return "spoofed";
+        case CORSARO_FILTERID_ERRATIC:
+            return "erratic";
+        case CORSARO_FILTERID_ROUTED:
+            return "routed";
+        case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
+            return "abnormal-protocol";
+        case CORSARO_FILTERID_TTL_200:
+            return "ttl-200";
+        case CORSARO_FILTERID_FRAGMENT:
+            return "fragmented";
+        case CORSARO_FILTERID_LAST_SRC_IP_0:
+            return "last-byte-src-0";
+        case CORSARO_FILTERID_LAST_SRC_IP_255:
+            return "last-byte-src-255";
+        case CORSARO_FILTERID_SAME_SRC_DEST_IP:
+            return "same-src-dst";
+        case CORSARO_FILTERID_UDP_PORT_0:
+            return "udp-port-0";
+        case CORSARO_FILTERID_TCP_PORT_0:
+            return "tcp-port-0";
+        case CORSARO_FILTERID_RFC5735:
+            return "rfc5735";
+        case CORSARO_FILTERID_BACKSCATTER:
+            return "backscatter";
+        case CORSARO_FILTERID_BITTORRENT:
+            return "bittorrent";
+        case CORSARO_FILTERID_UDP_0X31:
+            return "udp-0x31";
+        case CORSARO_FILTERID_UDP_IPLEN_96:
+            return "udp-ip-len-96";
+        case CORSARO_FILTERID_PORT_53:
+            return "port-53";
+        case CORSARO_FILTERID_TCP_PORT_23:
+            return "tcp-port-23";
+        case CORSARO_FILTERID_TCP_PORT_80:
+            return "tcp-port-80";
+        case CORSARO_FILTERID_TCP_PORT_5000:
+            return "tcp-port-5000";
+        case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
+            return "dns-resp-non-standard";
+        case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
+            return "netbios-query-name";
+        default:
+            corsaro_log(logger, "Warning: no filter name for id %d -- please add one to corsaro_get_builtin_filter_name()", filtid);
+            snprintf(unknown, 2048, "unknown-%d", filtid);
+            /* Naughty, returning a local variable address */
+            return (const char *)unknown;
+    }
+    return NULL;
+}
+
+int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
+        corsaro_builtin_filter_id_t filtid, libtrace_packet_t *packet) {
+
+    if (filtid < 0 || filtid >= CORSARO_FILTERID_MAX) {
+        corsaro_log(logger, "Attempted to apply invalid filter using id %d",
+                filtid);
+        return -1;
+    }
+
+    switch(filtid) {
+        case CORSARO_FILTERID_SPOOFED:
+            return corsaro_apply_spoofing_filter(logger, packet);
+        case CORSARO_FILTERID_ERRATIC:
+            return corsaro_apply_erratic_filter(logger, packet);
+        case CORSARO_FILTERID_ROUTED:
+            return corsaro_apply_routable_filter(logger, packet);
+        case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
+            return _apply_abnormal_protocol_filter(logger, packet);
+        case CORSARO_FILTERID_TTL_200:
+            return _apply_ttl200_filter(logger, packet);
+        case CORSARO_FILTERID_FRAGMENT:
+            return _apply_fragment_filter(logger, packet);
+        case CORSARO_FILTERID_LAST_SRC_IP_0:
+            return _apply_last_src_byte0_filter(logger, packet);
+        case CORSARO_FILTERID_LAST_SRC_IP_255:
+            return _apply_last_src_byte255_filter(logger, packet);
+        case CORSARO_FILTERID_SAME_SRC_DEST_IP:
+            return _apply_same_src_dest_filter(logger, packet);
+        case CORSARO_FILTERID_UDP_PORT_0:
+            return _apply_udp_port_zero_filter(logger, packet);
+        case CORSARO_FILTERID_TCP_PORT_0:
+            return _apply_tcp_port_zero_filter(logger, packet);
+        case CORSARO_FILTERID_RFC5735:
+            return _apply_rfc5735_filter(logger, packet);
+        case CORSARO_FILTERID_BACKSCATTER:
+            return _apply_backscatter_filter(logger, packet);
+        case CORSARO_FILTERID_BITTORRENT:
+            return _apply_bittorrent_filter(logger, packet);
+        case CORSARO_FILTERID_UDP_0X31:
+            return _apply_udp_0x31_filter(logger, packet);
+        case CORSARO_FILTERID_UDP_IPLEN_96:
+            return _apply_udp_iplen_96_filter(logger, packet);
+        case CORSARO_FILTERID_PORT_53:
+            return _apply_port_53_filter(logger, packet);
+        case CORSARO_FILTERID_TCP_PORT_23:
+            return _apply_port_tcp23_filter(logger, packet);
+        case CORSARO_FILTERID_TCP_PORT_80:
+            return _apply_port_tcp80_filter(logger, packet);
+        case CORSARO_FILTERID_TCP_PORT_5000:
+            return _apply_port_tcp5000_filter(logger, packet);
+        case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
+            return _apply_dns_resp_oddport_filter(logger, packet);
+        case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
+            return _apply_netbios_name_filter(logger, packet);
+        default:
+            corsaro_log(logger, "Warning: no filter callback for id %d -- please add one to corsaro_apply_filter_by_id()", filtid);
+    }
+    return -1;
+}
+
 int corsaro_apply_single_custom_filter(corsaro_logger_t *logger,
         corsaro_filter_t *filter, libtrace_packet_t *packet) {
 
