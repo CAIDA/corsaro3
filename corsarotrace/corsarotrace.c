@@ -43,6 +43,7 @@
 #include "libcorsaro3_log.h"
 #include "corsarotrace.h"
 #include "libcorsaro3_plugin.h"
+#include "libcorsaro3_filtering.h"
 
 /* This version of corsaro is solely for the analysis of captured packets,
  * either via a live interface or from a trace file on disk.
@@ -174,6 +175,8 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         tls->pkts_since_tick = 0;
         tls->last_ts = 0;
         tls->stopped = 0;
+        tls->customfilters = corsaro_create_filters(glob->logger,
+                glob->treefiltername);
 
         if (tls->plugins == NULL) {
             corsaro_log(glob->logger, "error while starting plugins.");
@@ -206,7 +209,7 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
             publish_file_closed_message(trace, t, tls->current_interval.number,
                             tls->next_report);
         }
-
+        corsaro_destroy_filters(tls->customfilters);
         free(tls);
     } else {
         glob->savedlocalstate[trace_get_perpkt_thread_id(t)] = tls;
@@ -287,6 +290,21 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         tls->pkts_outstanding = 0;
     }
 
+    if (glob->removespoofed &&
+            corsaro_apply_spoofing_filter(glob->logger, packet)) {
+        return packet;
+    }
+
+    if (glob->removeerratic && corsaro_apply_erratic_filter(glob->logger,
+                packet)) {
+        return packet;
+    }
+
+    if (glob->removerouted && corsaro_apply_routable_filter(glob->logger,
+                packet)) {
+        return packet;
+    }
+
     tls->pkts_outstanding ++;
     tls->pkts_since_tick ++;
     tls->last_ts = tv.tv_sec;
@@ -364,9 +382,7 @@ static void halt_waiter(libtrace_t *trace, libtrace_thread_t *t,
     while (wait->finished_intervals) {
         fin = wait->finished_intervals;
 
-        if (glob->mergeoutput) {
-            corsaro_merge_plugin_outputs(glob->logger, wait->pluginset, fin);
-        }
+        corsaro_merge_plugin_outputs(glob->logger, wait->pluginset, fin);
         wait->finished_intervals = fin->next;
         free(fin);
     }
@@ -423,21 +439,19 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
 
         if (glob->threads == 1) {
             corsaro_fin_interval_t quik;
-            if (glob->mergeoutput) {
-                quik.interval_id = msg->interval_num;
-                quik.timestamp = msg->interval_time;
-                quik.threads_ended = 1;
-                quik.next = NULL;
-                quik.rotate_after = 0;
-                quik.thread_plugin_data = (void ***)(calloc(glob->threads,
-                    sizeof(void **)));
-                quik.thread_plugin_data[0] = msg->plugindata;
+            quik.interval_id = msg->interval_num;
+            quik.timestamp = msg->interval_time;
+            quik.threads_ended = 1;
+            quik.next = NULL;
+            quik.rotate_after = 0;
+            quik.thread_plugin_data = (void ***)(calloc(glob->threads,
+                sizeof(void **)));
+            quik.thread_plugin_data[0] = msg->plugindata;
 
-                corsaro_merge_plugin_outputs(glob->logger, wait->pluginset,
-                        &quik);
-                free(msg->plugindata);
-                free(quik.thread_plugin_data);
-            }
+            corsaro_merge_plugin_outputs(glob->logger, wait->pluginset,
+                    &quik);
+            free(msg->plugindata);
+            free(quik.thread_plugin_data);
             free(msg);
             return;
         }
@@ -457,10 +471,8 @@ static void handle_trace_msg(libtrace_t *trace, libtrace_thread_t *t,
             fin->threads_ended ++;
             if (fin->threads_ended == glob->threads) {
                 assert(fin == wait->finished_intervals);
-                if (glob->mergeoutput) {
-                    corsaro_merge_plugin_outputs(glob->logger,
-                            wait->pluginset, fin);
-                }
+                corsaro_merge_plugin_outputs(glob->logger,
+                        wait->pluginset, fin);
                 if (fin->rotate_after) {
                     corsaro_rotate_plugin_output(glob->logger,
                             wait->pluginset);

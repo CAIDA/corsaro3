@@ -40,6 +40,8 @@ libcorsaro3_la_SOURCES = 	\
         libcorsaro3_avro.h              \
         libcorsaro3_trace.c             \
         libcorsaro3_trace.h             \
+        libcorsaro3_filtering.c         \
+        libcorsaro3_filtering.h         \
         libcorsaro3.h
 
 libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \

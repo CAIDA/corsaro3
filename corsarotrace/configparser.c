@@ -55,18 +55,22 @@ static int parse_promisc_mode(corsaro_trace_global_t *glob, char *value) {
 
 }
 
-static int parse_merge_mode(corsaro_trace_global_t *glob, char *value) {
+static int parse_onoff_option(corsaro_trace_global_t *glob, char *value,
+        uint8_t *opt, const char *optstr) {
 
     if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
-            strcmp(value, "on") == 0) {
-        glob->mergeoutput = 1;
+            strcmp(value, "on") == 0 || strcmp(value, "enabled") == 0) {
+        *opt = 1;
     }
 
     else if (strcmp(value, "no") == 0 || strcmp(value, "false") == 0 ||
-            strcmp(value, "off") == 0) {
-        glob->mergeoutput = 0;
+            strcmp(value, "off") == 0 || strcmp(value, "disabled") == 0) {
+        *opt = 0;
     } else {
-        corsaro_log(glob->logger, "invalid mergeoutput mode '%s'", value);
+        corsaro_log(glob->logger,
+                "invalid value for '%s' option: '%s'", optstr, value);
+        corsaro_log(glob->logger,
+                "try using 'yes' to enable %s or 'no' to disable it.", optstr);
         return -1;
     }
 
@@ -178,21 +182,52 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "promisc")) {
-        if (parse_promisc_mode(glob, (char *)value->data.scalar.value) < 0) {
+        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+                &(glob->promisc), "promiscuous mode") < 0) {
             return -1;
         }
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && !strcmp((char *)key->data.scalar.value, "mergeoutput")) {
-        if (parse_merge_mode(glob, (char *)value->data.scalar.value) < 0) {
+            && !strcmp((char *)key->data.scalar.value, "tagging")) {
+        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+                &(glob->taggingon), "tagging") < 0) {
             return -1;
         }
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && !strcmp((char *)key->data.scalar.value, "filter")) {
+            && !strcmp((char *)key->data.scalar.value, "removespoofed")) {
+        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+                &(glob->removespoofed), "remove spoofed") < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "removeerratic")) {
+        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+                &(glob->removeerratic), "remove erratic") < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "removerouted")) {
+        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+                &(glob->removerouted), "remove routed") < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "basicfilter")) {
         glob->filterstring = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "filterfile")) {
+        glob->treefiltername = strdup((char *)value->data.scalar.value);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -264,10 +299,23 @@ static void log_configuration(corsaro_trace_global_t *glob) {
         corsaro_log(glob->logger, "enabling promiscuous mode on all inputs");
     }
 
-    if (!glob->mergeoutput) {
-        corsaro_log(glob->logger,
-                "disabled merging of per-thread output files");
+    if (glob->removespoofed) {
+        corsaro_log(glob->logger, "removing spoofed traffic from packet stream");
     }
+
+    if (glob->removeerratic) {
+        corsaro_log(glob->logger, "removing erratic traffic from packet stream");
+    }
+
+    if (glob->removerouted) {
+        corsaro_log(glob->logger, "only included traffic from RFC 5735 addresses");
+    }
+
+    if (glob->taggingon == 0) {
+        corsaro_log(glob->logger,
+                "disabled tagging of packets with extra info");
+    }
+
 }
 
 static int parse_corsaro_trace_config(corsaro_trace_global_t *glob,
@@ -360,15 +408,17 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->filterstring = NULL;
     glob->monitorid = NULL;
     glob->promisc = 0;
+    glob->taggingon = 1;
     glob->logmode = logmode;
     glob->logfilename = NULL;
     glob->threads = 2;
     glob->plugincount = 0;
-    glob->mergeoutput = 1;
 
     glob->trace = NULL;
     glob->filter = NULL;
     glob->logger = NULL;
+
+    glob->treefiltername = NULL;
 
     glob->savedlocalstate = NULL;
     glob->hasher = NULL;
@@ -520,6 +570,10 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
 
     if (glob->hasher_data) {
         free(glob->hasher_data);
+    }
+
+    if (glob->treefiltername) {
+        free(glob->treefiltername);
     }
 
     destroy_corsaro_logger(glob->logger);
