@@ -42,6 +42,10 @@
 #include "corsaro_dos.h"
 #endif
 
+#ifdef WITH_PLUGIN_FILTERINGSTATS
+#include "corsaro_filteringstats.h"
+#endif
+
 #define PLUGIN_INIT_ADD(plugin)                                                \
 {                                                                              \
     tail = add_plugin(logger, tail, plugin##_alloc(), 1);                      \
