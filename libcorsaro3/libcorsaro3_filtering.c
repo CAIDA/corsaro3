@@ -386,7 +386,7 @@ static inline int _apply_netbios_name_filter(corsaro_logger_t *logger,
     udp = (libtrace_udp_t *)transport;
     udppayload = (uint16_t *)trace_get_payload_from_udp(udp, &rem);
 
-    if (ntohs(udp->source) != 137 && ntohs(udp->dest) != 137) {
+    if (ntohs(udp->source) != 137 || ntohs(udp->dest) != 137) {
         return 0;
     }
 
@@ -444,13 +444,14 @@ static inline int _apply_backscatter_filter(corsaro_logger_t *logger,
             return 1;
         }
     }
-
+    
     if (proto == TRACE_IPPROTO_ICMP) {
         icmp = (libtrace_icmp_t *)transport;
         if (rem < 1) {
             return -1;
         }
         switch(icmp->type) {
+            case 0:     // echo reply
             case 3:     // dest unreachable
             case 4:     // source quench
             case 5:     // redirect
@@ -670,6 +671,7 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
     uint8_t last10pat[10] = {0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00};
 
+    
     ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
@@ -695,13 +697,12 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
     /* TODO return different positive values for filter quality analysis */
     if (udplen >= 20 && rem >= 12) {
         if (ntohl(ptr32[0]) == 0x64313a61 || ntohl(ptr32[0]) == 0x64313a72) {
-            if (ntohl(ptr32[1] == 0x64323a69) && ntohl(ptr32[2] == 0x6432303a))
+            if (ntohl(ptr32[1]) == 0x64323a69 && ntohl(ptr32[2]) == 0x6432303a)
             {
                 return 1;
             }
         }
     }
-
     if (udplen >= 48 && rem >= 40) {
         if (ntohl(ptr32[5]) == 0x13426974 && ntohl(ptr32[6]) == 0x546f7272 &&
                 ntohl(ptr32[7]) == 0x656e7420 &&
@@ -710,7 +711,6 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
             return 1;
         }
     }
-
     if (ntohs(ip->ip_len) >= 0x3a) {
         if (ntohs(udppayload[0]) == 0x4102 || ntohs(udppayload[0]) == 0x2102
                 || ntohs(udppayload[0]) == 0x3102
@@ -718,23 +718,21 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
 
             if (rem >= udplen - sizeof(libtrace_udp_t)) {
                 uint8_t *ptr8 = (uint8_t *)udppayload;
-                ptr8 += (udplen - 10);
+                ptr8 += (rem - 10);
                 if (memcmp(ptr8, last10pat, 10) == 0) {
                     return 1;
                 }
             }
         }
     }
-
     if (ntohs(ip->ip_len) == 0x30) {
         if (ntohs(udppayload[0]) == 0x4100 || ntohs(udppayload[0]) == 0x2100
-                || ntohs(udppayload[0]) == 0x3100
+                || ntohs(udppayload[0]) == 0x3102
                 || ntohs(udppayload[0]) == 0x1100) {
 
             return 1;
         }
     }
-
     if (ntohs(ip->ip_len) == 61) {
         if (ntohl(ptr32[3]) == 0x7fffffff && ntohl(ptr32[4]) == 0xab020400 &&
                 ntohl(ptr32[5]) == 0x01000000 &&
@@ -742,7 +740,6 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
             return 1;
         }
     }
-
     return 0;
 }
 
