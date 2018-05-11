@@ -178,9 +178,38 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         tls->customfilters = corsaro_create_filters(glob->logger,
                 glob->treefiltername);
 
+        if (glob->taggingon) {
+            tls->tagger = corsaro_create_packet_tagger();
+            if (glob->pfxtagopts.enabled) {
+                if (corsaro_enable_ipmeta_provider(tls->tagger,
+                        IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts)) != 0) {
+                    corsaro_log(glob->logger,
+                            "error while enabling prefix->asn tagging.");
+                }
+            }
+            if (glob->maxtagopts.enabled) {
+                if (corsaro_enable_ipmeta_provider(tls->tagger,
+                        IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts)) != 0) {
+                    corsaro_log(glob->logger,
+                            "error while enabling Maxmind geo-location tags.");
+                }
+            }
+            if (glob->netacqtagopts.enabled) {
+                if (corsaro_enable_ipmeta_provider(tls->tagger,
+                        IPMETA_PROVIDER_NETACQ_EDGE,
+                        &(glob->netacqtagopts)) != 0) {
+                    corsaro_log(glob->logger,
+                            "error while enabling Netacq-Edge geo-location tags.");
+                }
+            }
+        } else {
+            tls->tagger = NULL;
+        }
+
         if (tls->plugins == NULL) {
             corsaro_log(glob->logger, "error while starting plugins.");
         }
+
     } else {
         tls = glob->savedlocalstate[trace_get_perpkt_thread_id(t)];
     }
@@ -210,6 +239,7 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
                             tls->next_report);
         }
         corsaro_destroy_filters(tls->customfilters);
+        corsaro_destroy_packet_tagger(tls->tagger);
         free(tls);
     } else {
         glob->savedlocalstate[trace_get_perpkt_thread_id(t)] = tls;
@@ -222,6 +252,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)local;
     struct timeval tv;
+    corsaro_packet_tags_t packettags;
 
     if (tls->stopped) {
         return packet;
@@ -308,7 +339,15 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     tls->pkts_outstanding ++;
     tls->pkts_since_tick ++;
     tls->last_ts = tv.tv_sec;
-    corsaro_push_packet_plugins(tls->plugins, packet);
+    if (tls->tagger) {
+        if (corsaro_tag_packet(tls->tagger, &packettags, packet) != 0) {
+            corsaro_log(glob->logger,
+                    "error while attempting to tag a packet.");
+        }
+        corsaro_push_packet_plugins(tls->plugins, packet, &packettags);
+    } else {
+        corsaro_push_packet_plugins(tls->plugins, packet, NULL);
+    }
 
     return packet;
 }

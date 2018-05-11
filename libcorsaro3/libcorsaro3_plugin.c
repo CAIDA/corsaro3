@@ -148,11 +148,6 @@ static inline void populate_interval(corsaro_interval_t *interval,
     interval->time = time;
 }
 
-static inline void reset_packet_state(corsaro_packet_state_t *pstate) {
-    pstate->flags = 0;
-}
-
-
 corsaro_plugin_t *corsaro_load_all_plugins(corsaro_logger_t *logger) {
     corsaro_plugin_t *all = NULL;
     corsaro_plugin_t *tail = NULL;
@@ -318,19 +313,16 @@ int corsaro_stop_plugins(corsaro_plugin_set_t *pset) {
 }
 
 int corsaro_push_packet_plugins(corsaro_plugin_set_t *pset,
-        libtrace_packet_t *packet) {
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
     int index = 0;
     corsaro_plugin_t *p = pset->active_plugins;
-    corsaro_packet_state_t pstate;
 
     if (pset->api != CORSARO_TRACE_API) {
         return -1;
     }
 
-    reset_packet_state(&pstate);
-
     while (p != NULL) {
-        p->process_packet(p, pset->plugin_state[index], packet, &pstate);
+        p->process_packet(p, pset->plugin_state[index], packet, tags);
         p = p->next;
         index ++;
     }

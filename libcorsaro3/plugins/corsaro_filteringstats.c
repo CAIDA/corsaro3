@@ -328,7 +328,7 @@ static inline void update_counter(corsaro_filteringstats_counter_t *c,
 }
 
 int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
-        libtrace_packet_t *packet, corsaro_packet_state_t *pstate) {
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
 
     struct corsaro_filteringstats_state_t *state;
     int i;

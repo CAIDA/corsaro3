@@ -36,6 +36,7 @@
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_filtering.h"
+#include "libcorsaro3_tagging.h"
 
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
@@ -82,6 +83,10 @@ typedef struct corsaro_trace_glob {
     uint8_t removeerratic;
     uint8_t removerouted;
 
+    pfx2asn_opts_t pfxtagopts;
+    maxmind_opts_t maxtagopts;
+    netacq_opts_t netacqtagopts;
+
     corsaro_trace_local_t **savedlocalstate;
     fn_hasher hasher;
     void *hasher_data;
@@ -100,6 +105,7 @@ struct corsaro_trace_local {
     uint8_t stopped;
 
     libtrace_list_t *customfilters;
+    corsaro_packet_tagger_t *tagger;
 };
 
 typedef struct corsaro_trace_waiter {

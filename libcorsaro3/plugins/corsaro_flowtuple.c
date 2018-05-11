@@ -544,7 +544,7 @@ int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
 
 
 int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
-        libtrace_packet_t *packet, corsaro_packet_state_t *pstate) {
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
     libtrace_ip_t *ip_hdr = NULL;
     libtrace_icmp_t *icmp_hdr = NULL;
     libtrace_tcp_t *tcp_hdr = NULL;
@@ -554,10 +554,6 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     struct corsaro_flowtuple_state_t *state;
 
     FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_process_packet", -1);
-
-    if ((pstate->flags & CORSARO_PACKET_STATE_FLAG_IGNORE) != 0) {
-        return 0;
-    }
 
     if ((ip_hdr = trace_get_ip(packet)) == NULL) {
         /* non-ipv4 packet */

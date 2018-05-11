@@ -370,7 +370,7 @@ void *corsaro_wdcap_end_interval(corsaro_plugin_t *p, void *local,
 }
 
 int corsaro_wdcap_process_packet(corsaro_plugin_t *p, void *local,
-        libtrace_packet_t *packet, corsaro_packet_state_t *pstate) {
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
 
     wdcapstate_t *state = (wdcapstate_t *)local;
     corsaro_wdcap_config_t *conf = (corsaro_wdcap_config_t *)(p->config);

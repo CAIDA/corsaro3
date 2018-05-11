@@ -31,7 +31,7 @@
 #include <yaml.h>
 #include <libtrace.h>
 
-#include "libcorsaro3_avro.h"
+#include "libcorsaro3_tagging.h"
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
 
@@ -52,7 +52,7 @@
     void *plugin##_end_interval(corsaro_plugin_t *p, void *local, \
             corsaro_interval_t *int_end);                   \
     int plugin##_process_packet(corsaro_plugin_t *p, void *local, \
-            libtrace_packet_t *packet, corsaro_packet_state_t *pstate); \
+            libtrace_packet_t *packet, corsaro_packet_tags_t *tags); \
     char *plugin##_derive_output_name(corsaro_plugin_t *p, void *local, \
             uint32_t timestamp, int threadid);              \
     void *plugin##_init_merging(corsaro_plugin_t *p, int sources);    \
@@ -132,7 +132,7 @@ struct corsaro_plugin {
     void *(*end_interval)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *int_end);
     int (*process_packet)(corsaro_plugin_t *p, void *local,
-            libtrace_packet_t *packet, corsaro_packet_state_t *pstate);
+            libtrace_packet_t *packet, corsaro_packet_tags_t *tags);
     char *(*derive_output_name)(corsaro_plugin_t *p, void *local,
             uint32_t timestamp, int threadid);
 
@@ -186,7 +186,7 @@ void **corsaro_push_end_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
 int corsaro_push_start_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
         uint32_t ts);
 int corsaro_push_packet_plugins(corsaro_plugin_set_t *pluginset,
-        libtrace_packet_t *packet);
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags);
 
 int corsaro_rotate_plugin_output(corsaro_logger_t *logger,
         corsaro_plugin_set_t *pset);

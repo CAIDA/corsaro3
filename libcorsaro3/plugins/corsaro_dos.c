@@ -1191,7 +1191,7 @@ static attack_vector_t *match_packet_to_vector(
 }
 
 int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
-        libtrace_packet_t *packet, corsaro_packet_state_t *pstate) {
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
 
     corsaro_dos_config_t *conf;
     struct corsaro_dos_state_t *state;
