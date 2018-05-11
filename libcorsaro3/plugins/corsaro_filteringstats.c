@@ -89,6 +89,22 @@ typedef struct corsaro_filteringstats_merge_state {
 } corsaro_filteringstats_merge_state_t;
 
 
+static const char FILTERINGSTATS_SCHEMA[] =
+"{\"type\": \"record\",\
+  \"namespace\": \"org.caida.corsaro\",\
+  \"name\": \"filteringstats\",\
+  \"doc\": \"Statistics describing the packets that would have been \
+             excluded by each internal filter and subfilter.\",\
+  \"fields\": [\
+        {\"name\": \"bin_timestamp\", \"type\": \"long\"}, \
+        {\"name\": \"packet_count\", \"type\": \"long\"}, \
+        {\"name\": \"byte_count\", \"type\": \"long\"}, \
+        {\"name\": \"source_ips\", \"type\": \"long\"}, \
+        {\"name\": \"destination_ips\", \"type\": \"long\"}, \
+        {\"name\": \"filter_name\", \"type\": \"string\"} \
+    ]}";
+
+
 corsaro_plugin_t *corsaro_filteringstats_alloc(void) {
     return &(corsaro_filteringstats_plugin);
 }
@@ -358,8 +374,7 @@ void *corsaro_filteringstats_init_merging(corsaro_plugin_t *p, int sources) {
         return NULL;
     }
 
-    //m->writer = corsaro_create_avro_writer(p->logger, FILTERSTATS_SCHEMA);
-    m->writer = NULL;
+    m->writer = corsaro_create_avro_writer(p->logger, FILTERINGSTATS_SCHEMA);
 
     return m;
 }
@@ -464,6 +479,29 @@ static int update_combined_result(
     return 0;
 }
 
+static int filteringstats_to_avro(corsaro_logger_t *logger, avro_value_t *av,
+        void *counter) {
+
+    corsaro_filteringstats_counter_t *c;
+    c = (corsaro_filteringstats_counter_t *)counter;
+
+    avro_value_t field;
+    CORSARO_AVRO_SET_FIELD(long, av, field, 0, "bin_timestamp",
+            "filteringstats", c->bin_ts);
+    CORSARO_AVRO_SET_FIELD(long, av, field, 1, "packet_count",
+            "filteringstats", c->packets);
+    CORSARO_AVRO_SET_FIELD(long, av, field, 2, "byte_count",
+            "filteringstats", c->bytes);
+    CORSARO_AVRO_SET_FIELD(long, av, field, 3, "source_ips",
+            "filteringstats", kh_size(c->sourceips));
+    CORSARO_AVRO_SET_FIELD(long, av, field, 4, "destination_ips",
+            "filteringstats", kh_size(c->destips));
+    CORSARO_AVRO_SET_FIELD(string, av, field, 5, "filter_name",
+            "filteringstats", c->filtername);
+
+    return 0;
+}
+
 static int write_builtin_filter_stats(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, kh_fstats_t *stats,
         uint32_t timestamp) {
@@ -485,10 +523,6 @@ static int write_builtin_filter_stats(corsaro_logger_t *logger,
         c->bin_ts = timestamp;
         c->filtername = (char *)corsaro_get_builtin_filter_name(logger, i);
 
-        printf("%u %s  %lu %lu %u %u\n", timestamp, c->filtername,
-                c->packets, c->bytes, kh_size(c->sourceips),
-                kh_size(c->destips));
-        /*
         avro = corsaro_populate_avro_item(writer, c, filteringstats_to_avro);
         if (avro == NULL) {
             corsaro_log(logger,
@@ -501,7 +535,6 @@ static int write_builtin_filter_stats(corsaro_logger_t *logger,
                     "could not write filtering stats to Avro output file");
             return -1;
         }
-        */
     }
     return 0;
 }
