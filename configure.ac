@@ -161,6 +161,8 @@ AC_SEARCH_LIBS([yaml_parser_initialize], [yaml], ,[AC_MSG_ERROR(
 AC_SEARCH_LIBS([avro_generic_value_new], [avro], ,[AC_MSG_ERROR(
 		 [libavro required]
 		 )])
+AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
+
 AM_CONDITIONAL([WITH_WANDIO], [test "x" == x])
 
 # Checks for header files.
