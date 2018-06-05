@@ -352,7 +352,7 @@ static inline int flow_list_to_avro(corsaro_logger_t *logger,
     return 0;
 }
 
-uint32_t calculate_maximum_ppm(corsaro_dos_config_t *conf,
+static uint32_t calculate_maximum_ppm(corsaro_dos_config_t *conf,
         libtrace_list_t *buckets) {
 
     uint32_t maxppm = 0;
