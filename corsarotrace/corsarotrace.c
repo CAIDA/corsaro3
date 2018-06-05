@@ -222,7 +222,7 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)local;
 
-    if (glob->currenturi == glob->totaluris - 1) {
+    if (glob->currenturi == glob->totaluris) {
         if (tls->pkts_outstanding) {
             if (corsarotrace_interval_end(glob->logger, trace, t, tls,
                         tls->last_ts) == -1) {
@@ -240,6 +240,8 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         }
         corsaro_destroy_filters(tls->customfilters);
         corsaro_destroy_packet_tagger(tls->tagger);
+        corsaro_log(glob->logger, "shut down trace processing thread %d",
+                trace_get_perpkt_thread_id(t));
         free(tls);
     } else {
         glob->savedlocalstate[trace_get_perpkt_thread_id(t)] = tls;
@@ -734,9 +736,11 @@ int main(int argc, char *argv[]) {
             sleep(1);
         }
         if (!trace_has_finished(glob->trace)) {
+            glob->currenturi ++;
             trace_pstop(glob->trace);
+        } else {
+            glob->currenturi ++;
         }
-        glob->currenturi ++;
 
         /* Join on input trace */
         trace_join(glob->trace);
