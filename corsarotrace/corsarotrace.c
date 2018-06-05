@@ -179,7 +179,12 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
                 glob->treefiltername);
 
         if (glob->taggingon) {
-            tls->tagger = corsaro_create_packet_tagger();
+            tls->tagger = corsaro_create_packet_tagger(glob->logger);
+            if (tls->tagger == NULL) {
+                corsaro_log(glob->logger,
+                        "out of memory while creating packet tagger.");
+            }
+
             if (glob->pfxtagopts.enabled) {
                 if (corsaro_enable_ipmeta_provider(tls->tagger,
                         IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts)) != 0) {

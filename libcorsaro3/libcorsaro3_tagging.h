@@ -37,6 +37,7 @@
 /* These are our "built-in" tags */
 /* TODO think about how we could support "custom" tags? */
 typedef struct corsaro_packet_tags {
+    uint32_t providers_used;
     uint32_t netacq_region;
     uint32_t netacq_polygon;
     uint32_t prefixasn;
@@ -44,14 +45,14 @@ typedef struct corsaro_packet_tags {
     uint16_t netacq_country;
     uint16_t src_port;
     uint16_t dest_port;
-    uint8_t maxmind_continent;
-    uint8_t netacq_continent;
+    uint16_t maxmind_continent;
+    uint16_t netacq_continent;
     uint8_t protocol;
 
-    libtrace_list_t *providersused;
 } corsaro_packet_tags_t;
 
 typedef struct corsaro_packet_tagger {
+    corsaro_logger_t *logger;
     ipmeta_t *ipmeta;
     libtrace_list_t *providers;
     libtrace_list_t *tagfreelist;
@@ -82,7 +83,7 @@ typedef struct netacq_options {
     uint8_t enabled;
 } netacq_opts_t;
 
-corsaro_packet_tagger_t *corsaro_create_packet_tagger(void);
+corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger);
 int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
         ipmeta_provider_id_t provid, void *options);
 void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger);
