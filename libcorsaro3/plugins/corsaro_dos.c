@@ -568,7 +568,7 @@ int corsaro_dos_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
-                "Flowtuple plugin config should be a map.");
+                "DOS plugin config should be a map.");
         free(conf);
         return -1;
     }
@@ -576,9 +576,10 @@ int corsaro_dos_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     for (pair = options->data.mapping.pairs.start;
             pair < options->data.mapping.pairs.top; pair ++) {
 
-        char *val = (char *)value->data.scalar.value;
+        char *val;
         key = yaml_document_get_node(doc, pair->key);
         value = yaml_document_get_node(doc, pair->value);
+        val = (char *)value->data.scalar.value;
 
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                 && strcmp((char *)key->data.scalar.value,
@@ -723,6 +724,7 @@ int corsaro_dos_halt_processing(corsaro_plugin_t *p, void *local) {
     kh_destroy(av, state->attack_hash_udp);
     kh_destroy(av, state->attack_hash_icmp);
     free(state);
+    return 0;
 }
 
 
