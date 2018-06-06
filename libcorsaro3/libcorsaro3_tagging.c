@@ -304,8 +304,6 @@ static int update_maxmind_tags(corsaro_logger_t *logger,
 
     tags->providers_used |= (1 << IPMETA_PROVIDER_MAXMIND);
 
-    printf("country code = %c%c\n", tags->maxmind_country & 0xff,
-            (tags->maxmind_country >> 8) & 0xff);
     return 0;
 }
 
@@ -336,6 +334,7 @@ static void update_basic_tags(corsaro_logger_t *logger,
         tags->src_port = trace_get_source_port(packet);
         tags->dest_port = trace_get_destination_port(packet);
     }
+    tags->providers_used |= 1;
 }
 
 int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
