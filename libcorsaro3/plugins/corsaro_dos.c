@@ -1362,9 +1362,6 @@ static int write_iat_bins(corsaro_logger_t *logger, libtrace_list_t *tslist,
     n = tslist->head;
     while (n) {
         thists = *((double *)(n->data));
-        if (lastts > 0.0) {
-            printf("%u %u %u   %.8f %.8f\n", bints, targetip, proto, lastts, thists - lastts);
-        }
         lastts = thists;
         n = n->next;
     }
