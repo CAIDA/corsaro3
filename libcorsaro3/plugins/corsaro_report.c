@@ -74,8 +74,8 @@ typedef struct corsaro_report_config {
 typedef struct report_metric {
     uint64_t pkt_cnt;
     uint64_t ip_len;
-    khash_t(32xx) *uniq_src_ip;
-    khash_t(32xx) *uniq_dst_ip;
+    kh_32xx_t *uniq_src_ip;
+    kh_32xx_t *uniq_dst_ip;
 } corsaro_report_metric_t;
 
 typedef struct report_result {
@@ -427,10 +427,12 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
             corsaro_log(logger, "Invalid ICMP Code tag: %u", tags->dest_port);
             return;
         }
+        /*
         update_metric(metrics->icmp_types, tags->src_port, srcaddr,
                 dstaddr, iplen);
         update_metric(metrics->icmp_codes, tags->dest_port, srcaddr,
                 dstaddr, iplen);
+        */
 
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         if (tags->src_port >= METRIC_PORT_MAX) {
@@ -445,10 +447,12 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
             return;
         }
 
+/*
         update_metric(metrics->tcp_source_ports, tags->src_port, srcaddr,
                 dstaddr, iplen);
         update_metric(metrics->tcp_dest_ports, tags->dest_port, srcaddr,
                 dstaddr, iplen);
+*/
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
 
         if (tags->src_port >= METRIC_PORT_MAX) {
@@ -463,16 +467,20 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
             return;
         }
 
+    /*
         update_metric(metrics->udp_source_ports, tags->src_port, srcaddr,
                 dstaddr, iplen);
         update_metric(metrics->udp_dest_ports, tags->dest_port, srcaddr,
                 dstaddr, iplen);
+    */
 
     }
 
     update_metric(metrics->combined, 0, srcaddr, dstaddr, iplen);
+    /*
     update_metric(metrics->ip_protocols, tags->protocol, srcaddr, dstaddr,
             iplen);
+    */
 
 }
 
@@ -480,11 +488,12 @@ static void update_maxmind_tag_metrics(corsaro_logger_t *logger,
         corsaro_metric_set_t *metrics, corsaro_packet_tags_t *tags,
         uint32_t srcaddr, uint32_t dstaddr, uint16_t iplen) {
 
+/*
     update_metric(metrics->maxmind_continents, tags->maxmind_continent,
             srcaddr, dstaddr, iplen);
     update_metric(metrics->maxmind_countries, tags->maxmind_country,
             srcaddr, dstaddr, iplen);
-
+*/
 
 }
 
@@ -673,7 +682,6 @@ static int update_combined_result(corsaro_metric_set_t *combined,
         corsaro_metric_set_t *next, corsaro_logger_t *logger) {
 
     /* Can an error occur when combining? */
-
     combine_metrics(combined->maxmind_continents, next->maxmind_continents,
             METRIC_MAXMIND_2CHAR_MAX);
     combine_metrics(combined->maxmind_countries, next->maxmind_countries,
