@@ -55,6 +55,11 @@ PLUGIN_SRC+=corsaro_filteringstats.c corsarofiltering_stats.h
 include_HEADERS+=corsaro_filteringstats.h
 endif
 
+if WITH_PLUGIN_REPORT
+PLUGIN_SRC+=corsaro_report.c corsaro_report.h
+include_HEADERS+=corsaro_report.h
+endif
+
 libcorsaro3plugins_la_SOURCES = \
         $(PLUGIN_SRC)
 
