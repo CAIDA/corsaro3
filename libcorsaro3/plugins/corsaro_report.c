@@ -756,7 +756,7 @@ int corsaro_report_rotate_output(corsaro_plugin_t *p, void *local) {
         return -1;
     }
 
-    if (m->writer || corsaro_close_avro_writer(m->writer) < 0) {
+    if (m->writer == NULL || corsaro_close_avro_writer(m->writer) < 0) {
         return -1;
     }
     return 0;
