@@ -327,14 +327,14 @@ if test "x$with_plugin_smee" == xyes; then
 fi
 
 # the report plugin requires libtimeseries and corsaro_ipmeta
-if test "x$with_plugin_report" == xyes; then
-   if test "x$with_plugin_ipmeta" != xyes; then
-      AC_MSG_ERROR([corsaro_report plugin requires corsaro_ipmeta plugin])
-   fi
-   AC_CHECK_LIB([timeseries], [timeseries_init], , [
-			      AC_MSG_ERROR([libtimeseries is required])
-   ])
-fi
+#if test "x$with_plugin_report" == xyes; then
+#   if test "x$with_plugin_ipmeta" != xyes; then
+#      AC_MSG_ERROR([corsaro_report plugin requires corsaro_ipmeta plugin])
+#   fi
+#   AC_CHECK_LIB([timeseries], [timeseries_init], , [
+#			      AC_MSG_ERROR([libtimeseries is required])
+#   ])
+#fi
 
 # the confickerscan plugin needs p0f also
 if test "x$with_plugin_confickerscan" == xyes && 
