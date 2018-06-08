@@ -36,8 +36,7 @@
 #include <yaml.h>
 #include <libipmeta.h>
 
-#include "khash.h"
-#include "ksort.h"
+#include <uthash.h>
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_avro.h"
 #include "corsaro_report.h"
@@ -69,11 +68,6 @@ typedef struct corsaro_report_config {
     char *outlabel;
 } corsaro_report_config_t;
 
-typedef struct report_metric {
-    uint64_t pkt_cnt;
-    uint64_t ip_len;
-} corsaro_report_metric_t;
-
 typedef enum {
     CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
     CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
@@ -92,7 +86,21 @@ typedef struct report_metric_identifier {
     uint32_t metricval;
 } corsaro_report_metric_id_t;
 
+typedef struct metric_per_ip {
+    corsaro_report_metric_id_t metid;
+    UT_hash_handle hh;
+} corsaro_report_ip_metric_t;
+
+typedef struct report_metric {
+    corsaro_report_metric_id_t metid;
+    uint64_t pkt_cnt;
+    uint64_t ip_len;
+    UT_hash_handle hh;
+} corsaro_report_metric_t;
+
 typedef struct report_result {
+    corsaro_report_metric_id_t metid;
+
     uint64_t pkt_cnt;
     uint64_t ip_len;
     uint32_t uniq_src_ips;
@@ -103,32 +111,20 @@ typedef struct report_result {
     char *metrictype;
     char *metricval;
 
+    UT_hash_handle hh;
+
 } corsaro_report_result_t;
 
-#define HASHER_SHIFT_AND_XOR(value) h^=(h << 5) + (h >> 27) + (value)
-static inline khint32_t metric_id_hash_func(corsaro_report_metric_id_t *mid) {
-    khint32_t h = (khint32_t)(mid->metricval * 67);
-    HASHER_SHIFT_AND_XOR(((uint32_t)mid->class));
-}
-
-#define metric_id_hash_equal(a,b) \
-    ((a)->class == (b)->class && (a)->metricval == (b)->metricval)
-
-KHASH_INIT(metid, corsaro_report_metric_id_t *, corsaro_report_metric_t *, 1,
-        metric_id_hash_func, metric_id_hash_equal);
-
-KHASH_INIT(metset, corsaro_report_metric_id_t *, char, 0,
-        metric_id_hash_func, metric_id_hash_equal);
-
-KHASH_INIT(res, corsaro_report_metric_id_t *, corsaro_report_result_t *, 1,
-        metric_id_hash_func, metric_id_hash_equal);
-
-KHASH_MAP_INIT_INT(ip, khash_t(metset) *);
+typedef struct known_ip {
+    uint32_t ipaddr;
+    corsaro_report_ip_metric_t *assocmetrics;
+    UT_hash_handle hh;
+} corsaro_report_ip_t;
 
 typedef struct metric_set {
-    kh_metid_t *activemetrics;
-    kh_ip_t *source_ips;
-    kh_ip_t *dest_ips;
+    corsaro_report_metric_t *activemetrics;
+    corsaro_report_ip_t *srcips;
+    corsaro_report_ip_t *destips;
 
 } corsaro_metric_set_t;
 
@@ -267,17 +263,9 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
 
 static inline void init_metric_set(corsaro_metric_set_t *mset) {
 
-    mset->source_ips = kh_init(ip);
-    mset->dest_ips = kh_init(ip);
-    mset->activemetrics = kh_init(metid);
-
-    /* Immediately bump the hash table sizes to a non-trivial
-     * amount of entries -- if we let the table grow naturally from
-     * its default (small) size, we're going to waste a TON of time
-     * expanding and re-adjusting the table.
-     */
-    kh_resize(ip, mset->source_ips, 100000);
-    kh_resize(ip, mset->dest_ips, 100000);
+    mset->srcips = NULL;
+    mset->destips = NULL;
+    mset->activemetrics = NULL;
 }
 
 void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
@@ -292,28 +280,34 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     return state;
 }
 
-static inline void free_metrics(corsaro_report_metric_id_t *metid) {
-    free(metid);
-}
-
-static inline void free_ip_entries(kh_metset_t *ip) {
-    kh_destroy(metset, ip);
-}
-
-static inline void free_metric_vals(corsaro_report_metric_t *met) {
-    free(met);
-}
-
 static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
 
-    kh_free_vals(ip, mset->source_ips, free_ip_entries);
-    kh_free_vals(ip, mset->dest_ips, free_ip_entries);
-    kh_free_vals(metid, mset->activemetrics, free_metric_vals);
-    kh_free(metid, mset->activemetrics, free_metrics);
+    corsaro_report_ip_t *ip, *tmp;
+    corsaro_report_metric_t *met, *tmp2;
+    corsaro_report_ip_metric_t *ipmet, *tmp3;
 
-    kh_destroy(ip, mset->source_ips);
-    kh_destroy(ip, mset->dest_ips);
-    kh_destroy(metid, mset->activemetrics);
+    HASH_ITER(hh, mset->srcips, ip, tmp) {
+        HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
+            HASH_DELETE(hh, (ip->assocmetrics), ipmet);
+            free(ipmet);
+        }
+        HASH_DELETE(hh, mset->srcips, ip);
+        free(ip);
+    }
+
+    HASH_ITER(hh, mset->destips, ip, tmp) {
+        HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
+            HASH_DELETE(hh, ip->assocmetrics, ipmet);
+            free(ipmet);
+        }
+        HASH_DELETE(hh, mset->destips, ip);
+        free(ip);
+    }
+
+    HASH_ITER(hh, mset->activemetrics, met, tmp2) {
+        HASH_DELETE(hh, mset->activemetrics, met);
+        free(met);
+    }
 
 }
 
@@ -382,56 +376,70 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
 
 static inline void update_metric(corsaro_metric_set_t *metrics,
         corsaro_report_metric_class_t metclass, uint32_t metval,
-        kh_metset_t *srcipmap, kh_metset_t *dstipmap, uint16_t iplen) {
+        corsaro_report_ip_t *srcip, corsaro_report_ip_t *dstip,
+        uint16_t iplen) {
 
-    khiter_t khiter;
-    int khret;
-    corsaro_report_metric_id_t *metricid, lookup;
+    corsaro_report_metric_id_t lookup;
     corsaro_report_metric_t *metdata;
+    corsaro_report_ip_metric_t *find;
 
+    memset(&lookup, 0, sizeof(corsaro_report_metric_id_t));
     lookup.class = metclass;
     lookup.metricval = metval;
 
-    /* Update the metric itself */
-    if ((khiter = kh_get(metid, metrics->activemetrics, &lookup)) ==
-            kh_end(metrics->activemetrics)) {
-
-        metricid = (corsaro_report_metric_id_t *)malloc(sizeof(lookup));
-        metricid->class = metclass;
-        metricid->metricval = metval;
-
+    HASH_FIND(hh, metrics->activemetrics, &lookup,
+            sizeof(corsaro_report_metric_id_t), metdata);
+    if (metdata == NULL) {
         metdata = (corsaro_report_metric_t *)malloc(
                 sizeof(corsaro_report_metric_t));
+        memset(&metdata->metid, 0, sizeof(corsaro_report_metric_id_t));
+        metdata->metid.class = metclass;
+        metdata->metid.metricval = metval;
         metdata->pkt_cnt = 0;
         metdata->ip_len = 0;
 
-        khiter = kh_put(metid, metrics->activemetrics, metricid, &khret);
-        kh_value(metrics->activemetrics, khiter) = metdata;
-
-    } else {
-        metricid = kh_key(metrics->activemetrics, khiter);
-        metdata = kh_value(metrics->activemetrics, khiter);
+        HASH_ADD_KEYPTR(hh, metrics->activemetrics, &(metdata->metid),
+                sizeof(corsaro_report_metric_id_t), metdata);
     }
 
-    metdata->pkt_cnt += 1;
+    metdata->pkt_cnt ++;
     metdata->ip_len += iplen;
 
-    /* Update source IP map */
-    if ((khiter = kh_get(metset, srcipmap, metricid)) == kh_end(srcipmap)) {
-        khiter = kh_put(metset, srcipmap, metricid, &khret);
+    HASH_FIND(hh, srcip->assocmetrics, &(metdata->metid),
+            sizeof(corsaro_report_metric_id_t), find);
+    if (!find) {
+        corsaro_report_ip_metric_t *ipmet;
+
+        ipmet = (corsaro_report_ip_metric_t *)malloc(
+                sizeof(corsaro_report_ip_metric_t));
+        memset(&ipmet->metid, 0, sizeof(corsaro_report_metric_id_t));
+        ipmet->metid.class = metclass;
+        ipmet->metid.metricval = metval;
+
+        HASH_ADD_KEYPTR(hh, srcip->assocmetrics, &(ipmet->metid),
+                    sizeof(corsaro_report_metric_id_t), ipmet);
     }
 
-    /* Update dest IP map */
+    HASH_FIND(hh, dstip->assocmetrics, &(metdata->metid),
+            sizeof(corsaro_report_metric_id_t), find);
+    if (!find) {
+        corsaro_report_ip_metric_t *ipmet;
 
-    if ((khiter = kh_get(metset, dstipmap, metricid)) == kh_end(dstipmap)) {
-        khiter = kh_put(metset, dstipmap, metricid, &khret);
+        ipmet = (corsaro_report_ip_metric_t *)malloc(
+                sizeof(corsaro_report_ip_metric_t));
+        memset(&ipmet->metid, 0, sizeof(corsaro_report_metric_id_t));
+        ipmet->metid.class = metclass;
+        ipmet->metid.metricval = metval;
+
+        HASH_ADD_KEYPTR(hh, dstip->assocmetrics, &(ipmet->metid),
+                    sizeof(corsaro_report_metric_id_t), ipmet);
     }
 
 }
 
 static void update_basic_tag_metrics(corsaro_logger_t *logger,
         corsaro_metric_set_t *metrics, corsaro_packet_tags_t *tags,
-        kh_metset_t *srcs, kh_metset_t *dsts, uint16_t iplen) {
+        corsaro_report_ip_t *src, corsaro_report_ip_t *dst, uint16_t iplen) {
 
     /* Sanity checks before incrementing */
 
@@ -451,9 +459,9 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
             return;
         }
         update_metric(metrics, CORSARO_METRIC_CLASS_ICMP_TYPE,
-                tags->src_port, srcs, dsts, iplen);
+                tags->src_port, src, dst, iplen);
         update_metric(metrics, CORSARO_METRIC_CLASS_ICMP_CODE,
-                tags->dest_port, srcs, dsts, iplen);
+                tags->dest_port, src, dst, iplen);
 
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         if (tags->src_port >= METRIC_PORT_MAX) {
@@ -468,9 +476,9 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
             return;
         }
         update_metric(metrics, CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
-                tags->src_port, srcs, dsts, iplen);
+                tags->src_port, src, dst, iplen);
         update_metric(metrics, CORSARO_METRIC_CLASS_TCP_DEST_PORT,
-                tags->dest_port, srcs, dsts, iplen);
+                tags->dest_port, src, dst, iplen);
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
 
         if (tags->src_port >= METRIC_PORT_MAX) {
@@ -486,15 +494,15 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
         }
 
         update_metric(metrics, CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
-                tags->src_port, srcs, dsts, iplen);
+                tags->src_port, src, dst, iplen);
         update_metric(metrics, CORSARO_METRIC_CLASS_UDP_DEST_PORT,
-                tags->dest_port, srcs, dsts, iplen);
+                tags->dest_port, src, dst, iplen);
     }
 
-    update_metric(metrics, CORSARO_METRIC_CLASS_COMBINED, 0, srcs, dsts,
+    update_metric(metrics, CORSARO_METRIC_CLASS_COMBINED, 0, src, dst,
             iplen);
     update_metric(metrics, CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
-            srcs, dsts, iplen);
+            src, dst, iplen);
 
 }
 
@@ -560,9 +568,7 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     corsaro_report_state_t *state;
     uint16_t iplen;
     uint32_t srcaddr, dstaddr;
-    kh_metset_t *srcipmap, *destipmap;
-    khiter_t khiter;
-    int khret;
+    corsaro_report_ip_t *srcip, *destip;
 
     state = (corsaro_report_state_t *)local;
 
@@ -582,38 +588,35 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     }
 
 
-    if ((khiter = kh_get(ip, state->metrics->source_ips, srcaddr)) ==
-            kh_end(state->metrics->source_ips)) {
-
-        srcipmap = kh_init(metset);
-        kh_resize(metset, srcipmap, 10000);
-        khiter = kh_put(ip, state->metrics->source_ips, srcaddr, &khret);
-        kh_value(state->metrics->source_ips, khiter) = srcipmap;
-    } else {
-        srcipmap = kh_value(state->metrics->source_ips, khiter);
+    HASH_FIND(hh, state->metrics->srcips, &srcaddr, sizeof(uint32_t), srcip);
+    if (srcip == NULL) {
+        srcip = (corsaro_report_ip_t *)malloc(sizeof(corsaro_report_ip_t));
+        srcip->ipaddr = srcaddr;
+        srcip->assocmetrics = NULL;
+        HASH_ADD_KEYPTR(hh, state->metrics->srcips, &(srcip->ipaddr),
+                sizeof(uint32_t), srcip);
     }
 
-    if ((khiter = kh_get(ip, state->metrics->dest_ips, dstaddr)) ==
-            kh_end(state->metrics->dest_ips)) {
-
-        destipmap = kh_init(metset);
-        kh_resize(metset, destipmap, 10000);
-        khiter = kh_put(ip, state->metrics->dest_ips, dstaddr, &khret);
-        kh_value(state->metrics->dest_ips, khiter) = destipmap;
-    } else {
-        destipmap = kh_value(state->metrics->dest_ips, khiter);
+    HASH_FIND(hh, state->metrics->destips, &dstaddr, sizeof(uint32_t), destip);
+    if (destip == NULL) {
+        destip = (corsaro_report_ip_t *)malloc(sizeof(corsaro_report_ip_t));
+        destip->ipaddr = dstaddr;
+        destip->assocmetrics = NULL;
+        HASH_ADD_KEYPTR(hh, state->metrics->destips, &(destip->ipaddr),
+                sizeof(uint32_t), destip);
     }
 
     if (basic_tagged(tags)) {
-        update_basic_tag_metrics(p->logger, state->metrics, tags, srcipmap,
-                destipmap, iplen);
+        update_basic_tag_metrics(p->logger, state->metrics, tags, srcip,
+                destip, iplen);
     }
 
+/*
     if (maxmind_tagged(tags)) {
         update_maxmind_tag_metrics(p->logger, state->metrics, tags, srcaddr,
                 dstaddr, iplen);
     }
-
+*/
     return 0;
 }
 
@@ -677,9 +680,9 @@ static inline int report_do_avro_write(corsaro_logger_t *logger,
 }
 
 static int write_single_metric(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, corsaro_report_metric_id_t *metricid,
-        corsaro_report_result_t *res) {
+        corsaro_avro_writer_t *writer, corsaro_report_result_t *res) {
 
+    corsaro_report_metric_id_t *metricid = &(res->metid);
     char valspace[2048];
 
     switch(metricid->class) {
@@ -743,219 +746,144 @@ static int write_single_metric(corsaro_logger_t *logger,
 
 }
 
-static void tally_ip_counters(kh_res_t *rmap, kh_ip_t *source_ips,
-        kh_ip_t *dest_ips) {
+static void tally_ip_counters(corsaro_report_result_t *rmap,
+        corsaro_report_ip_t *source_ips, corsaro_report_ip_t *dest_ips) {
 
-    kh_metset_t *mset;
-    khiter_t i, j, find;
-    int khret;
     corsaro_report_result_t *r;
-    corsaro_report_metric_id_t *metricid;
+    corsaro_report_ip_t *ip, *tmp;
+    corsaro_report_ip_metric_t *ipmet, *tmpmet;
 
-    for (i = kh_begin(source_ips); i != kh_end(source_ips); ++i) {
-        if (!kh_exist(source_ips, i)) {
-            continue;
-        }
-        mset = kh_value(source_ips, i);
-        for (j = kh_begin(mset); j != kh_end(mset); ++j) {
-
-            if (!kh_exist(mset, j)) {
-                continue;
-            }
-            metricid = kh_key(mset, j);
-            find = kh_get(res, rmap, metricid);
-            assert(find != kh_end(rmap));
-
-            r = kh_value(rmap, find);
+    HASH_ITER(hh, source_ips, ip, tmp) {
+        HASH_ITER(hh, ip->assocmetrics, ipmet, tmpmet) {
+            HASH_FIND(hh, rmap, &(ipmet->metid),
+                    sizeof(corsaro_report_metric_id_t), r);
+            assert(r);
             r->uniq_src_ips ++;
         }
     }
 
-    for (i = kh_begin(dest_ips); i != kh_end(dest_ips); ++i) {
-        if (!kh_exist(dest_ips, i)) {
-            continue;
-        }
-        mset = kh_value(dest_ips, i);
-        for (j = kh_begin(mset); j != kh_end(mset); ++j) {
-
-            if (!kh_exist(mset, j)) {
-                continue;
-            }
-            metricid = kh_key(mset, j);
-            find = kh_get(res, rmap, metricid);
-            assert(find != kh_end(rmap));
-
-            r = kh_value(rmap, find);
+    HASH_ITER(hh, dest_ips, ip, tmp) {
+        HASH_ITER(hh, ip->assocmetrics, ipmet, tmpmet) {
+            HASH_FIND(hh, rmap, &(ipmet->metid),
+                    sizeof(corsaro_report_metric_id_t), r);
+            assert(r);
             r->uniq_dst_ips ++;
         }
     }
 
-}
 
-static inline void free_result(corsaro_report_result_t *r) {
-    free(r);
 }
 
 static int write_all_metrics(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, corsaro_metric_set_t *metrics,
         uint32_t ts, corsaro_report_config_t *conf) {
 
-    kh_res_t *resultmap = kh_init(res);
-    corsaro_report_result_t *r;
-    corsaro_report_metric_id_t *metricid;
-    corsaro_report_metric_t *counters;
+    corsaro_report_result_t *resultmap, *r, *tmpres;
+    corsaro_report_metric_id_t metricid;
+    corsaro_report_metric_t *met, *tmpmet;
 
-    khiter_t i, ins;
-    int khret;
+    resultmap = NULL;
 
-    for (i = kh_begin(metrics->activemetrics);
-            i != kh_end(metrics->activemetrics); ++i) {
-
-        if (!kh_exist(metrics->activemetrics, i)) {
-            continue;
-        }
-
-        metricid = kh_key(metrics->activemetrics, i);
-        counters = kh_value(metrics->activemetrics, i);
-
-        ins = kh_put(res, resultmap, metricid, &khret);
+    HASH_ITER(hh, metrics->activemetrics, met, tmpmet) {
         r = (corsaro_report_result_t *)malloc(sizeof(corsaro_report_result_t));
-        r->pkt_cnt = counters->pkt_cnt;
-        r->ip_len = counters->ip_len;
+        memset(&(r->metid), 0, sizeof(corsaro_report_metric_id_t));
+
+        r->metid.class = met->metid.class;
+        r->metid.metricval = met->metid.metricval;
+
+        r->pkt_cnt = met->pkt_cnt;
+        r->ip_len = met->ip_len;
         r->attimestamp = ts;
         r->uniq_src_ips = 0;
         r->uniq_dst_ips = 0;
         r->label = conf->outlabel;
         r->metrictype = NULL;
         r->metricval = NULL;
-        kh_value(resultmap, ins) = r;
-    }
 
-
-    for (i = kh_begin(resultmap); i != kh_end(resultmap); ++i) {
-        if (!kh_exist(resultmap, i)) {
-            continue;
-        }
-
-        metricid = kh_key(resultmap, i);
-        r = kh_value(resultmap, i);
+        HASH_ADD_KEYPTR(hh, resultmap, &(r->metid),
+                sizeof(corsaro_report_metric_id_t), r);
     }
 
     /* Tally up all the IPs seen for each metric */
-    tally_ip_counters(resultmap, metrics->source_ips, metrics->dest_ips);
+    tally_ip_counters(resultmap, metrics->srcips, metrics->destips);
 
-    for (i = kh_begin(resultmap); i != kh_end(resultmap); ++i) {
-        if (!kh_exist(resultmap, i)) {
-            continue;
-        }
-
-        r = kh_value(resultmap, i);
-        metricid = kh_key(resultmap, i);
-
-        write_single_metric(logger, writer, metricid, r);
+    HASH_ITER(hh, resultmap, r, tmpres) {
+        write_single_metric(logger, writer, r);
+        HASH_DELETE(hh, resultmap, r);
+        free(r);
     }
-
-    kh_free_vals(res, resultmap, free_result);
-    kh_destroy(res, resultmap);
 
     return 0;
 
 }
 
-static void combine_metsets(kh_metset_t *dest, kh_metset_t *src,
-        kh_metid_t *metrefs) {
+static void combine_ip_metsets(corsaro_report_ip_metric_t **combset,
+        corsaro_report_ip_metric_t **newset) {
 
-    khiter_t i, find;
-    int khret;
-    corsaro_report_metric_id_t *toadd, *canon;
+    corsaro_report_ip_metric_t *toadd, *existing, *tmp;
 
-    for (i = kh_begin(src); i != kh_end(src); ++i) {
-        if (!kh_exist(src, i)) {
-            continue;
-        }
-        toadd = kh_key(src, i);
+    HASH_ITER(hh, *newset, toadd, tmp) {
 
-        /* This metric ID is probably about to be deleted, so we need to make
-         * sure we put the "canonical" reference in our metset instead.
-         */
-        find = kh_get(metid, metrefs, toadd);
-        assert(find != kh_end(metrefs));
-        canon = kh_key(metrefs, find);
-        find = kh_get(metset, dest, canon);
+        HASH_FIND(hh, *combset, &(toadd->metid),
+                sizeof(corsaro_report_metric_id_t), existing);
 
-        if (find == kh_end(dest)) {
-            /* metric not in destination set, add it */
-            find = kh_put(metset, dest, canon, &khret);
-            kh_del(metset, src, i);
+        if (!existing) {
+            HASH_DELETE(hh, *newset, toadd);
+            HASH_ADD_KEYPTR(hh, *combset, &(toadd->metid),
+                    sizeof(corsaro_report_metric_id_t), toadd);
         }
     }
+
 }
 
-static void combine_ip_maps(kh_ip_t *dest, kh_ip_t *src, kh_metid_t *metrefs) {
+static void combine_ip_maps(corsaro_report_ip_t **combips,
+        corsaro_report_ip_t **newips) {
 
-    khiter_t i, find;
-    uint32_t ipaddr;
-    int khret;
-    kh_metset_t *srcmets, *dstmets;
+    corsaro_report_ip_t *thisip, *existing, *tmp;
 
-    for (i = kh_begin(src); i != kh_end(src); ++i) {
-        if (!kh_exist(src, i)) {
-            continue;
-        }
+    HASH_ITER(hh, *newips, thisip, tmp) {
+        HASH_FIND(hh, *combips, &(thisip->ipaddr), sizeof(uint32_t), existing);
 
-        ipaddr = kh_key(src, i);
-        srcmets = kh_value(src, i);
-        find = kh_get(ip, dest, ipaddr);
-
-        if (find == kh_end(dest)) {
-            /* This IP is not in the dest map */
-            find = kh_put(ip, dest, ipaddr, &khret);
-            dstmets = kh_init(metset);
-            kh_resize(metset, dstmets, 10000);
-            kh_value(dest, find) = dstmets;
+        if (!existing) {
+            existing = thisip;
+            HASH_DELETE(hh, *newips, thisip);
+            HASH_ADD_KEYPTR(hh, *combips, &(thisip->ipaddr), sizeof(uint32_t),
+                    thisip);
         } else {
-            dstmets = kh_value(dest, find);
+            combine_ip_metsets(&(existing->assocmetrics),
+                    &(thisip->assocmetrics));
         }
-        combine_metsets(dstmets, srcmets, metrefs);
     }
 }
 
-static void combine_metrics(kh_metid_t *dest, kh_metid_t *src) {
+static void combine_metrics(corsaro_report_metric_t **dest,
+        corsaro_report_metric_t **src) {
 
-    khiter_t i, find;
-    int khret;
-    corsaro_report_metric_id_t *toadd;
-    corsaro_report_metric_t *existing, *srcmet;
+    corsaro_report_metric_t *existing, *srcmet, *tmp;
 
-    for (i = kh_begin(src); i != kh_end(src); ++i) {
-        if (!kh_exist(src, i)) {
-            continue;
-        }
-        toadd = kh_key(src, i);
-        srcmet = kh_value(src, i);
-        find = kh_get(metid, dest, toadd);
+    HASH_ITER(hh, *src, srcmet, tmp) {
 
-        if (find == kh_end(dest)) {
-            find = kh_put(metid, dest, toadd, &khret);
-            kh_value(dest, find) = srcmet;
-            kh_del(metid, src, i);
-            continue;
+        HASH_FIND(hh, *dest, &(srcmet->metid),
+                sizeof(corsaro_report_metric_id_t), existing);
+
+        if (existing) {
+            existing->pkt_cnt += srcmet->pkt_cnt;
+            existing->ip_len += srcmet->ip_len;
+        } else {
+            HASH_DELETE(hh, *src, srcmet);
+            HASH_ADD_KEYPTR(hh, *dest, &(srcmet->metid),
+                    sizeof(corsaro_report_metric_id_t), srcmet);
         }
 
-        existing = kh_value(dest, find);
-        existing->pkt_cnt += srcmet->pkt_cnt;
-        existing->ip_len += srcmet->ip_len;
     }
 }
 
 static int update_combined_result(corsaro_metric_set_t *combined,
         corsaro_metric_set_t *next, corsaro_logger_t *logger) {
 
-    combine_metrics(combined->activemetrics, next->activemetrics);
-    combine_ip_maps(combined->source_ips, next->source_ips,
-            combined->activemetrics);
-    combine_ip_maps(combined->dest_ips, next->dest_ips,
-            combined->activemetrics); 
+    combine_metrics(&combined->activemetrics, &next->activemetrics);
+    combine_ip_maps(&combined->srcips, &next->srcips);
+    combine_ip_maps(&combined->destips, &next->destips);
 
     destroy_metric_set(next);
     free(next);
