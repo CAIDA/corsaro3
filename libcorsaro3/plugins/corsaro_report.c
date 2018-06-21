@@ -37,6 +37,7 @@
 #include <libipmeta.h>
 
 #include <uthash.h>
+#include "libcorsaro3_memhandler.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_avro.h"
 #include "corsaro_report.h"
@@ -88,6 +89,7 @@ typedef struct report_metric_identifier {
 
 typedef struct metric_per_ip {
     corsaro_report_metric_id_t metid;
+    corsaro_memsource_t *source;
     UT_hash_handle hh;
 } corsaro_report_ip_metric_t;
 
@@ -125,7 +127,7 @@ typedef struct metric_set {
     corsaro_report_metric_t *activemetrics;
     corsaro_report_ip_t *srcips;
     corsaro_report_ip_t *destips;
-
+    corsaro_memhandler_t ipreport_handler;
 } corsaro_metric_set_t;
 
 
@@ -277,6 +279,8 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
             sizeof(corsaro_metric_set_t));
 
     init_metric_set(state->metrics);
+    init_corsaro_memhandler(p->logger, &(state->metrics->ipreport_handler),
+            sizeof(corsaro_report_ip_metric_t), 1000);
     return state;
 }
 
@@ -289,7 +293,8 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
     HASH_ITER(hh, mset->srcips, ip, tmp) {
         HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
             HASH_DELETE(hh, (ip->assocmetrics), ipmet);
-            free(ipmet);
+            release_corsaro_memhandler_item(&(mset->ipreport_handler),
+                    ipmet->source);
         }
         HASH_DELETE(hh, mset->srcips, ip);
         free(ip);
@@ -298,7 +303,8 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
     HASH_ITER(hh, mset->destips, ip, tmp) {
         HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
             HASH_DELETE(hh, ip->assocmetrics, ipmet);
-            free(ipmet);
+            release_corsaro_memhandler_item(&(mset->ipreport_handler),
+                    ipmet->source);
         }
         HASH_DELETE(hh, mset->destips, ip);
         free(ip);
@@ -320,6 +326,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         return 0;
     }
     destroy_metric_set(state->metrics);
+    destroy_corsaro_memhandler(&(state->metrics->ipreport_handler));
     free(state->metrics);
     free(state);
 
@@ -371,13 +378,14 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
             sizeof(corsaro_metric_set_t));
 
     init_metric_set(state->metrics);
+    state->metrics->ipreport_handler = mset->ipreport_handler;
     return mset;
 }
 
 static inline void update_metric(corsaro_metric_set_t *metrics,
         corsaro_report_metric_class_t metclass, uint32_t metval,
         corsaro_report_ip_t *srcip, corsaro_report_ip_t *dstip,
-        uint16_t iplen) {
+        uint16_t iplen, corsaro_report_state_t *state) {
 
     corsaro_report_metric_id_t lookup;
     corsaro_report_metric_t *metdata;
@@ -409,12 +417,17 @@ static inline void update_metric(corsaro_metric_set_t *metrics,
             sizeof(corsaro_report_metric_id_t), find);
     if (!find) {
         corsaro_report_ip_metric_t *ipmet;
+        corsaro_memsource_t *memsrc;
 
-        ipmet = (corsaro_report_ip_metric_t *)malloc(
-                sizeof(corsaro_report_ip_metric_t));
+        ipmet = (corsaro_report_ip_metric_t *)
+                get_corsaro_memhandler_item(
+                        &(state->metrics->ipreport_handler),
+                        &memsrc);
+
         memset(&ipmet->metid, 0, sizeof(corsaro_report_metric_id_t));
         ipmet->metid.class = metclass;
         ipmet->metid.metricval = metval;
+        ipmet->source = memsrc;
 
         HASH_ADD_KEYPTR(hh, srcip->assocmetrics, &(ipmet->metid),
                     sizeof(corsaro_report_metric_id_t), ipmet);
@@ -424,12 +437,16 @@ static inline void update_metric(corsaro_metric_set_t *metrics,
             sizeof(corsaro_report_metric_id_t), find);
     if (!find) {
         corsaro_report_ip_metric_t *ipmet;
+        corsaro_memsource_t *memsrc;
 
-        ipmet = (corsaro_report_ip_metric_t *)malloc(
-                sizeof(corsaro_report_ip_metric_t));
+        ipmet = (corsaro_report_ip_metric_t *)
+                get_corsaro_memhandler_item(
+                        &(state->metrics->ipreport_handler),
+                        &memsrc);
         memset(&ipmet->metid, 0, sizeof(corsaro_report_metric_id_t));
         ipmet->metid.class = metclass;
         ipmet->metid.metricval = metval;
+        ipmet->source = memsrc;
 
         HASH_ADD_KEYPTR(hh, dstip->assocmetrics, &(ipmet->metid),
                     sizeof(corsaro_report_metric_id_t), ipmet);
@@ -439,7 +456,8 @@ static inline void update_metric(corsaro_metric_set_t *metrics,
 
 static void update_basic_tag_metrics(corsaro_logger_t *logger,
         corsaro_metric_set_t *metrics, corsaro_packet_tags_t *tags,
-        corsaro_report_ip_t *src, corsaro_report_ip_t *dst, uint16_t iplen) {
+        corsaro_report_ip_t *src, corsaro_report_ip_t *dst, uint16_t iplen,
+        corsaro_report_state_t *state) {
 
     /* Sanity checks before incrementing */
 
@@ -459,9 +477,9 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
             return;
         }
         update_metric(metrics, CORSARO_METRIC_CLASS_ICMP_TYPE,
-                tags->src_port, src, dst, iplen);
+                tags->src_port, src, dst, iplen, state);
         update_metric(metrics, CORSARO_METRIC_CLASS_ICMP_CODE,
-                tags->dest_port, src, dst, iplen);
+                tags->dest_port, src, dst, iplen, state);
 
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         if (tags->src_port >= METRIC_PORT_MAX) {
@@ -476,9 +494,9 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
             return;
         }
         update_metric(metrics, CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
-                tags->src_port, src, dst, iplen);
+                tags->src_port, src, dst, iplen, state);
         update_metric(metrics, CORSARO_METRIC_CLASS_TCP_DEST_PORT,
-                tags->dest_port, src, dst, iplen);
+                tags->dest_port, src, dst, iplen, state);
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
 
         if (tags->src_port >= METRIC_PORT_MAX) {
@@ -494,27 +512,28 @@ static void update_basic_tag_metrics(corsaro_logger_t *logger,
         }
 
         update_metric(metrics, CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
-                tags->src_port, src, dst, iplen);
+                tags->src_port, src, dst, iplen, state);
         update_metric(metrics, CORSARO_METRIC_CLASS_UDP_DEST_PORT,
-                tags->dest_port, src, dst, iplen);
+                tags->dest_port, src, dst, iplen, state);
     }
 
     update_metric(metrics, CORSARO_METRIC_CLASS_COMBINED, 0, src, dst,
-            iplen);
+            iplen, state);
     update_metric(metrics, CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
-            src, dst, iplen);
+            src, dst, iplen, state);
 
 }
 
 static void update_maxmind_tag_metrics(corsaro_logger_t *logger,
         corsaro_metric_set_t *metrics, corsaro_packet_tags_t *tags,
-        uint32_t srcaddr, uint32_t dstaddr, uint16_t iplen) {
+        uint32_t srcaddr, uint32_t dstaddr, uint16_t iplen,
+        corsaro_report_state_t *state) {
 
 /*
     update_metric(metrics->maxmind_continents, tags->maxmind_continent,
-            srcaddr, dstaddr, iplen);
+            srcaddr, dstaddr, iplen, state);
     update_metric(metrics->maxmind_countries, tags->maxmind_country,
-            srcaddr, dstaddr, iplen);
+            srcaddr, dstaddr, iplen, state);
 */
 
 }
@@ -608,13 +627,13 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
 
     if (basic_tagged(tags)) {
         update_basic_tag_metrics(p->logger, state->metrics, tags, srcip,
-                destip, iplen);
+                destip, iplen, state);
     }
 
 /*
     if (maxmind_tagged(tags)) {
         update_maxmind_tag_metrics(p->logger, state->metrics, tags, srcaddr,
-                dstaddr, iplen);
+                dstaddr, iplen, state);
     }
 */
     return 0;
@@ -831,6 +850,7 @@ static void combine_ip_metsets(corsaro_report_ip_metric_t **combset,
             HASH_DELETE(hh, *newset, toadd);
             HASH_ADD_KEYPTR(hh, *combset, &(toadd->metid),
                     sizeof(corsaro_report_metric_id_t), toadd);
+            assert(toadd->source);
         }
     }
 
