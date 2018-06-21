@@ -31,6 +31,7 @@
 
 #include <inttypes.h>
 #include <stdint.h>
+#include <pthread.h>
 
 #include "libcorsaro3_log.h"
 
@@ -53,6 +54,8 @@ typedef struct corsaro_memhandler {
     corsaro_logger_t *logger;
     uint32_t items_per_blob;
     size_t itemsize;
+    int users;
+    pthread_mutex_t mutex;
 
     corsaro_memsource_t *current;
     corsaro_memsource_t *freelist;
@@ -63,6 +66,7 @@ void init_corsaro_memhandler(corsaro_logger_t *logger,
         corsaro_memhandler_t *handler, size_t itemsize,
         uint32_t itemsperalloc);
 void destroy_corsaro_memhandler(corsaro_memhandler_t *handler);
+void add_corsaro_memhandler_user(corsaro_memhandler_t *handler);
 
 uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
         corsaro_memsource_t **itemsource);

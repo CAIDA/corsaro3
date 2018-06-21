@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <pthread.h>
 
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_memhandler.h"
@@ -59,6 +60,9 @@ void init_corsaro_memhandler(corsaro_logger_t *logger,
     handler->logger = logger;
     handler->items_per_blob = itemsperalloc;
     handler->itemsize = itemsize;
+    handler->users = 1;
+
+    pthread_mutex_init(&handler->mutex, NULL);
 
     handler->current = create_fresh_blob(handler->items_per_blob,
             handler->itemsize);
@@ -68,6 +72,11 @@ void init_corsaro_memhandler(corsaro_logger_t *logger,
 void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
 
     corsaro_memsource_t *blob, *tmp;
+
+    handler->users --;
+    if (handler->users > 0) {
+        return;
+    }
 
     blob = handler->freelist;
     while (blob) {
@@ -87,6 +96,12 @@ void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
         free(handler->current);
     }
 
+    pthread_mutex_destroy(&handler->mutex);
+
+}
+
+void add_corsaro_memhandler_user(corsaro_memhandler_t *handler) {
+    handler->users ++;
 }
 
 uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
@@ -100,16 +115,22 @@ uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
      */
 
     if (handler->current->nextavail >= handler->current->alloceditems) {
-        if (handler->freelist == NULL) {
+        if (pthread_mutex_trylock(&handler->mutex) == 0) {
+            if (handler->freelist == NULL) {
+                handler->current = create_fresh_blob(handler->items_per_blob,
+                        handler->itemsize);
+            } else {
+                handler->current = handler->freelist;
+                handler->freelist = handler->freelist->nextfree;
+                handler->current->nextavail = 0;
+                handler->current->released = 0;
+                handler->current->nextfree = NULL;
+            }
+        } else {
             handler->current = create_fresh_blob(handler->items_per_blob,
                     handler->itemsize);
-        } else {
-            handler->current = handler->freelist;
-            handler->freelist = handler->freelist->nextfree;
-            handler->current->nextavail = 0;
-            handler->current->released = 0;
-            handler->current->nextfree = NULL;
         }
+
     }
 
     mem = handler->current->blob + (handler->current->nextavail *
@@ -127,8 +148,13 @@ void release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
     itemsource->released ++;
 
     if (itemsource->released >= handler->current->alloceditems) {
-        itemsource->nextfree = handler->freelist;
-        handler->freelist = itemsource;
+        if (pthread_mutex_trylock(&handler->mutex) == 0) {
+            itemsource->nextfree = handler->freelist;
+            handler->freelist = itemsource;
+        } else {
+            free(itemsource->blob);
+            free(itemsource);
+        }
     }
 }
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
