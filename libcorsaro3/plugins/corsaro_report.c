@@ -127,7 +127,7 @@ typedef struct metric_set {
     corsaro_report_metric_t *activemetrics;
     corsaro_report_ip_t *srcips;
     corsaro_report_ip_t *destips;
-    corsaro_memhandler_t ipreport_handler;
+    corsaro_memhandler_t *ipreport_handler;
 } corsaro_metric_set_t;
 
 
@@ -263,11 +263,16 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
     p->config = NULL;
 }
 
-static inline void init_metric_set(corsaro_metric_set_t *mset) {
+static inline void init_metric_set(corsaro_metric_set_t *mset,
+            corsaro_logger_t *logger) {
 
     mset->srcips = NULL;
     mset->destips = NULL;
     mset->activemetrics = NULL;
+    mset->ipreport_handler = (corsaro_memhandler_t *)malloc(
+            sizeof(corsaro_memhandler_t));
+    init_corsaro_memhandler(logger, mset->ipreport_handler,
+            sizeof(corsaro_report_ip_metric_t), 1000);
 }
 
 void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
@@ -278,9 +283,7 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     state->metrics = (corsaro_metric_set_t *)malloc(
             sizeof(corsaro_metric_set_t));
 
-    init_metric_set(state->metrics);
-    init_corsaro_memhandler(p->logger, &(state->metrics->ipreport_handler),
-            sizeof(corsaro_report_ip_metric_t), 1000);
+    init_metric_set(state->metrics, p->logger);
     return state;
 }
 
@@ -293,7 +296,7 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
     HASH_ITER(hh, mset->srcips, ip, tmp) {
         HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
             HASH_DELETE(hh, (ip->assocmetrics), ipmet);
-            release_corsaro_memhandler_item(&(mset->ipreport_handler),
+            release_corsaro_memhandler_item(mset->ipreport_handler,
                     ipmet->source);
         }
         HASH_DELETE(hh, mset->srcips, ip);
@@ -303,7 +306,7 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
     HASH_ITER(hh, mset->destips, ip, tmp) {
         HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
             HASH_DELETE(hh, ip->assocmetrics, ipmet);
-            release_corsaro_memhandler_item(&(mset->ipreport_handler),
+            release_corsaro_memhandler_item(mset->ipreport_handler,
                     ipmet->source);
         }
         HASH_DELETE(hh, mset->destips, ip);
@@ -314,6 +317,8 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
         HASH_DELETE(hh, mset->activemetrics, met);
         free(met);
     }
+
+    destroy_corsaro_memhandler(mset->ipreport_handler);
 
 }
 
@@ -326,7 +331,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         return 0;
     }
     destroy_metric_set(state->metrics);
-    destroy_corsaro_memhandler(&(state->metrics->ipreport_handler));
+    destroy_corsaro_memhandler(state->metrics->ipreport_handler);
     free(state->metrics);
     free(state);
 
@@ -377,8 +382,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     state->metrics = (corsaro_metric_set_t *)malloc(
             sizeof(corsaro_metric_set_t));
 
-    init_metric_set(state->metrics);
-    state->metrics->ipreport_handler = mset->ipreport_handler;
+    init_metric_set(state->metrics, p->logger);
     return mset;
 }
 
@@ -421,7 +425,7 @@ static inline void update_metric(corsaro_metric_set_t *metrics,
 
         ipmet = (corsaro_report_ip_metric_t *)
                 get_corsaro_memhandler_item(
-                        &(state->metrics->ipreport_handler),
+                        state->metrics->ipreport_handler,
                         &memsrc);
 
         memset(&ipmet->metid, 0, sizeof(corsaro_report_metric_id_t));
@@ -441,7 +445,7 @@ static inline void update_metric(corsaro_metric_set_t *metrics,
 
         ipmet = (corsaro_report_ip_metric_t *)
                 get_corsaro_memhandler_item(
-                        &(state->metrics->ipreport_handler),
+                        state->metrics->ipreport_handler,
                         &memsrc);
         memset(&ipmet->metid, 0, sizeof(corsaro_report_metric_id_t));
         ipmet->metid.class = metclass;

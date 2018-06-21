@@ -69,9 +69,6 @@ void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
 
     corsaro_memsource_t *blob, *tmp;
 
-    /* Hopefully no one will be silly enough to call this while
-     * they have unreleased items... */
-
     blob = handler->freelist;
     while (blob) {
         tmp = blob;
@@ -80,13 +77,16 @@ void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
         free(tmp);
     }
 
-    if (handler->current->released < handler->current->nextavail) {
-        corsaro_log(handler->logger,
-                "calling destroy_corsaro_memhandler() but not all memory items have been released -- this is going to end in a memory leak (at best)");
+    /* Only free current if all references have been released back
+     * to us, otherwise there are still items out there that are
+     * in use. Hopefully, whoever has those items still has a
+     * memory handler around to use to release them...
+     */
+    if (handler->current->released >= handler->current->nextavail) {
+        free(handler->current->blob);
+        free(handler->current);
     }
 
-    free(handler->current->blob);
-    free(handler->current);
 }
 
 uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
