@@ -120,6 +120,7 @@ typedef struct report_result {
 typedef struct known_ip {
     uint32_t ipaddr;
     corsaro_report_ip_metric_t *assocmetrics;
+    corsaro_memsource_t *source;
     UT_hash_handle hh;
 } corsaro_report_ip_t;
 
@@ -128,6 +129,7 @@ typedef struct metric_set {
     corsaro_report_ip_t *srcips;
     corsaro_report_ip_t *destips;
     corsaro_memhandler_t *ipreport_handler;
+    corsaro_memhandler_t *ip_handler;
 } corsaro_metric_set_t;
 
 
@@ -269,10 +271,6 @@ static inline void init_metric_set(corsaro_metric_set_t *mset,
     mset->srcips = NULL;
     mset->destips = NULL;
     mset->activemetrics = NULL;
-    mset->ipreport_handler = (corsaro_memhandler_t *)malloc(
-            sizeof(corsaro_memhandler_t));
-    init_corsaro_memhandler(logger, mset->ipreport_handler,
-            sizeof(corsaro_report_ip_metric_t), 1000);
 }
 
 void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
@@ -284,6 +282,14 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
             sizeof(corsaro_metric_set_t));
 
     init_metric_set(state->metrics, p->logger);
+    state->metrics->ipreport_handler = (corsaro_memhandler_t *)malloc(
+            sizeof(corsaro_memhandler_t));
+    state->metrics->ip_handler = (corsaro_memhandler_t *)malloc(
+            sizeof(corsaro_memhandler_t));
+    init_corsaro_memhandler(p->logger, state->metrics->ipreport_handler,
+            sizeof(corsaro_report_ip_metric_t), 1000);
+    init_corsaro_memhandler(p->logger, state->metrics->ip_handler,
+            sizeof(corsaro_report_ip_t), 5000);
     return state;
 }
 
@@ -300,7 +306,7 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
                     ipmet->source);
         }
         HASH_DELETE(hh, mset->srcips, ip);
-        free(ip);
+        release_corsaro_memhandler_item(mset->ip_handler, ip->source);
     }
 
     HASH_ITER(hh, mset->destips, ip, tmp) {
@@ -310,7 +316,7 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
                     ipmet->source);
         }
         HASH_DELETE(hh, mset->destips, ip);
-        free(ip);
+        release_corsaro_memhandler_item(mset->ip_handler, ip->source);
     }
 
     HASH_ITER(hh, mset->activemetrics, met, tmp2) {
@@ -319,6 +325,7 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
     }
 
     destroy_corsaro_memhandler(mset->ipreport_handler);
+    destroy_corsaro_memhandler(mset->ip_handler);
 
 }
 
@@ -332,6 +339,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
     }
     destroy_metric_set(state->metrics);
     destroy_corsaro_memhandler(state->metrics->ipreport_handler);
+    destroy_corsaro_memhandler(state->metrics->ip_handler);
     free(state->metrics);
     free(state);
 
@@ -383,6 +391,10 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
             sizeof(corsaro_metric_set_t));
 
     init_metric_set(state->metrics, p->logger);
+    state->metrics->ipreport_handler = mset->ipreport_handler;
+    state->metrics->ip_handler = mset->ip_handler;
+    add_corsaro_memhandler_user(mset->ipreport_handler);
+    add_corsaro_memhandler_user(mset->ip_handler);
     return mset;
 }
 
@@ -613,18 +625,27 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
 
     HASH_FIND(hh, state->metrics->srcips, &srcaddr, sizeof(uint32_t), srcip);
     if (srcip == NULL) {
-        srcip = (corsaro_report_ip_t *)malloc(sizeof(corsaro_report_ip_t));
+        corsaro_memsource_t *memsrc;
+
+        srcip = (corsaro_report_ip_t *)
+                get_corsaro_memhandler_item(state->metrics->ip_handler,
+                        &memsrc);
         srcip->ipaddr = srcaddr;
         srcip->assocmetrics = NULL;
+        srcip->source = memsrc;
         HASH_ADD_KEYPTR(hh, state->metrics->srcips, &(srcip->ipaddr),
                 sizeof(uint32_t), srcip);
     }
 
     HASH_FIND(hh, state->metrics->destips, &dstaddr, sizeof(uint32_t), destip);
     if (destip == NULL) {
-        destip = (corsaro_report_ip_t *)malloc(sizeof(corsaro_report_ip_t));
+        corsaro_memsource_t *memsrc;
+        destip = (corsaro_report_ip_t *)
+                get_corsaro_memhandler_item(state->metrics->ip_handler,
+                        &memsrc);
         destip->ipaddr = dstaddr;
         destip->assocmetrics = NULL;
+        destip->source = memsrc;
         HASH_ADD_KEYPTR(hh, state->metrics->destips, &(destip->ipaddr),
                 sizeof(uint32_t), destip);
     }
