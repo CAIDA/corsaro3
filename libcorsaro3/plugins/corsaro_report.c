@@ -35,6 +35,9 @@
 #include <errno.h>
 #include <yaml.h>
 #include <libipmeta.h>
+#include <libtrace/message_queue.h>
+#include <sys/epoll.h>
+#include <errno.h>
 
 #include <uthash.h>
 #include "libcorsaro3_memhandler.h"
@@ -82,6 +85,12 @@ typedef enum {
     CORSARO_METRIC_CLASS_COMBINED,
 } corsaro_report_metric_class_t;
 
+enum {
+    CORSARO_REPORT_MERGE_JOB_SOURCE,
+    CORSARO_REPORT_MERGE_JOB_DEST,
+    CORSARO_REPORT_MERGE_JOB_HALT,
+};
+
 typedef struct report_metric_identifier {
     corsaro_report_metric_class_t class;
     uint32_t metricval;
@@ -113,6 +122,9 @@ typedef struct report_result {
     char *metrictype;
     char *metricval;
 
+
+    corsaro_memhandler_t *handler;
+    corsaro_memsource_t *memsource;
     UT_hash_handle hh;
 
 } corsaro_report_result_t;
@@ -124,12 +136,20 @@ typedef struct known_ip {
     UT_hash_handle hh;
 } corsaro_report_ip_t;
 
+typedef struct ipblock {
+    uint32_t blockid;
+    corsaro_report_ip_t *memberips;
+    corsaro_memsource_t *source;
+    UT_hash_handle hh;
+} corsaro_report_ipblock_t;
+
 typedef struct metric_set {
     corsaro_report_metric_t *activemetrics;
-    corsaro_report_ip_t *srcips;
-    corsaro_report_ip_t *destips;
+    corsaro_report_ipblock_t *srcips;
+    corsaro_report_ipblock_t *destips;
     corsaro_memhandler_t *ipreport_handler;
     corsaro_memhandler_t *ip_handler;
+    corsaro_memhandler_t *ipblock_handler;
 } corsaro_metric_set_t;
 
 
@@ -137,9 +157,38 @@ typedef struct report_state {
     corsaro_metric_set_t *metrics;
 } corsaro_report_state_t;
 
+typedef struct corsaro_report_merge_job {
+
+    uint8_t jobtype;
+    corsaro_report_ipblock_t **ipblocks;
+    corsaro_metric_set_t **parents;
+    int blockcount;
+
+} corsaro_report_merge_job_t;
+
+typedef struct corsaro_report_merge_result {
+    uint8_t resulttype;
+    corsaro_report_result_t *res;
+} corsaro_report_merge_result_t;
+
+typedef struct corsaro_report_worker {
+
+    pthread_t threadid;
+    libtrace_message_queue_t jobqueue;
+    libtrace_message_queue_t resultqueue;
+    corsaro_memhandler_t *res_handler;
+
+} corsaro_report_worker_t;
 
 typedef struct report_merge_state {
     corsaro_avro_writer_t *writer;
+
+    int jobsoutstanding;
+    int workerthreadcount;
+    int epoll_fd;
+
+    corsaro_report_worker_t *workthreads;
+
 } corsaro_report_merge_state_t;
 
 static const char REPORT_RESULT_SCHEMA[] =
@@ -265,12 +314,31 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
     p->config = NULL;
 }
 
-static inline void init_metric_set(corsaro_metric_set_t *mset,
-            corsaro_logger_t *logger) {
+static inline corsaro_metric_set_t *init_metric_set(corsaro_logger_t *logger,
+        uint8_t newhandlers) {
+
+    corsaro_metric_set_t *mset = (corsaro_metric_set_t *)malloc(
+            sizeof(corsaro_metric_set_t));
 
     mset->srcips = NULL;
     mset->destips = NULL;
     mset->activemetrics = NULL;
+
+    if (newhandlers) {
+        mset->ipreport_handler = (corsaro_memhandler_t *)malloc(
+                sizeof(corsaro_memhandler_t));
+        mset->ip_handler = (corsaro_memhandler_t *)malloc(
+                sizeof(corsaro_memhandler_t));
+        mset->ipblock_handler = (corsaro_memhandler_t *)malloc(
+                sizeof(corsaro_memhandler_t));
+        init_corsaro_memhandler(logger, mset->ipreport_handler,
+                sizeof(corsaro_report_ip_metric_t), 1000);
+        init_corsaro_memhandler(logger, mset->ip_handler,
+                sizeof(corsaro_report_ip_t), 5000);
+        init_corsaro_memhandler(logger, mset->ipblock_handler,
+                sizeof(corsaro_report_ip_t), 2000);
+    }
+    return mset;
 }
 
 void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
@@ -278,45 +346,43 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     corsaro_report_state_t *state;
 
     state = (corsaro_report_state_t *)malloc(sizeof(corsaro_report_state_t));
-    state->metrics = (corsaro_metric_set_t *)malloc(
-            sizeof(corsaro_metric_set_t));
-
-    init_metric_set(state->metrics, p->logger);
-    state->metrics->ipreport_handler = (corsaro_memhandler_t *)malloc(
-            sizeof(corsaro_memhandler_t));
-    state->metrics->ip_handler = (corsaro_memhandler_t *)malloc(
-            sizeof(corsaro_memhandler_t));
-    init_corsaro_memhandler(p->logger, state->metrics->ipreport_handler,
-            sizeof(corsaro_report_ip_metric_t), 1000);
-    init_corsaro_memhandler(p->logger, state->metrics->ip_handler,
-            sizeof(corsaro_report_ip_t), 5000);
+    state->metrics = init_metric_set(p->logger, 1);
     return state;
+}
+
+static inline void destroy_ip_block(corsaro_report_ipblock_t *ipblock,
+        corsaro_report_ipblock_t **ipblock_list,
+        corsaro_metric_set_t *parent) {
+
+    corsaro_report_ip_t *ip, *tmp;
+    corsaro_report_ip_metric_t *ipmet, *tmp3;
+
+    HASH_ITER(hh, ipblock->memberips, ip, tmp) {
+        HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
+            HASH_DELETE(hh, (ip->assocmetrics), ipmet);
+            release_corsaro_memhandler_item(parent->ipreport_handler,
+                    ipmet->source);
+        }
+        HASH_DELETE(hh, ipblock->memberips, ip);
+        release_corsaro_memhandler_item(parent->ip_handler, ip->source);
+    }
+
+    HASH_DELETE(hh, *ipblock_list, ipblock);
+    release_corsaro_memhandler_item(parent->ipblock_handler,
+            ipblock->source);
 }
 
 static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
 
-    corsaro_report_ip_t *ip, *tmp;
+    corsaro_report_ipblock_t *ipblock, *tmpblock;
     corsaro_report_metric_t *met, *tmp2;
-    corsaro_report_ip_metric_t *ipmet, *tmp3;
 
-    HASH_ITER(hh, mset->srcips, ip, tmp) {
-        HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
-            HASH_DELETE(hh, (ip->assocmetrics), ipmet);
-            release_corsaro_memhandler_item(mset->ipreport_handler,
-                    ipmet->source);
-        }
-        HASH_DELETE(hh, mset->srcips, ip);
-        release_corsaro_memhandler_item(mset->ip_handler, ip->source);
+    HASH_ITER(hh, mset->srcips, ipblock, tmpblock) {
+        destroy_ip_block(ipblock, &(mset->srcips), mset);
     }
 
-    HASH_ITER(hh, mset->destips, ip, tmp) {
-        HASH_ITER(hh, ip->assocmetrics, ipmet, tmp3) {
-            HASH_DELETE(hh, ip->assocmetrics, ipmet);
-            release_corsaro_memhandler_item(mset->ipreport_handler,
-                    ipmet->source);
-        }
-        HASH_DELETE(hh, mset->destips, ip);
-        release_corsaro_memhandler_item(mset->ip_handler, ip->source);
+    HASH_ITER(hh, mset->destips, ipblock, tmpblock) {
+        destroy_ip_block(ipblock, &(mset->destips), mset);
     }
 
     HASH_ITER(hh, mset->activemetrics, met, tmp2) {
@@ -326,20 +392,25 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
 
     destroy_corsaro_memhandler(mset->ipreport_handler);
     destroy_corsaro_memhandler(mset->ip_handler);
-
+    destroy_corsaro_memhandler(mset->ipblock_handler);
 }
 
 int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
 
     corsaro_report_state_t *state;
+    corsaro_report_config_t *conf;
+
+    conf = (corsaro_report_config_t *)(p->config);
     state = (corsaro_report_state_t *)local;
+
+    if (conf->outlabel) {
+        free(conf->outlabel);
+    }
 
     if (state == NULL) {
         return 0;
     }
     destroy_metric_set(state->metrics);
-    destroy_corsaro_memhandler(state->metrics->ipreport_handler);
-    destroy_corsaro_memhandler(state->metrics->ip_handler);
     free(state->metrics);
     free(state);
 
@@ -387,14 +458,14 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     }
 
     mset = state->metrics;
-    state->metrics = (corsaro_metric_set_t *)malloc(
-            sizeof(corsaro_metric_set_t));
+    state->metrics = init_metric_set(p->logger, 0);
 
-    init_metric_set(state->metrics, p->logger);
     state->metrics->ipreport_handler = mset->ipreport_handler;
     state->metrics->ip_handler = mset->ip_handler;
+    state->metrics->ipblock_handler = mset->ipblock_handler;
     add_corsaro_memhandler_user(mset->ipreport_handler);
     add_corsaro_memhandler_user(mset->ip_handler);
+    add_corsaro_memhandler_user(mset->ipblock_handler);
     return mset;
 }
 
@@ -603,7 +674,10 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     corsaro_report_state_t *state;
     uint16_t iplen;
     uint32_t srcaddr, dstaddr;
+    uint32_t srcblock, dstblock;
     corsaro_report_ip_t *srcip, *destip;
+    corsaro_report_ipblock_t *ipb;
+    corsaro_memsource_t *memsrc;
 
     state = (corsaro_report_state_t *)local;
 
@@ -623,30 +697,55 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     }
 
 
-    HASH_FIND(hh, state->metrics->srcips, &srcaddr, sizeof(uint32_t), srcip);
-    if (srcip == NULL) {
-        corsaro_memsource_t *memsrc;
+    srcblock = srcaddr & (0x0000ffff);
+    dstblock = dstaddr & (0x0000ffff);
 
+    HASH_FIND(hh, state->metrics->srcips, &srcblock, sizeof(srcblock), ipb);
+    if (ipb == NULL) {
+        ipb = (corsaro_report_ipblock_t *)
+                get_corsaro_memhandler_item(state->metrics->ipblock_handler,
+                        &memsrc);
+        ipb->blockid = srcblock;
+        ipb->memberips = NULL;
+        ipb->source = memsrc;
+        HASH_ADD_KEYPTR(hh, state->metrics->srcips, &(ipb->blockid),
+                sizeof(ipb->blockid), ipb);
+    }
+
+
+    HASH_FIND(hh, ipb->memberips, &srcaddr, sizeof(uint32_t), srcip);
+    if (srcip == NULL) {
         srcip = (corsaro_report_ip_t *)
                 get_corsaro_memhandler_item(state->metrics->ip_handler,
                         &memsrc);
         srcip->ipaddr = srcaddr;
         srcip->assocmetrics = NULL;
         srcip->source = memsrc;
-        HASH_ADD_KEYPTR(hh, state->metrics->srcips, &(srcip->ipaddr),
+        HASH_ADD_KEYPTR(hh, ipb->memberips, &(srcip->ipaddr),
                 sizeof(uint32_t), srcip);
     }
 
-    HASH_FIND(hh, state->metrics->destips, &dstaddr, sizeof(uint32_t), destip);
+    HASH_FIND(hh, state->metrics->destips, &dstblock, sizeof(dstblock), ipb);
+    if (ipb == NULL) {
+        ipb = (corsaro_report_ipblock_t *)
+                get_corsaro_memhandler_item(state->metrics->ipblock_handler,
+                        &memsrc);
+        ipb->blockid = dstblock;
+        ipb->memberips = NULL;
+        ipb->source = memsrc;
+        HASH_ADD_KEYPTR(hh, state->metrics->destips, &(ipb->blockid),
+                sizeof(ipb->blockid), ipb);
+    }
+
+    HASH_FIND(hh, ipb->memberips, &dstaddr, sizeof(uint32_t), destip);
     if (destip == NULL) {
-        corsaro_memsource_t *memsrc;
         destip = (corsaro_report_ip_t *)
                 get_corsaro_memhandler_item(state->metrics->ip_handler,
                         &memsrc);
         destip->ipaddr = dstaddr;
         destip->assocmetrics = NULL;
         destip->source = memsrc;
-        HASH_ADD_KEYPTR(hh, state->metrics->destips, &(destip->ipaddr),
+        HASH_ADD_KEYPTR(hh, ipb->memberips, &(destip->ipaddr),
                 sizeof(uint32_t), destip);
     }
 
@@ -666,9 +765,110 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
 
 /** ------------- MERGING API -------------------- */
 
+void count_ips_per_metric(corsaro_report_result_t **res,
+        corsaro_report_ipblock_t *block, corsaro_metric_set_t *parent,
+        uint8_t jobtype, corsaro_memhandler_t *handler) {
+
+    corsaro_report_ip_t *ip, *tmp;
+    corsaro_report_ip_metric_t *ipmet, *tmpmet;
+    corsaro_report_result_t *r;
+    corsaro_memsource_t *memsrc;
+
+    HASH_ITER(hh, block->memberips, ip, tmp) {
+        HASH_ITER(hh, ip->assocmetrics, ipmet, tmpmet) {
+            HASH_FIND(hh, *res, &(ipmet->metid),
+                    sizeof(corsaro_report_metric_id_t), r);
+
+            if (!r) {
+                r = (corsaro_report_result_t *)get_corsaro_memhandler_item(
+                        handler, &memsrc);
+                memset(&(r->metid), 0, sizeof(corsaro_report_metric_id_t));
+
+                r->metid.class = ipmet->metid.class;
+                r->metid.metricval = ipmet->metid.metricval;
+
+                r->pkt_cnt = 0;
+                r->ip_len = 0;
+                r->attimestamp = 0;
+                r->uniq_src_ips = 0;
+                r->uniq_dst_ips = 0;
+                r->label = NULL;
+                r->metrictype = NULL;
+                r->metricval = NULL;
+
+                r->memsource = memsrc;
+                r->handler = handler;
+
+                HASH_ADD_KEYPTR(hh, *res, &(r->metid),
+                        sizeof(corsaro_report_metric_id_t), r);
+            }
+
+            if (jobtype == CORSARO_REPORT_MERGE_JOB_SOURCE) {
+                r->uniq_src_ips ++;
+            } else {
+                r->uniq_dst_ips ++;
+            }
+            HASH_DELETE(hh, ip->assocmetrics, ipmet);
+            release_corsaro_memhandler_item(parent->ipreport_handler,
+                    ipmet->source);
+        }
+        HASH_DELETE(hh, block->memberips, ip);
+        release_corsaro_memhandler_item(parent->ip_handler, ip->source);
+    }
+
+    //release_corsaro_memhandler_item(parent->ipblock_handler, block->source);
+
+}
+
+void *start_merge_worker(void *tdata) {
+
+    corsaro_report_worker_t *workstate = (corsaro_report_worker_t *)tdata;
+    corsaro_report_merge_job_t nextjob;
+    corsaro_report_merge_result_t res;
+    int i;
+
+    while (1) {
+        if (libtrace_message_queue_try_get(&(workstate->jobqueue), &nextjob)
+                == LIBTRACE_MQ_FAILED) {
+            usleep(100);
+            continue;
+        }
+
+        if (nextjob.jobtype == CORSARO_REPORT_MERGE_JOB_HALT) {
+            break;
+        }
+
+        memset(&res, 0, sizeof(res));
+        res.res = NULL;
+        res.resulttype = nextjob.jobtype;
+
+        for (i = 0; i < nextjob.blockcount; i++) {
+            count_ips_per_metric(&(res.res), nextjob.ipblocks[i],
+                    nextjob.parents[i], nextjob.jobtype,
+                    workstate->res_handler);
+            if (i > 0) {
+                release_corsaro_memhandler_item(
+                        nextjob.parents[i]->ipblock_handler,
+                        nextjob.ipblocks[i]->source);
+            }
+        }
+
+        free(nextjob.ipblocks);
+        free(nextjob.parents);
+
+        libtrace_message_queue_put(&(workstate->resultqueue), (void *)(&res));
+
+    }
+
+    pthread_exit(NULL);
+}
+
 void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
 
     corsaro_report_merge_state_t *m;
+    int i;
+    struct epoll_event ev;
+
     m = (corsaro_report_merge_state_t *)calloc(1,
             sizeof(corsaro_report_merge_state_t));
     if (m == NULL) {
@@ -685,16 +885,72 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
         return NULL;
     }
 
+    m->epoll_fd = epoll_create1(0);
+    m->jobsoutstanding = 0;
+    m->workerthreadcount = 4;
+    m->workthreads = (corsaro_report_worker_t *)calloc(m->workerthreadcount,
+            sizeof(corsaro_report_worker_t));
+
+    for (i = 0; i < m->workerthreadcount; i++) {
+        libtrace_message_queue_init(&(m->workthreads[i].jobqueue),
+                sizeof(corsaro_report_merge_job_t));
+        libtrace_message_queue_init(&(m->workthreads[i].resultqueue),
+                sizeof(corsaro_report_merge_result_t));
+
+        ev.events = EPOLLIN | EPOLLRDHUP;
+        ev.data.ptr = &(m->workthreads[i]);
+
+        if (epoll_ctl(m->epoll_fd, EPOLL_CTL_ADD,
+                    libtrace_message_queue_get_fd(&(m->workthreads[i].resultqueue)),
+                    &ev) != 0) {
+            corsaro_log(p->logger, "Error configuring epoll for merging worker thread in report plugin: %s", strerror(errno));
+            /* TODO throw some sort of error? */
+        }
+
+        m->workthreads[i].res_handler = (corsaro_memhandler_t *)malloc(
+                sizeof(corsaro_memhandler_t));
+        init_corsaro_memhandler(p->logger, m->workthreads[i].res_handler,
+                sizeof(corsaro_report_result_t), 1000);
+
+        pthread_create(&(m->workthreads[i].threadid), NULL,
+                start_merge_worker, &(m->workthreads[i]));
+    }
+
     return m;
 }
 
 int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
     corsaro_report_merge_state_t *m;
+    corsaro_report_merge_job_t endjob;
+    int i;
 
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
         return 0;
     }
+
+    memset(&endjob, 0, sizeof(corsaro_report_merge_job_t));
+    endjob.jobtype = CORSARO_REPORT_MERGE_JOB_HALT;
+    endjob.ipblocks = NULL;
+    endjob.blockcount = 0;
+
+
+    for (i = 0; i < m->workerthreadcount; i++) {
+        libtrace_message_queue_put(&(m->workthreads[i].jobqueue), &endjob);
+    }
+
+    for (i = 0; i < m->workerthreadcount; i++) {
+        pthread_join(m->workthreads[i].threadid, NULL);
+        destroy_corsaro_memhandler(m->workthreads[i].res_handler);
+        libtrace_message_queue_destroy(&(m->workthreads[i].jobqueue));
+        libtrace_message_queue_destroy(&(m->workthreads[i].resultqueue));
+    }
+
+    if (m->workthreads) {
+        free(m->workthreads);
+    }
+
+    close(m->epoll_fd);
 
     if (m->writer) {
         corsaro_destroy_avro_writer(m->writer);
@@ -790,70 +1046,14 @@ static int write_single_metric(corsaro_logger_t *logger,
 
 }
 
-static void tally_ip_counters(corsaro_report_result_t *rmap,
-        corsaro_report_ip_t *source_ips, corsaro_report_ip_t *dest_ips) {
-
-    corsaro_report_result_t *r;
-    corsaro_report_ip_t *ip, *tmp;
-    corsaro_report_ip_metric_t *ipmet, *tmpmet;
-
-    HASH_ITER(hh, source_ips, ip, tmp) {
-        HASH_ITER(hh, ip->assocmetrics, ipmet, tmpmet) {
-            HASH_FIND(hh, rmap, &(ipmet->metid),
-                    sizeof(corsaro_report_metric_id_t), r);
-            assert(r);
-            r->uniq_src_ips ++;
-        }
-    }
-
-    HASH_ITER(hh, dest_ips, ip, tmp) {
-        HASH_ITER(hh, ip->assocmetrics, ipmet, tmpmet) {
-            HASH_FIND(hh, rmap, &(ipmet->metid),
-                    sizeof(corsaro_report_metric_id_t), r);
-            assert(r);
-            r->uniq_dst_ips ++;
-        }
-    }
-
-
-}
-
 static int write_all_metrics(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, corsaro_metric_set_t *metrics,
-        uint32_t ts, corsaro_report_config_t *conf) {
+        corsaro_avro_writer_t *writer, corsaro_report_result_t **resultmap) {
 
-    corsaro_report_result_t *resultmap, *r, *tmpres;
-    corsaro_report_metric_id_t metricid;
-    corsaro_report_metric_t *met, *tmpmet;
+    corsaro_report_result_t *r, *tmpres;
 
-    resultmap = NULL;
-
-    HASH_ITER(hh, metrics->activemetrics, met, tmpmet) {
-        r = (corsaro_report_result_t *)malloc(sizeof(corsaro_report_result_t));
-        memset(&(r->metid), 0, sizeof(corsaro_report_metric_id_t));
-
-        r->metid.class = met->metid.class;
-        r->metid.metricval = met->metid.metricval;
-
-        r->pkt_cnt = met->pkt_cnt;
-        r->ip_len = met->ip_len;
-        r->attimestamp = ts;
-        r->uniq_src_ips = 0;
-        r->uniq_dst_ips = 0;
-        r->label = conf->outlabel;
-        r->metrictype = NULL;
-        r->metricval = NULL;
-
-        HASH_ADD_KEYPTR(hh, resultmap, &(r->metid),
-                sizeof(corsaro_report_metric_id_t), r);
-    }
-
-    /* Tally up all the IPs seen for each metric */
-    tally_ip_counters(resultmap, metrics->srcips, metrics->destips);
-
-    HASH_ITER(hh, resultmap, r, tmpres) {
+    HASH_ITER(hh, *resultmap, r, tmpres) {
         write_single_metric(logger, writer, r);
-        HASH_DELETE(hh, resultmap, r);
+        HASH_DELETE(hh, *resultmap, r);
         free(r);
     }
 
@@ -861,97 +1061,228 @@ static int write_all_metrics(corsaro_logger_t *logger,
 
 }
 
-static void combine_ip_metsets(corsaro_report_ip_metric_t **combset,
-        corsaro_report_ip_metric_t **newset) {
+static void combine_metrics(corsaro_report_result_t **dest,
+        corsaro_report_metric_t **src, uint32_t ts,
+        corsaro_report_config_t *conf) {
 
-    corsaro_report_ip_metric_t *toadd, *existing, *tmp;
-
-    HASH_ITER(hh, *newset, toadd, tmp) {
-
-        HASH_FIND(hh, *combset, &(toadd->metid),
-                sizeof(corsaro_report_metric_id_t), existing);
-
-        if (!existing) {
-            HASH_DELETE(hh, *newset, toadd);
-            HASH_ADD_KEYPTR(hh, *combset, &(toadd->metid),
-                    sizeof(corsaro_report_metric_id_t), toadd);
-            assert(toadd->source);
-        }
-    }
-
-}
-
-static void combine_ip_maps(corsaro_report_ip_t **combips,
-        corsaro_report_ip_t **newips) {
-
-    corsaro_report_ip_t *thisip, *existing, *tmp;
-
-    HASH_ITER(hh, *newips, thisip, tmp) {
-        HASH_FIND(hh, *combips, &(thisip->ipaddr), sizeof(uint32_t), existing);
-
-        if (!existing) {
-            existing = thisip;
-            HASH_DELETE(hh, *newips, thisip);
-            HASH_ADD_KEYPTR(hh, *combips, &(thisip->ipaddr), sizeof(uint32_t),
-                    thisip);
-        } else {
-            combine_ip_metsets(&(existing->assocmetrics),
-                    &(thisip->assocmetrics));
-        }
-    }
-}
-
-static void combine_metrics(corsaro_report_metric_t **dest,
-        corsaro_report_metric_t **src) {
-
-    corsaro_report_metric_t *existing, *srcmet, *tmp;
+    corsaro_report_metric_t *srcmet, *tmp;
+    corsaro_report_result_t *r;
 
     HASH_ITER(hh, *src, srcmet, tmp) {
 
         HASH_FIND(hh, *dest, &(srcmet->metid),
-                sizeof(corsaro_report_metric_id_t), existing);
+                sizeof(corsaro_report_metric_id_t), r);
 
-        if (existing) {
-            existing->pkt_cnt += srcmet->pkt_cnt;
-            existing->ip_len += srcmet->ip_len;
+        if (r) {
+            r->pkt_cnt += srcmet->pkt_cnt;
+            r->ip_len += srcmet->ip_len;
         } else {
-            HASH_DELETE(hh, *src, srcmet);
-            HASH_ADD_KEYPTR(hh, *dest, &(srcmet->metid),
-                    sizeof(corsaro_report_metric_id_t), srcmet);
-        }
 
+            r = (corsaro_report_result_t *)malloc(sizeof(
+                    corsaro_report_result_t));
+            memset(&(r->metid), 0, sizeof(corsaro_report_metric_id_t));
+
+            r->metid.class = srcmet->metid.class;
+            r->metid.metricval = srcmet->metid.metricval;
+
+            r->pkt_cnt = srcmet->pkt_cnt;
+            r->ip_len = srcmet->ip_len;
+            r->attimestamp = ts;
+            r->uniq_src_ips = 0;
+            r->uniq_dst_ips = 0;
+            r->label = conf->outlabel;
+            r->metrictype = NULL;
+            r->metricval = NULL;
+
+            r->handler = NULL;
+            r->memsource = NULL;
+
+            HASH_ADD_KEYPTR(hh, *dest, &(r->metid),
+                    sizeof(corsaro_report_metric_id_t), r);
+        }
+        HASH_DELETE(hh, *src, srcmet);
+        free(srcmet);
     }
+
 }
 
-static int update_combined_result(corsaro_metric_set_t *combined,
-        corsaro_metric_set_t *next, corsaro_logger_t *logger) {
+int create_merge_jobs(corsaro_metric_set_t **msets, int threadindex,
+        corsaro_report_worker_t *workthreads, int workthreadcount,
+        int sourcethreads, corsaro_report_ipblock_t **ipb,
+        uint8_t jobmode, int jobsperworker) {
 
-    combine_metrics(&combined->activemetrics, &next->activemetrics);
-    combine_ip_maps(&combined->srcips, &next->srcips);
-    combine_ip_maps(&combined->destips, &next->destips);
+    int i;
+    int jobcount = 0;
+    int nextworker = 0;
+    corsaro_report_merge_job_t job;
+    corsaro_report_ipblock_t *match;
 
-    destroy_metric_set(next);
-    free(next);
-    return 0;
+    if (*ipb == NULL) {
+        if (jobmode == CORSARO_REPORT_MERGE_JOB_SOURCE) {
+            *ipb = msets[threadindex]->srcips;
+        } else {
+            *ipb = msets[threadindex]->destips;
+        }
+    }
+
+    for (*ipb; *ipb != NULL; *ipb=(*ipb)->hh.next) {
+        if (jobcount >= workthreadcount * jobsperworker) {
+            break;
+        }
+
+        memset(&job, 0, sizeof(job));
+        job.ipblocks = (corsaro_report_ipblock_t **)calloc(sourcethreads,
+                sizeof(corsaro_report_ipblock_t *));
+        job.parents = (corsaro_metric_set_t **)calloc(sourcethreads,
+                sizeof(corsaro_report_ipblock_t *));
+        job.jobtype = CORSARO_REPORT_MERGE_JOB_SOURCE;
+
+
+        job.ipblocks[0] = *ipb;
+        job.parents[0] = msets[threadindex];
+
+        job.blockcount = 1;
+        for (i = threadindex + 1; i < sourcethreads; i++) {
+            if (jobmode == CORSARO_REPORT_MERGE_JOB_SOURCE) {
+                HASH_FIND(hh, msets[i]->srcips, &((*ipb)->blockid),
+                        sizeof((*ipb)->blockid), match);
+            } else {
+                HASH_FIND(hh, msets[i]->destips, &((*ipb)->blockid),
+                        sizeof((*ipb)->blockid), match);
+            }
+
+            if (!match) {
+                continue;
+            }
+            job.ipblocks[job.blockcount] = match;
+            job.parents[job.blockcount] = msets[i];
+            job.blockcount ++;
+
+            /* XXX XXX TODO find a way to release these mofos */
+            if (jobmode == CORSARO_REPORT_MERGE_JOB_SOURCE) {
+                HASH_DELETE(hh, msets[i]->srcips, match);
+            } else {
+                HASH_DELETE(hh, msets[i]->destips, match);
+            }
+        }
+
+        libtrace_message_queue_put(&(workthreads[nextworker].jobqueue),
+                (void *)(&job));
+        jobcount ++;
+        nextworker ++;
+        if (nextworker == workthreadcount) {
+            nextworker = 0;
+        }
+
+        /*
+        if (jobmode == CORSARO_REPORT_MERGE_JOB_SOURCE) {
+            HASH_DELETE(hh, msets[threadindex]->srcips, *ipb);
+        } else {
+            HASH_DELETE(hh, msets[threadindex]->destips, *ipb);
+        }
+        */
+    }
+
+    return jobcount;
+}
+
+void update_merge_result(corsaro_report_result_t **combined,
+        corsaro_report_result_t *rlist) {
+
+    corsaro_report_result_t *r, *tmp, *found;
+
+    HASH_ITER(hh, rlist, r, tmp) {
+        HASH_FIND(hh, *combined, &(r->metid),
+                sizeof(corsaro_report_metric_id_t), found);
+        assert(found);
+
+        found->uniq_src_ips += r->uniq_src_ips;
+        found->uniq_dst_ips += r->uniq_dst_ips;
+
+        HASH_DELETE(hh, rlist, r);
+        release_corsaro_memhandler_item(r->handler, r->memsource);
+    }
+
 }
 
 int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
         void **tomerge, corsaro_fin_interval_t *fin) {
 
-    corsaro_metric_set_t *combined;
+    corsaro_metric_set_t *next;
     corsaro_report_merge_state_t *m;
+    corsaro_report_result_t *combined = NULL;
+    corsaro_report_merge_result_t res;
     int i, ret;
     char *outname;
+    int threadindex, alljobssent;
+    corsaro_report_ipblock_t *iter;
+    struct epoll_event events[64];
+    uint8_t jobmode;
 
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
         return -1;
     }
 
-    /* Use tomerge[0] as the "combined" result */
-    combined = (corsaro_metric_set_t *)(tomerge[0]);
+    for (i = 0; i < fin->threads_ended; i++) {
+        next = (corsaro_metric_set_t *)(tomerge[i]);
+        combine_metrics(&combined, &next->activemetrics, fin->timestamp,
+                (corsaro_report_config_t *)(p->config));
+    }
 
-    /* First step, open an output file if we need one */
+    threadindex = 0;
+    iter = NULL;
+    alljobssent = 0;
+    jobmode = CORSARO_REPORT_MERGE_JOB_SOURCE;
+
+    while (!alljobssent || m->jobsoutstanding > 0) {
+        ret = epoll_wait(m->epoll_fd, events, 64, 10);
+
+        for (i = 0; i < ret; i++) {
+            corsaro_report_worker_t *wkr = (corsaro_report_worker_t *)
+                    (events[i].data.ptr);
+            if (libtrace_message_queue_try_get(&(wkr->resultqueue), &res) ==
+                        LIBTRACE_MQ_FAILED) {
+                continue;
+            }
+
+            update_merge_result(&combined, res.res);
+            m->jobsoutstanding --;
+        }
+
+        if (ret != 0 || alljobssent) {
+            continue;
+        }
+
+        ret = create_merge_jobs((corsaro_metric_set_t **)(tomerge),
+                threadindex, m->workthreads, m->workerthreadcount,
+                fin->threads_ended, &iter, jobmode, 100);
+        if (iter == NULL) {
+            if (jobmode == CORSARO_REPORT_MERGE_JOB_SOURCE) {
+                jobmode = CORSARO_REPORT_MERGE_JOB_DEST;
+            } else {
+                threadindex ++;
+                jobmode = CORSARO_REPORT_MERGE_JOB_SOURCE;
+            }
+            iter = NULL;
+
+            if (threadindex == fin->threads_ended) {
+                alljobssent = 1;
+            }
+        }
+        m->jobsoutstanding += ret;
+
+    }
+
+    for (i = 0; i < fin->threads_ended; i++) {
+        next = (corsaro_metric_set_t *)(tomerge[i]);
+        destroy_metric_set(next);
+        free(next);
+
+    }
+
+
+    /* Open an output file if we need one */
     if (!corsaro_is_avro_writer_active(m->writer)) {
         outname = p->derive_output_name(p, local, fin->timestamp, -1);
         if (outname == NULL) {
@@ -964,23 +1295,10 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
         free(outname);
     }
 
-    for (i = 1; i < fin->threads_ended; i++) {
-        if (update_combined_result(combined,
-                (corsaro_metric_set_t *)(tomerge[i]), p->logger) < 0) {
-            corsaro_log(p->logger,
-                    "error while merging report results from thread %d", i);
-            return -1;
-        }
-    }
-
     ret = 0;
-    if (write_all_metrics(p->logger, m->writer, combined, fin->timestamp,
-            (corsaro_report_config_t *)(p->config)) < 0) {
+    if (write_all_metrics(p->logger, m->writer, &combined) < 0) {
         ret = -1;
     }
-
-    destroy_metric_set(combined);
-    free(combined);
 
     return ret;
 }
