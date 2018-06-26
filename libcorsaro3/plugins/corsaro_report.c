@@ -36,8 +36,15 @@
 #include <yaml.h>
 #include <libipmeta.h>
 #include <libtrace/message_queue.h>
-#include <sys/epoll.h>
 #include <errno.h>
+
+#ifdef __linux__
+#include <sys/epoll.h>
+#else
+#include <sys/types.h>
+#include <sys/event.h>
+#include <sys/time.h>
+#endif
 
 #include <uthash.h>
 #include "libcorsaro3_memhandler.h"
@@ -185,7 +192,11 @@ typedef struct report_merge_state {
 
     int jobsoutstanding;
     int workerthreadcount;
+#ifdef __linux__
     int epoll_fd;
+#else
+    int kqueue_fd;
+#endif
 
     corsaro_report_worker_t *workthreads;
 
@@ -867,7 +878,11 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
 
     corsaro_report_merge_state_t *m;
     int i;
+#ifdef __linux__
     struct epoll_event ev;
+#else
+    struct kevent ev;
+#endif
 
     m = (corsaro_report_merge_state_t *)calloc(1,
             sizeof(corsaro_report_merge_state_t));
@@ -885,7 +900,12 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
         return NULL;
     }
 
+#ifdef __linux__
     m->epoll_fd = epoll_create1(0);
+#else
+    m->kqueue_fd = kqueue();
+#endif
+
     m->jobsoutstanding = 0;
     m->workerthreadcount = 4;
     m->workthreads = (corsaro_report_worker_t *)calloc(m->workerthreadcount,
@@ -897,6 +917,7 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
         libtrace_message_queue_init(&(m->workthreads[i].resultqueue),
                 sizeof(corsaro_report_merge_result_t));
 
+#ifdef __linux__
         ev.events = EPOLLIN | EPOLLRDHUP;
         ev.data.ptr = &(m->workthreads[i]);
 
@@ -906,6 +927,13 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
             corsaro_log(p->logger, "Error configuring epoll for merging worker thread in report plugin: %s", strerror(errno));
             /* TODO throw some sort of error? */
         }
+#else
+        EV_SET(&ev, libtrace_message_queue_get_fd(&(m->workthreads[i].resultqueue)), EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, &(m->workthreads[i]));
+        if (kevent(m->kqueue_fd, &ev, 1, NULL, 0, NULL) == -1) {
+            corsaro_log(p->logger, "Error configuring kqueue for merging worker thread in report plugin: %s", strerror(errno));
+            /* TODO throw some sort of error? */
+        }
+#endif
 
         m->workthreads[i].res_handler = (corsaro_memhandler_t *)malloc(
                 sizeof(corsaro_memhandler_t));
@@ -949,8 +977,11 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
     if (m->workthreads) {
         free(m->workthreads);
     }
-
+#ifdef __linux__
     close(m->epoll_fd);
+#else
+    close(m->kqueue_fd);
+#endif
 
     if (m->writer) {
         corsaro_destroy_avro_writer(m->writer);
@@ -1158,7 +1189,6 @@ int create_merge_jobs(corsaro_metric_set_t **msets, int threadindex,
             job.parents[job.blockcount] = msets[i];
             job.blockcount ++;
 
-            /* XXX XXX TODO find a way to release these mofos */
             if (jobmode == CORSARO_REPORT_MERGE_JOB_SOURCE) {
                 HASH_DELETE(hh, msets[i]->srcips, match);
             } else {
@@ -1216,8 +1246,14 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     char *outname;
     int threadindex, alljobssent;
     corsaro_report_ipblock_t *iter;
-    struct epoll_event events[64];
     uint8_t jobmode;
+
+#ifdef __linux__
+    struct epoll_event events[64];
+#else
+    struct kevent events[64];
+    struct timespec timeout;
+#endif
 
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
@@ -1236,6 +1272,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     jobmode = CORSARO_REPORT_MERGE_JOB_SOURCE;
 
     while (!alljobssent || m->jobsoutstanding > 0) {
+#ifdef __linux__
         ret = epoll_wait(m->epoll_fd, events, 64, 10);
 
         for (i = 0; i < ret; i++) {
@@ -1249,6 +1286,25 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
             update_merge_result(&combined, res.res);
             m->jobsoutstanding --;
         }
+#else
+        timeout.tv_sec = 0;
+        timeout.tv_nsec = 10000000;
+
+        ret = kevent(m->kqueue_fd, NULL, 0, events, 64, &timeout);
+
+        for (i = 0; i < ret; i++) {
+            corsaro_report_worker_t *wkr = (corsaro_report_worker_t *)
+                    (events[i].udata);
+
+            if (libtrace_message_queue_try_get(&(wkr->resultqueue), &res) ==
+                        LIBTRACE_MQ_FAILED) {
+                continue;
+            }
+
+            update_merge_result(&combined, res.res);
+            m->jobsoutstanding --;
+        }
+#endif
 
         if (ret != 0 || alljobssent) {
             continue;
