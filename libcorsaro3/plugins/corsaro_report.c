@@ -1166,7 +1166,7 @@ int create_merge_jobs(corsaro_metric_set_t **msets, int threadindex,
                 sizeof(corsaro_report_ipblock_t *));
         job.parents = (corsaro_metric_set_t **)calloc(sourcethreads,
                 sizeof(corsaro_report_ipblock_t *));
-        job.jobtype = CORSARO_REPORT_MERGE_JOB_SOURCE;
+        job.jobtype = jobmode;
 
 
         job.ipblocks[0] = *ipb;
