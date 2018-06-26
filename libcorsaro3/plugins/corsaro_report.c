@@ -320,6 +320,12 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
 
 void corsaro_report_destroy_self(corsaro_plugin_t *p) {
     if (p->config) {
+        corsaro_report_config_t *conf;
+        conf = (corsaro_report_config_t *)(p->config);
+        if (conf->outlabel) {
+            free(conf->outlabel);
+        }
+
         free(p->config);
     }
     p->config = NULL;
@@ -409,14 +415,8 @@ static inline void destroy_metric_set(corsaro_metric_set_t *mset) {
 int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
 
     corsaro_report_state_t *state;
-    corsaro_report_config_t *conf;
 
-    conf = (corsaro_report_config_t *)(p->config);
     state = (corsaro_report_state_t *)local;
-
-    if (conf->outlabel) {
-        free(conf->outlabel);
-    }
 
     if (state == NULL) {
         return 0;
