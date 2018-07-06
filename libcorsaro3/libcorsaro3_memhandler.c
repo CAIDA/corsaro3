@@ -67,6 +67,7 @@ void init_corsaro_memhandler(corsaro_logger_t *logger,
     handler->current = create_fresh_blob(handler->items_per_blob,
             handler->itemsize);
     handler->freelist = NULL;
+    handler->freelistavail = 0;
 }
 
 void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
@@ -139,6 +140,7 @@ uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
             handler->current->nextavail = 0;
             handler->current->released = 0;
             handler->current->nextfree = NULL;
+            handler->freelistavail --;
         }
     }
 
@@ -167,7 +169,17 @@ void release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
         assert(handler->freelist != itemsource);
         itemsource->nextfree = handler->freelist;
         handler->freelist = itemsource;
+        handler->freelistavail ++;
     }
+
+    while (handler->freelistavail > 100) {
+        corsaro_memsource_t *tmp = handler->freelist;
+        handler->freelist = handler->freelist->nextfree;
+        handler->freelistavail --;
+        free(tmp->blob);
+        free(tmp);
+    }
+
     pthread_mutex_unlock(&handler->mutex);
 }
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

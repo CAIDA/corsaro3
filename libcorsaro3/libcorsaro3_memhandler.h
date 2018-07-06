@@ -55,6 +55,7 @@ typedef struct corsaro_memhandler {
     uint32_t items_per_blob;
     size_t itemsize;
     int users;
+    int freelistavail;
     pthread_mutex_t mutex;
 
     corsaro_memsource_t *current;
