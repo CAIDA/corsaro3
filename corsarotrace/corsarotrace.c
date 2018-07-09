@@ -82,6 +82,7 @@ static void publish_file_closed_message(libtrace_t *trace,
 
     msg = (corsaro_trace_msg_t *)malloc(sizeof(corsaro_trace_msg_t));
 
+    memset(msg, 0, sizeof(corsaro_trace_msg_t));
     msg->type = CORSARO_TRACE_MSG_ROTATE;
     msg->interval_num = last_interval;
     msg->interval_time = rotatets - 1;
@@ -103,6 +104,7 @@ static void publish_interval_ended(libtrace_t *trace,
 
     msg = (corsaro_trace_msg_t *)malloc(sizeof(corsaro_trace_msg_t));
 
+    memset(msg, 0, sizeof(corsaro_trace_msg_t));
     msg->type = CORSARO_TRACE_MSG_MERGE;
     msg->interval_num = interval_num;
     msg->interval_time = interval_ts;
@@ -122,6 +124,7 @@ static void publish_stop_message(libtrace_t *trace, libtrace_thread_t *t,
     libtrace_generic_t topub;
 
     msg = (corsaro_trace_msg_t *)malloc(sizeof(corsaro_trace_msg_t));
+    memset(msg, 0, sizeof(corsaro_trace_msg_t));
 
     msg->type = CORSARO_TRACE_MSG_STOP;
     msg->interval_num = 0;
@@ -573,8 +576,10 @@ int start_trace_input(corsaro_trace_global_t *glob) {
     }
 
     trace_set_combiner(glob->trace, &combiner_unordered, nothing);
+    /*
     trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, glob->hasher,
             glob->hasher_data);
+    */
     trace_set_perpkt_threads(glob->trace, glob->threads);
 
     if (glob->savedlocalstate == NULL) {
