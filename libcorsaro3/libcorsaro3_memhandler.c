@@ -30,18 +30,32 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <pthread.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <unistd.h>
 
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_memhandler.h"
 
 static inline corsaro_memsource_t *create_fresh_blob(uint32_t itemcount,
-        size_t itemsize) {
+        size_t itemsize, corsaro_memhandler_t *handler) {
 
     corsaro_memsource_t *blob;
+    size_t upsize;
+
+    upsize = (((itemsize * itemcount) / handler->pagesize) + 1) * handler->pagesize;
 
     blob = (corsaro_memsource_t *)malloc(sizeof(corsaro_memsource_t));
 
-    blob->blob = (uint8_t *)calloc(itemcount, itemsize);
+    blob->blob = mmap(NULL, upsize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                -1, 0);
+    if (blob->blob == MAP_FAILED) {
+        corsaro_log(handler->logger, "mmap failed: %s\n", strerror(errno));
+        free(blob);
+        return NULL;
+    }
+
+    blob->blobsize = upsize;
     blob->itemsize = itemsize;
     blob->alloceditems = itemcount;
     blob->nextavail = 0;
@@ -61,13 +75,16 @@ void init_corsaro_memhandler(corsaro_logger_t *logger,
     handler->items_per_blob = itemsperalloc;
     handler->itemsize = itemsize;
     handler->users = 1;
+    handler->pagesize = sysconf(_SC_PAGE_SIZE);
 
     pthread_mutex_init(&handler->mutex, NULL);
 
     handler->current = create_fresh_blob(handler->items_per_blob,
-            handler->itemsize);
+            handler->itemsize, handler);
     handler->freelist = NULL;
     handler->freelistavail = 0;
+    handler->unreleased = 1;
+
 }
 
 void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
@@ -77,6 +94,12 @@ void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
     pthread_mutex_lock(&handler->mutex);
     handler->users --;
     if (handler->users > 0) {
+        printf("%p, unreleased=%u freelist=%u blobsize=%lu totalmem=%lu\n",
+            handler, handler->unreleased, handler->freelistavail,
+            (handler->items_per_blob * handler->itemsize),
+            (handler->items_per_blob * handler->itemsize) *
+            (handler->unreleased + handler->freelistavail));
+                    
         pthread_mutex_unlock(&handler->mutex);
         return;
     }
@@ -86,7 +109,7 @@ void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
     while (blob) {
         tmp = blob;
         blob = blob->nextfree;
-        free(tmp->blob);
+        munmap(tmp->blob, tmp->blobsize);
         free(tmp);
     }
 
@@ -96,7 +119,7 @@ void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
      * memory handler around to use to release them...
      */
     if (handler->current->released >= handler->current->nextavail) {
-        free(handler->current->blob);
+        munmap(handler->current->blob, handler->current->blobsize);
         free(handler->current);
     }
 
@@ -132,7 +155,8 @@ uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
         } else if (handler->freelist == NULL) {
             /* No available blobs in the freelist, create a new one */
             handler->current = create_fresh_blob(handler->items_per_blob,
-                    handler->itemsize);
+                    handler->itemsize, handler);
+            handler->unreleased ++;
         } else {
             /* Pop an old blob off the freelist */
             handler->current = handler->freelist;
@@ -141,6 +165,7 @@ uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
             handler->current->released = 0;
             handler->current->nextfree = NULL;
             handler->freelistavail --;
+            handler->unreleased ++;
         }
     }
 
@@ -170,13 +195,14 @@ void release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
         itemsource->nextfree = handler->freelist;
         handler->freelist = itemsource;
         handler->freelistavail ++;
+        handler->unreleased --;
     }
 
     while (handler->freelistavail > 100) {
         corsaro_memsource_t *tmp = handler->freelist;
         handler->freelist = handler->freelist->nextfree;
         handler->freelistavail --;
-        free(tmp->blob);
+        munmap(tmp->blob, tmp->blobsize);
         free(tmp);
     }
 

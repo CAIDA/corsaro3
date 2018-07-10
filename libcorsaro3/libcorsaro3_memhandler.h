@@ -40,6 +40,7 @@ typedef struct corsaro_memblob corsaro_memsource_t;
 struct corsaro_memblob {
 
     uint8_t *blob;
+    size_t blobsize;
     size_t itemsize;
     uint32_t alloceditems;
 
@@ -60,6 +61,9 @@ typedef struct corsaro_memhandler {
 
     corsaro_memsource_t *current;
     corsaro_memsource_t *freelist;
+
+    uint32_t unreleased;
+    size_t pagesize;
 
 } corsaro_memhandler_t;
 
