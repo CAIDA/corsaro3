@@ -345,11 +345,11 @@ static inline corsaro_metric_set_t *init_metric_set(corsaro_logger_t *logger,
         mset->ipblock_handler = (corsaro_memhandler_t *)malloc(
                 sizeof(corsaro_memhandler_t));
         init_corsaro_memhandler(logger, mset->ipreport_handler,
-                sizeof(corsaro_report_ip_metric_t), 1000);
+                sizeof(corsaro_report_ip_metric_t), 100000);
         init_corsaro_memhandler(logger, mset->ip_handler,
-                sizeof(corsaro_report_ip_t), 5000);
+                sizeof(corsaro_report_ip_t), 50000);
         init_corsaro_memhandler(logger, mset->ipblock_handler,
-                sizeof(corsaro_report_ip_t), 2000);
+                sizeof(corsaro_report_ip_t), 200);
     }
     return mset;
 }
