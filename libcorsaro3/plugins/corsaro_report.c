@@ -922,7 +922,7 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
         m->workthreads[i].res_handler = (corsaro_memhandler_t *)malloc(
                 sizeof(corsaro_memhandler_t));
         init_corsaro_memhandler(p->logger, m->workthreads[i].res_handler,
-                sizeof(corsaro_report_result_t), 1000);
+                sizeof(corsaro_report_result_t), 10000);
 
         pthread_create(&(m->workthreads[i].threadid), NULL,
                 start_merge_worker, &(m->workthreads[i]));
