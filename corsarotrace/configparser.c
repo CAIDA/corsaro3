@@ -682,6 +682,10 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->threads = 2;
     glob->plugincount = 0;
 
+    glob->removeerratic = 0;
+    glob->removespoofed = 0;
+    glob->removerouted = 0;
+
     glob->trace = NULL;
     glob->filter = NULL;
     glob->logger = NULL;
@@ -778,6 +782,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
     stdopts.template = glob->template;
     stdopts.monitorid = glob->monitorid;
+    stdopts.procthreads = glob->threads;
 
     if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts) < 0) {
         corsaro_log(glob->logger,

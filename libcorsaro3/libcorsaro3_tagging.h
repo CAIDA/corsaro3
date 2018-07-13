@@ -36,6 +36,9 @@
 
 /* These are our "built-in" tags */
 /* TODO think about how we could support "custom" tags? */
+
+#define CORSARO_MAX_SUPPORTED_TAGS 16
+
 typedef struct corsaro_packet_tags {
     uint32_t providers_used;
     uint32_t netacq_region;

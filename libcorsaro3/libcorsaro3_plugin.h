@@ -82,6 +82,7 @@ typedef struct corsaro_plugin_result corsaro_plugin_result_t;
 typedef struct corsaro_plugin_proc_options {
     char *template;
     char *monitorid;
+    uint8_t procthreads;
 } corsaro_plugin_proc_options_t;
 
 /** Corsaro state for a packet
