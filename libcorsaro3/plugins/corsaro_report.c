@@ -508,7 +508,7 @@ static void *start_iptracker(void *tdata) {
                 continue;
             }
             track->intervalreports ++;
-            if (track->intervalreports < track->sourcethreads) {
+            if (track->intervalreports < track->sourcethreads * 0.66) {
                 pthread_mutex_unlock(&(track->mutex));
                 continue;
             }
