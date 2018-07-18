@@ -101,6 +101,7 @@ struct corsaro_trace_local {
     uint64_t pkts_outstanding;
     uint64_t pkts_since_tick;
     uint32_t next_report;
+    uint32_t next_rotate;
     uint32_t last_ts;
     uint8_t stopped;
 

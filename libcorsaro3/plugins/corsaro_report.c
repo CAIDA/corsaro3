@@ -492,7 +492,8 @@ void *start_iptracker(void *tdata) {
         newip = 0;
         for (i = 0; i < msg.numtags; i++) {
             /* Combined should always be the first tag we see, so we'll always
-             * know if this is a new IP before we do any "stable" metric updates.
+             * know if this is a new IP before we do any "stable" metric
+             * updates.
              */
 
             if (i == 0) {
@@ -500,8 +501,8 @@ void *start_iptracker(void *tdata) {
             }
 
             if (is_unstable_metric(msg.tags[i])) {
-                update_unstable_metric(track, msg.tags[i], msg.key.ipaddr, msg.issrc,
-                        &newip);
+                update_unstable_metric(track, msg.tags[i], msg.key.ipaddr,
+                        msg.issrc, &newip);
             }
 
             else if (newip) {
@@ -814,7 +815,7 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
 }
 
 #define GEN_METRICID(class, val) \
-    (((uint64_t) class) << 32 + ((uint64_t)val))
+    ((((uint64_t) class) << 32) + ((uint64_t)val))
 
 static void update_basic_counter(corsaro_report_state_t *state, uint64_t metricid,
         uint16_t iplen) {
@@ -1226,9 +1227,9 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
             }
 
             if (pthread_mutex_trylock(&(procconf->iptrackers[i].mutex)) == 0) {
-                printf("%u %u %d\n", fin->timestamp, procconf->iptrackers[i].lastresultts, i);
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
+                    printf("%u %u %d\n", fin->timestamp, procconf->iptrackers[i].lastresultts, i, totaldone);
                     update_tracker_results(&results, &(procconf->iptrackers[i]),
                             fin->timestamp, conf, m->res_handler);
 

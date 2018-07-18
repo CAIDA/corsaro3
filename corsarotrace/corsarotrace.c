@@ -152,6 +152,7 @@ static inline int corsarotrace_interval_end(corsaro_logger_t *logger,
                 tls->current_interval.time, ts,
                 tls->plugins->plugincount, interval_data);
     }
+    tls->pkts_outstanding = 0;
     return 0;
 }
 
@@ -261,8 +262,10 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)local;
-    struct timeval tv;
+    struct timeval tv, firsttv;
+    const libtrace_packet_t *firstpkt;
     corsaro_packet_tags_t packettags;
+    int ret;
 
     if (tls->stopped) {
         return packet;
@@ -297,11 +300,29 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
             exit(1);
         }
 
-        tls->current_interval.time = tv.tv_sec - (tv.tv_sec % glob->interval);
-        tls->lastrotateinterval.time = tls->current_interval.time;
+        if ((ret = trace_get_first_packet(trace, NULL, &firstpkt, NULL)) == -1) {
+            corsaro_log(glob->logger,
+                    "unable to get first packet timestamp?");
+            return packet;
+        }
+
+        if (ret == 0) {
+            return packet;
+        }
+
+        firsttv = trace_get_timeval(firstpkt);
+
+        tls->current_interval.time = firsttv.tv_sec -
+                (firsttv.tv_sec % glob->interval);
+        tls->lastrotateinterval.time = tls->current_interval.time -
+                (tls->current_interval.time %
+                (glob->interval * glob->rotatefreq));
         corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
                 tls->current_interval.time);
+
         tls->next_report = tls->current_interval.time + glob->interval;
+        tls->next_rotate = tls->lastrotateinterval.time +
+                (glob->interval * glob->rotatefreq);
     }
 
     if (tv.tv_sec < tls->current_interval.time) {
@@ -309,6 +330,8 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
                 "received a packet from *before* our current interval!");
         corsaro_log(glob->logger,
                 "skipping packet, but this is probably a b00g.");
+        printf("%u %u\n", tv.tv_sec, tls->current_interval.time);
+        assert(0);
         return packet;
     }
 
@@ -318,10 +341,10 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
                     tls->next_report) == -1) {
             /* do something?? */
         }
-        if (glob->rotatefreq > 0 &&
-                ((tls->current_interval.number + 1) % glob->rotatefreq) == 0) {
+        if (glob->rotatefreq > 0 && tv.tv_sec >= tls->next_rotate) {
             publish_file_closed_message(trace, t, tls->current_interval.number,
                     tls->next_report);
+            tls->next_rotate += (glob->interval * glob->rotatefreq);
         }
         tls->current_interval.number ++;
         tls->current_interval.time = tls->next_report;
@@ -381,7 +404,6 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
      */
 
     if (tls->pkts_since_tick == 0) {
-
         if (corsarotrace_interval_end(glob->logger, trace, t, tls,
                     glob->boundendts) == -1) {
             /* do something?? */
