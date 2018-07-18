@@ -116,6 +116,8 @@ typedef struct corsaro_report_iptracker {
     libtrace_message_queue_t incoming;
 
     uint32_t lastresultts;
+    uint8_t intervalreports;
+    uint8_t sourcethreads;
     pthread_t tid;
     pthread_mutex_t mutex;
     corsaro_ip_hash_t *unstables;
@@ -149,10 +151,27 @@ typedef struct corsaro_report_config {
     corsaro_memhandler_t **basic_handlers;
 } corsaro_report_config_t;
 
+typedef struct corsaro_report_msg_body {
+    uint32_t ipaddr;
+    uint8_t issrc;
+    uint8_t numtags;
+    uint64_t tags[CORSARO_MAX_SUPPORTED_TAGS];
+} corsaro_report_msg_body_t;
+
+#define REPORT_BATCH_SIZE (50)
+
+typedef struct corsaro_report_ip_message {
+    uint8_t msgtype;
+    uint32_t timestamp;
+    uint16_t bodycount;
+    corsaro_report_msg_body_t *update;
+} PACKED corsaro_report_ip_message_t;
+
 typedef struct corsaro_report_state {
 
     corsaro_memhandler_t *counter_handler;
     corsaro_report_basic_counter_t *met_counters;
+    corsaro_report_ip_message_t *nextmsg;
     int threadid;
     uint32_t current_interval;
 
@@ -162,17 +181,6 @@ typedef struct corsaro_report_merge_state {
     corsaro_avro_writer_t *writer;
     corsaro_memhandler_t *res_handler;
 } corsaro_report_merge_state_t;
-
-typedef struct corsaro_report_ip_message {
-    uint8_t msgtype;
-    union {
-        uint32_t ipaddr;
-        uint32_t timestamp;
-    } key;
-    uint8_t issrc;
-    uint8_t numtags;
-    uint64_t tags[CORSARO_MAX_SUPPORTED_TAGS];
-} PACKED corsaro_report_ip_message_t;
 
 typedef struct corsaro_report_interim {
     corsaro_report_basic_counter_t *counter;
@@ -446,11 +454,39 @@ static void tally_unstables(corsaro_report_iptracker_t *track) {
 
 }
 
-void *start_iptracker(void *tdata) {
+static void process_msg_body(corsaro_report_iptracker_t *track,
+        corsaro_report_msg_body_t *body) {
+
+    uint8_t newip = 0;
+    int i;
+
+    for (i = 0; i < body->numtags; i++) {
+        /* Combined should always be the first tag we see, so we'll always
+         * know if this is a new IP before we do any "stable" metric
+         * updates.
+         */
+
+        if (i == 0) {
+            assert(body->tags[i] == 0);
+        }
+
+        if (is_unstable_metric(body->tags[i])) {
+            update_unstable_metric(track, body->tags[i], body->ipaddr,
+                    body->issrc, &newip);
+        }
+
+        else if (newip) {
+            update_stable_metric(track, body->tags[i], body->issrc);
+        }
+    }
+
+}
+
+
+static void *start_iptracker(void *tdata) {
     corsaro_report_iptracker_t *track;
     corsaro_report_ip_message_t msg;
     int i;
-    uint8_t newip = 0;
 
     track = (corsaro_report_iptracker_t *)tdata;
 
@@ -467,10 +503,16 @@ void *start_iptracker(void *tdata) {
 
         if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
             pthread_mutex_lock(&(track->mutex));
-            if (msg.key.timestamp == 0 || msg.key.timestamp <= track->lastresultts) {
+            if (msg.timestamp == 0 || msg.timestamp <= track->lastresultts) {
                 pthread_mutex_unlock(&(track->mutex));
                 continue;
             }
+            track->intervalreports ++;
+            if (track->intervalreports < track->sourcethreads) {
+                pthread_mutex_unlock(&(track->mutex));
+                continue;
+            }
+
             pthread_mutex_unlock(&(track->mutex));
 
             /* End of interval, tally up results and update lastresults */
@@ -480,7 +522,8 @@ void *start_iptracker(void *tdata) {
             tally_unstables(track);
 
             pthread_mutex_lock(&(track->mutex));
-            track->lastresultts = msg.key.timestamp;
+            track->lastresultts = msg.timestamp;
+            track->intervalreports = 0;
 
             corsaro_log(track->logger,
                     "tracker thread has finished tally for %u", track->lastresultts);
@@ -489,26 +532,11 @@ void *start_iptracker(void *tdata) {
             continue;
         }
 
-        newip = 0;
-        for (i = 0; i < msg.numtags; i++) {
-            /* Combined should always be the first tag we see, so we'll always
-             * know if this is a new IP before we do any "stable" metric
-             * updates.
-             */
-
-            if (i == 0) {
-                assert(msg.tags[i] == 0);
-            }
-
-            if (is_unstable_metric(msg.tags[i])) {
-                update_unstable_metric(track, msg.tags[i], msg.key.ipaddr,
-                        msg.issrc, &newip);
-            }
-
-            else if (newip) {
-                update_stable_metric(track, msg.tags[i], msg.issrc);
-            }
+        for (i = 0; i < msg.bodycount; i++) {
+            process_msg_body(track, &(msg.update[i]));
         }
+        free(msg.update);
+
 
     }
 
@@ -554,6 +582,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         conf->iptrackers[i].stables = NULL;
         conf->iptrackers[i].lastresult = NULL;
         conf->iptrackers[i].logger = p->logger;
+        conf->iptrackers[i].sourcethreads = stdopts->procthreads;
 
         conf->iptrackers[i].ip_handler = (corsaro_memhandler_t *)malloc(
                 sizeof(corsaro_memhandler_t));
@@ -608,6 +637,7 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
 
     corsaro_report_state_t *state;
     corsaro_report_config_t *conf;
+    int i;
 
     conf = (corsaro_report_config_t *)(p->config);
     state = (corsaro_report_state_t *)malloc(sizeof(corsaro_report_state_t));
@@ -620,6 +650,13 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     init_corsaro_memhandler(p->logger, state->counter_handler,
             sizeof(corsaro_report_basic_counter_t), 10000);
 
+    state->nextmsg = (corsaro_report_ip_message_t *)calloc(
+            conf->tracker_count, sizeof(corsaro_report_ip_message_t));
+
+    for (i = 0; i < conf->tracker_count; i++) {
+        state->nextmsg[i].update = (corsaro_report_msg_body_t *)calloc(
+                REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+    }
 
     conf->basic_handlers[threadid] = state->counter_handler;
     add_corsaro_memhandler_user(state->counter_handler);
@@ -656,8 +693,17 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
     msg.msgtype = CORSARO_IP_MESSAGE_HALT;
 
     for (i = 0; i < conf->tracker_count; i++) {
+        if (state->nextmsg[i].bodycount > 0) {
+            libtrace_message_queue_put(&(conf->iptrackers[i].incoming),
+                    (void *)(&(state->nextmsg[i])));
+
+            state->nextmsg[i].bodycount = 0;
+            state->nextmsg[i].update = (corsaro_report_msg_body_t *)calloc(
+                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+        }
         libtrace_message_queue_put(&(conf->iptrackers[i].incoming), (void *)(&msg));
     }
+
     for (i = 0; i < conf->tracker_count; i++) {
         pthread_join(conf->iptrackers[i].tid, NULL);
     }
@@ -733,9 +779,16 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     
     memset(&msg, 0, sizeof(msg));
     msg.msgtype = CORSARO_IP_MESSAGE_INTERVAL;
-    msg.key.timestamp = state->current_interval;
+    msg.timestamp = state->current_interval;
 
     for (i = 0; i < conf->tracker_count; i++) {
+        if (state->nextmsg[i].bodycount > 0) {
+            libtrace_message_queue_put(&(conf->iptrackers[i].incoming),
+                    (void *)(&(state->nextmsg[i])));
+            state->nextmsg[i].update = (corsaro_report_msg_body_t *)calloc(
+                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+            state->nextmsg[i].bodycount = 0;
+        }
         libtrace_message_queue_put(&(conf->iptrackers[i].incoming), (void *)(&msg));
     }
 
@@ -846,20 +899,20 @@ static void update_basic_counter(corsaro_report_state_t *state, uint64_t metrici
 
 }
 
-static inline void add_new_message_tag(corsaro_report_ip_message_t *msg,
+static inline void add_new_message_tag(corsaro_report_msg_body_t *body,
         uint64_t metricid) {
 
-    assert(msg->numtags < CORSARO_MAX_SUPPORTED_TAGS);
+    assert(body->numtags < CORSARO_MAX_SUPPORTED_TAGS);
 
-    msg->tags[msg->numtags] = metricid;
-    msg->numtags ++;
+    body->tags[body->numtags] = metricid;
+    body->numtags ++;
 
 }
 
 static inline void process_single_tag(corsaro_report_metric_class_t class,
         uint32_t tagval, uint32_t maxtagval, uint16_t iplen,
-        corsaro_report_state_t *state, corsaro_report_ip_message_t *msg,
-        corsaro_logger_t *logger) {
+        corsaro_report_state_t *state, corsaro_report_msg_body_t *body,
+        corsaro_logger_t *logger, uint8_t issrc) {
 
     uint64_t metricid;
 
@@ -870,47 +923,51 @@ static inline void process_single_tag(corsaro_report_metric_class_t class,
     }
 
     metricid = GEN_METRICID(class, tagval);
-    update_basic_counter(state, metricid, iplen);
-    add_new_message_tag(msg, metricid);
+    if (issrc) {
+        update_basic_counter(state, metricid, iplen);
+    }
+
+    add_new_message_tag(body, metricid);
 }
 
 
 static void process_tags(corsaro_packet_tags_t *tags, uint16_t iplen,
-        corsaro_report_ip_message_t *msg, corsaro_report_state_t *state,
-        corsaro_logger_t *logger) {
+        corsaro_report_msg_body_t *body, corsaro_report_state_t *state,
+        corsaro_logger_t *logger, uint32_t addr, uint8_t issrc) {
 
-    uint64_t metricid;
-
+    body->ipaddr = addr;
+    body->issrc = issrc;
+    body->numtags = 0;
 
     process_single_tag(CORSARO_METRIC_CLASS_COMBINED, 0, 0, iplen, state,
-            msg, logger);
+            body, logger, issrc);
 
     process_single_tag(CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
-            METRIC_IPPROTOS_MAX, iplen, state, msg, logger);
+            METRIC_IPPROTOS_MAX, iplen, state, body, logger, issrc);
 
     if (tags->protocol == TRACE_IPPROTO_ICMP) {
         process_single_tag(CORSARO_METRIC_CLASS_ICMP_TYPE, tags->src_port,
-                METRIC_ICMP_MAX, iplen, state, msg, logger);
+                METRIC_ICMP_MAX, iplen, state, body, logger, issrc);
         process_single_tag(CORSARO_METRIC_CLASS_ICMP_CODE, tags->dest_port,
-                METRIC_ICMP_MAX, iplen, state, msg, logger);
+                METRIC_ICMP_MAX, iplen, state, body, logger, issrc);
 
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         process_single_tag(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT, tags->src_port,
-                METRIC_PORT_MAX, iplen, state, msg, logger);
+                METRIC_PORT_MAX, iplen, state, body, logger, issrc);
         process_single_tag(CORSARO_METRIC_CLASS_TCP_DEST_PORT, tags->dest_port,
-                METRIC_PORT_MAX, iplen, state, msg, logger);
+                METRIC_PORT_MAX, iplen, state, body, logger, issrc);
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
         process_single_tag(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, tags->src_port,
-                METRIC_PORT_MAX, iplen, state, msg, logger);
+                METRIC_PORT_MAX, iplen, state, body, logger, issrc);
         process_single_tag(CORSARO_METRIC_CLASS_UDP_DEST_PORT, tags->dest_port,
-                METRIC_PORT_MAX, iplen, state, msg, logger);
+                METRIC_PORT_MAX, iplen, state, body, logger, issrc);
     }
 
     if (maxmind_tagged(tags)) {
         process_single_tag(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
-                tags->maxmind_continent, 0, iplen, state, msg, logger);
+                tags->maxmind_continent, 0, iplen, state, body, logger, issrc);
         process_single_tag(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
-                tags->maxmind_continent, 0, iplen, state, msg, logger);
+                tags->maxmind_continent, 0, iplen, state, body, logger, issrc);
     }
 
 }
@@ -923,8 +980,9 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     uint32_t srcaddr, dstaddr;
     int trackerhash;
     corsaro_memsource_t *memsrc;
-    corsaro_report_ip_message_t msg;
     corsaro_report_config_t *conf;
+    corsaro_report_msg_body_t *body;
+    corsaro_report_ip_message_t *msg;
 
     conf = (corsaro_report_config_t *)(p->config);
     state = (corsaro_report_state_t *)local;
@@ -944,20 +1002,32 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
         return 0;
     }
 
-    memset(&msg, 0, sizeof(msg));
 
-    process_tags(tags, iplen, &msg, state, p->logger);
-
-    msg.msgtype = CORSARO_IP_MESSAGE_UPDATE;
-    msg.key.ipaddr = srcaddr;
-    msg.issrc = 1;
     trackerhash = (srcaddr >> 24) % conf->tracker_count;
-    libtrace_message_queue_put(&(conf->iptrackers[trackerhash].incoming), (void *)(&msg));
+    msg = &(state->nextmsg[trackerhash]);
+    body = &(msg->update[msg->bodycount]);
+    process_tags(tags, iplen, body, state, p->logger, srcaddr, 1);
+    msg->bodycount ++;
 
-    msg.key.ipaddr = dstaddr;
-    msg.issrc = 0;
+    if (msg->bodycount == REPORT_BATCH_SIZE) {
+        libtrace_message_queue_put(&(conf->iptrackers[trackerhash].incoming), (void *)msg);
+        msg->bodycount = 0;
+        msg->update = (corsaro_report_msg_body_t *)calloc(
+                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+    }
+
     trackerhash = (dstaddr >> 24) % conf->tracker_count;
-    libtrace_message_queue_put(&(conf->iptrackers[trackerhash].incoming), (void *)(&msg));
+    msg = &(state->nextmsg[trackerhash]);
+    body = &(msg->update[msg->bodycount]);
+    process_tags(tags, iplen, body, state, p->logger, dstaddr, 0);
+    msg->bodycount ++;
+
+    if (msg->bodycount == REPORT_BATCH_SIZE) {
+        libtrace_message_queue_put(&(conf->iptrackers[trackerhash].incoming), (void *)msg);
+        msg->bodycount = 0;
+        msg->update = (corsaro_report_msg_body_t *)calloc(
+                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+    }
 
     return 0;
 }
@@ -1229,7 +1299,6 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
             if (pthread_mutex_trylock(&(procconf->iptrackers[i].mutex)) == 0) {
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
-                    printf("%u %u %d\n", fin->timestamp, procconf->iptrackers[i].lastresultts, i, totaldone);
                     update_tracker_results(&results, &(procconf->iptrackers[i]),
                             fin->timestamp, conf, m->res_handler);
 
