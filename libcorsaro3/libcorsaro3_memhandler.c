@@ -94,12 +94,6 @@ void destroy_corsaro_memhandler(corsaro_memhandler_t *handler) {
     pthread_mutex_lock(&handler->mutex);
     handler->users --;
     if (handler->users > 0) {
-        printf("%p, unreleased=%u freelist=%u blobsize=%lu totalmem=%lu\n",
-            handler, handler->unreleased, handler->freelistavail,
-            (handler->items_per_blob * handler->itemsize),
-            (handler->items_per_blob * handler->itemsize) *
-            (handler->unreleased + handler->freelistavail));
-                    
         pthread_mutex_unlock(&handler->mutex);
         return;
     }
