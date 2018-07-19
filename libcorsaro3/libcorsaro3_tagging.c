@@ -346,6 +346,7 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
 
     tags->providers_used = 0;
 
+    update_basic_tags(tagger->logger, packet, tags);
     if (tagger->providers == NULL) {
         return 0;
     }
@@ -379,8 +380,6 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
         }
     }
 
-    update_basic_tags(tagger->logger, packet, tags);
-    tags->src_port = trace_get_source_port(packet);
 
     return 0;
 }
