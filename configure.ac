@@ -148,8 +148,8 @@ AX_LIB_SOCKET_NSL
 # Checks for libraries.
 AC_CHECK_LIB([packetdump], [trace_dump_packet], ,[AC_MSG_WARN(
 			   [libpacketdump missing. ascii packet dumps not available])])
-AC_CHECK_LIB([trace], [trace_pstart], ,[AC_MSG_ERROR(
-		      [libtrace >= 4.0.0 required])])
+AC_CHECK_LIB([trace], [libtrace_message_queue_put], ,[AC_MSG_ERROR(
+		      [libtrace >= 4.0.3 required])])
 
 # TODO -- remove this check when we spin corsaro3 off into its own project
 AC_SEARCH_LIBS([wandio_create], [wandio trace], ,[AC_MSG_ERROR(
