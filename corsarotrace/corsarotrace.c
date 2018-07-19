@@ -231,7 +231,11 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
     corsaro_trace_local_t *tls = (corsaro_trace_local_t *)local;
 
-    if (glob->currenturi == glob->totaluris) {
+    /* -1 because we don't increment currenturi until all of the threads have
+     * stopped for the trace, so current and total will never be equal at this
+     * point.
+     */
+    if (glob->currenturi == glob->totaluris - 1) {
         if (tls->pkts_outstanding) {
             if (corsarotrace_interval_end(glob->logger, trace, t, tls,
                         tls->last_ts) == -1) {
@@ -291,7 +295,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
 
-    if (tls->current_interval.time == 0) {
+    while (tls->current_interval.time == 0) {
         /* First non-ignored packet */
         if (glob->interval <= 0) {
             corsaro_log(glob->logger,
@@ -307,7 +311,8 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         }
 
         if (ret == 0) {
-            return packet;
+            usleep(10);
+            continue;
         }
 
         firsttv = trace_get_timeval(firstpkt);
