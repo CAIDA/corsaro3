@@ -168,19 +168,22 @@ typedef struct corsaro_report_msg_body {
     uint64_t tags[CORSARO_MAX_SUPPORTED_TAGS];
 } corsaro_report_msg_body_t;
 
-#define REPORT_BATCH_SIZE (50)
+#define REPORT_BATCH_SIZE (500)
 
 typedef struct corsaro_report_ip_message {
     uint8_t msgtype;
     uint8_t sender;
     uint32_t timestamp;
     uint16_t bodycount;
+    corsaro_memsource_t *memsrc;
+    corsaro_memhandler_t *handler;
     corsaro_report_msg_body_t *update;
 } PACKED corsaro_report_ip_message_t;
 
 typedef struct corsaro_report_state {
 
     corsaro_memhandler_t *counter_handler;
+    corsaro_memhandler_t *msgbody_handler;
     corsaro_report_basic_counter_t *met_counters;
     corsaro_report_ip_message_t *nextmsg;
     int threadid;
@@ -664,7 +667,7 @@ static void *start_iptracker(void *tdata) {
         for (i = 0; i < msg.bodycount; i++) {
             process_msg_body(track, msg.sender, &(msg.update[i]));
         }
-        free(msg.update);
+        release_corsaro_memhandler_item(msg.handler, msg.memsrc);
 
 
     }
@@ -775,6 +778,7 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
 
     corsaro_report_state_t *state;
     corsaro_report_config_t *conf;
+    corsaro_memsource_t *memsrc;
     int i;
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -788,12 +792,20 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     init_corsaro_memhandler(p->logger, state->counter_handler,
             sizeof(corsaro_report_basic_counter_t), 10000);
 
+    state->msgbody_handler = (corsaro_memhandler_t *)malloc(
+            sizeof(corsaro_memhandler_t));
+    init_corsaro_memhandler(p->logger, state->msgbody_handler,
+            sizeof(corsaro_report_msg_body_t) * REPORT_BATCH_SIZE,
+            10000);
+
     state->nextmsg = (corsaro_report_ip_message_t *)calloc(
             conf->tracker_count, sizeof(corsaro_report_ip_message_t));
 
     for (i = 0; i < conf->tracker_count; i++) {
-        state->nextmsg[i].update = (corsaro_report_msg_body_t *)calloc(
-                REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+        state->nextmsg[i].update = (corsaro_report_msg_body_t *)
+            get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
+        state->nextmsg[i].handler = state->msgbody_handler;
+        state->nextmsg[i].memsrc = memsrc;
         state->nextmsg[i].sender = state->threadid;
     }
 
@@ -819,6 +831,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
     corsaro_report_state_t *state;
     corsaro_report_ip_message_t msg;
     corsaro_report_config_t *conf;
+    corsaro_memsource_t *memsrc;
     int i;
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -838,8 +851,10 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
                     (void *)(&(state->nextmsg[i])));
 
             state->nextmsg[i].bodycount = 0;
-            state->nextmsg[i].update = (corsaro_report_msg_body_t *)calloc(
-                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+            state->nextmsg[i].update = (corsaro_report_msg_body_t *)
+                get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
+            state->nextmsg[i].handler = state->msgbody_handler;
+            state->nextmsg[i].memsrc = memsrc;
         }
         libtrace_message_queue_put(&(conf->iptrackers[i].incoming), (void *)(&msg));
     }
@@ -850,6 +865,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
 
     release_all_counters(state->met_counters, state->counter_handler);
     destroy_corsaro_memhandler(state->counter_handler);
+    destroy_corsaro_memhandler(state->msgbody_handler);
     free(state);
 
     return 0;
@@ -894,6 +910,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     corsaro_report_basic_counter_t *detach;
     corsaro_report_interim_t *interim;
     corsaro_report_ip_message_t msg;
+    corsaro_memsource_t *memsrc;
     int i;
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -922,9 +939,11 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
         if (state->nextmsg[i].bodycount > 0) {
             libtrace_message_queue_put(&(conf->iptrackers[i].incoming),
                     (void *)(&(state->nextmsg[i])));
-            state->nextmsg[i].update = (corsaro_report_msg_body_t *)calloc(
-                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
             state->nextmsg[i].bodycount = 0;
+            state->nextmsg[i].update = (corsaro_report_msg_body_t *)
+                get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
+            state->nextmsg[i].handler = state->msgbody_handler;
+            state->nextmsg[i].memsrc = memsrc;
         }
         libtrace_message_queue_put(&(conf->iptrackers[i].incoming), (void *)(&msg));
     }
@@ -1147,8 +1166,10 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     if (msg->bodycount == REPORT_BATCH_SIZE) {
         libtrace_message_queue_put(&(conf->iptrackers[trackerhash].incoming), (void *)msg);
         msg->bodycount = 0;
-        msg->update = (corsaro_report_msg_body_t *)calloc(
-                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+        msg->update = (corsaro_report_msg_body_t *)
+            get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
+        msg->handler = state->msgbody_handler;
+        msg->memsrc = memsrc;
     }
 
     trackerhash = (dstaddr >> 24) % conf->tracker_count;
@@ -1160,8 +1181,10 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     if (msg->bodycount == REPORT_BATCH_SIZE) {
         libtrace_message_queue_put(&(conf->iptrackers[trackerhash].incoming), (void *)msg);
         msg->bodycount = 0;
-        msg->update = (corsaro_report_msg_body_t *)calloc(
-                    REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+        msg->update = (corsaro_report_msg_body_t *)
+            get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
+        msg->handler = state->msgbody_handler;
+        msg->memsrc = memsrc;
     }
 
     return 0;
