@@ -98,6 +98,9 @@ static int close_avro_writer()
 {
   iow_t *df = NULL;
 
+  /* do a flush (why does close not do this???) */
+  avro_file_writer_flush(a_writer);
+
   /* close the writer */
   errno = 0;
   if (avro_file_writer_close(a_writer) != 0 || errno != 0) {
