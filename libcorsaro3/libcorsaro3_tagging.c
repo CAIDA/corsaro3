@@ -32,8 +32,8 @@
 #include "libcorsaro3_tagging.h"
 #include "libcorsaro3_log.h"
 
-corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger)
-{
+corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
+        ipmeta_t *ipmeta) {
 
     corsaro_packet_tagger_t *tagger = NULL;
 
@@ -44,7 +44,7 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger)
     }
 
     tagger->logger = logger;
-    tagger->ipmeta = ipmeta_init();
+    tagger->ipmeta = ipmeta;
     tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
     tagger->tagfreelist = libtrace_list_init(sizeof(corsaro_packet_tags_t *));
 
@@ -108,10 +108,6 @@ static inline char *create_prefix2asn_option_string(corsaro_logger_t *logger,
     int used = 0;
     int towrite = 0;
 
-    snprintf(fragment, FRAGSPACE, "%s ", "prefix2asn");
-
-    COPY_STRING(space, MAXSPACE, used, fragment, "prefix2asn");
-
     if (pfxopts->pfx2as_file) {
         snprintf(fragment, FRAGSPACE, "-f %s ", pfxopts->pfx2as_file);
         COPY_STRING(space, MAXSPACE, used, fragment, "maxmind");
@@ -137,10 +133,6 @@ static inline char *create_netacq_option_string(corsaro_logger_t *logger,
     int used = 0;
     int towrite = 0;
     libtrace_list_node_t *n;
-
-    snprintf(fragment, FRAGSPACE, "%s ", "netacq-edge");
-
-    COPY_STRING(space, MAXSPACE, used, fragment, "netacq-edge");
 
     if (acqopts->blocks_file) {
         snprintf(fragment, FRAGSPACE, "-b %s ", acqopts->blocks_file);
@@ -212,11 +204,52 @@ static char *create_ipmeta_options(corsaro_logger_t *logger,
 
 }
 
-int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
-        ipmeta_provider_id_t provid, void *options) {
+ipmeta_provider_t *corsaro_init_ipmeta_provider(ipmeta_t *ipmeta,
+        ipmeta_provider_id_t provid, void *options, corsaro_logger_t *logger) {
 
-    ipmeta_provider_t *prov;
     char *optstring = NULL;
+    ipmeta_provider_t *prov;
+
+    if (ipmeta == NULL) {
+        corsaro_log(logger,
+                "Cannot create IPMeta provider: IPMeta instance is NULL.");
+        return NULL;
+    }
+
+    prov = ipmeta_get_provider_by_id(ipmeta, provid);
+    if (prov == NULL) {
+        corsaro_log(logger,
+                "Cannot create IPMeta provider: %u is an invalid provider ID.",
+                provid);
+        return NULL;
+    }
+
+    optstring = create_ipmeta_options(logger, provid, options);
+    if (!optstring) {
+        corsaro_log(logger,
+                "Cannot create IPMeta provider %u: error parsing options.",
+                provid);
+        return NULL;
+    }
+
+    if (ipmeta_enable_provider(ipmeta, prov, (const char *)optstring,
+            IPMETA_PROVIDER_DEFAULT_NO) != 0) {
+        corsaro_log(logger,
+                "Cannot create IPMeta provider %u: libipmeta internal error.",
+                provid);
+        free(optstring);
+        return NULL;
+    }
+
+    if (optstring) {
+        free(optstring);
+    }
+    return prov;
+}
+
+int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
+        ipmeta_provider_t *prov) {
+
 
     if (tagger == NULL) {
         return -1;
@@ -228,48 +261,62 @@ int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
         return -1;
     }
 
-    prov = ipmeta_get_provider_by_id(tagger->ipmeta, provid);
+    /* Provider is not initialised, so just skip it */
     if (prov == NULL) {
-        corsaro_log(tagger->logger,
-                "Cannot enable IPMeta provider: %u is an invalid provider ID.",
-                provid);
-        return -1;
-    }
-
-    optstring = create_ipmeta_options(tagger->logger, provid, options);
-    if (!optstring) {
-        corsaro_log(tagger->logger,
-                "Cannot enable IPMeta provider %u: error parsing options.",
-                provid);
-        return -1;
-    }
-
-    if (ipmeta_enable_provider(tagger->ipmeta, prov, (const char *)optstring,
-            IPMETA_PROVIDER_DEFAULT_NO) != 0) {
-        corsaro_log(tagger->logger,
-                "Cannot enable IPMeta provider %u: libipmeta internal error.",
-                provid);
-        free(optstring);
-        return -1;
+        return 0;
     }
 
     libtrace_list_push_back(tagger->providers, &prov);
 
-    if (optstring) {
-        free(optstring);
-    }
-
     return 0;
 }
+
+int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
+        ipmeta_provider_t *prov) {
+
+    libtrace_list_node_t *n;
+    ipmeta_provider_t **current = NULL;
+
+    if (tagger == NULL) {
+        return -1;
+    }
+
+    if (tagger->ipmeta == NULL) {
+        corsaro_log(tagger->logger,
+                "Cannot replace IPMeta provider: IPMeta instance is NULL.");
+        return -1;
+    }
+
+    /* Provider is not initialised, so just skip it */
+    if (prov == NULL) {
+        return 0;
+    }
+
+    n = tagger->providers->head;
+    while (n) {
+        current = (ipmeta_provider_t **)(n->data);
+
+        n = n->next;
+        if (ipmeta_get_provider_id(*current) == ipmeta_get_provider_id(prov)) {
+            break;
+        }
+        current = NULL;
+    }
+
+    if (current == NULL) {
+        libtrace_list_push_back(tagger->providers, &prov);
+    } else {
+        n->data = &prov;
+    }
+    return 0;
+}
+
 
 void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger) {
 
     libtrace_list_node_t *n;
 
     if (tagger) {
-        if (tagger->ipmeta) {
-            ipmeta_free(tagger->ipmeta);
-        }
 
         if (tagger->providers) {
             libtrace_list_deinit(tagger->providers);
@@ -303,6 +350,25 @@ static int update_maxmind_tags(corsaro_logger_t *logger,
     tags->maxmind_country = *((uint16_t *)(rec->country_code));
 
     tags->providers_used |= (1 << IPMETA_PROVIDER_MAXMIND);
+
+    return 0;
+}
+
+static int update_netacq_tags(corsaro_logger_t *logger,
+        ipmeta_provider_t *prov, uint32_t addr, corsaro_packet_tags_t *tags) {
+
+    ipmeta_record_t *rec = NULL;
+
+    rec = ipmeta_lookup_single(prov, addr);
+
+    if (rec == NULL) {
+        return 0;
+    }
+
+    tags->netacq_continent = *((uint16_t *)(rec->continent_code));
+    tags->netacq_country = *((uint16_t *)(rec->country_code));
+
+    tags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
 
     return 0;
 }
@@ -370,6 +436,12 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
         switch(ipmeta_get_provider_id(prov)) {
             case IPMETA_PROVIDER_MAXMIND:
                 if (update_maxmind_tags(tagger->logger, prov,
+                            sin->sin_addr.s_addr, tags) != 0) {
+                    return -1;
+                }
+                break;
+            case IPMETA_PROVIDER_NETACQ_EDGE:
+                if (update_netacq_tags(tagger->logger, prov,
                             sin->sin_addr.s_addr, tags) != 0) {
                     return -1;
                 }

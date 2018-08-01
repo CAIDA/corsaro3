@@ -183,33 +183,29 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
                 glob->treefiltername);
 
         if (glob->taggingon) {
-            tls->tagger = corsaro_create_packet_tagger(glob->logger);
+            tls->tagger = corsaro_create_packet_tagger(glob->logger,
+                    glob->ipmeta);
             if (tls->tagger == NULL) {
                 corsaro_log(glob->logger,
                         "out of memory while creating packet tagger.");
             }
+       
+            if (corsaro_enable_ipmeta_provider(tls->tagger,
+                        glob->pfxipmeta) < 0) {
+                corsaro_log(glob->logger,
+                        "error while enabling prefix->asn tagging.");
+            }
 
-            if (glob->pfxtagopts.enabled) {
-                if (corsaro_enable_ipmeta_provider(tls->tagger,
-                        IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts)) != 0) {
-                    corsaro_log(glob->logger,
-                            "error while enabling prefix->asn tagging.");
-                }
+            if (corsaro_enable_ipmeta_provider(tls->tagger,
+                        glob->maxmindipmeta) < 0) {
+                corsaro_log(glob->logger,
+                        "error while enabling Maxmind geo-location tags.");
             }
-            if (glob->maxtagopts.enabled) {
-                if (corsaro_enable_ipmeta_provider(tls->tagger,
-                        IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts)) != 0) {
-                    corsaro_log(glob->logger,
-                            "error while enabling Maxmind geo-location tags.");
-                }
-            }
-            if (glob->netacqtagopts.enabled) {
-                if (corsaro_enable_ipmeta_provider(tls->tagger,
-                        IPMETA_PROVIDER_NETACQ_EDGE,
-                        &(glob->netacqtagopts)) != 0) {
-                    corsaro_log(glob->logger,
-                            "error while enabling Netacq-Edge geo-location tags.");
-                }
+
+            if (corsaro_enable_ipmeta_provider(tls->tagger,
+                        glob->netacqipmeta) < 0) {
+                corsaro_log(glob->logger,
+                        "error while enabling Netacq-Edge geo-location tags.");
             }
         } else {
             tls->tagger = NULL;
@@ -667,6 +663,7 @@ int main(int argc, char *argv[]) {
     char *logmodestr = NULL;
     corsaro_trace_global_t *glob = NULL;
     int logmode = GLOBAL_LOGMODE_STDERR;
+    ipmeta_provider_t *prov;
 
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
@@ -744,6 +741,46 @@ int main(int argc, char *argv[]) {
     glob = corsaro_trace_init_global(configfile, logmode);
     if (glob == NULL) {
         return 1;
+    }
+
+    if (glob->taggingon) {
+        glob->ipmeta = ipmeta_init();
+
+        if (glob->pfxtagopts.enabled) {
+            prov = corsaro_init_ipmeta_provider(glob->ipmeta,
+                        IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts),
+                        glob->logger);
+            if (prov == NULL) {
+                corsaro_log(glob->logger,
+                        "error while enabling prefix->asn tagging.");
+            } else {
+                glob->pfxipmeta = prov;
+            }
+        }
+
+        if (glob->maxtagopts.enabled) {
+            prov = corsaro_init_ipmeta_provider(glob->ipmeta,
+                        IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts),
+                        glob->logger);
+            if (prov == NULL) {
+                corsaro_log(glob->logger,
+                        "error while enabling Maxmind geo-location tagging.");
+            } else {
+                glob->maxmindipmeta = prov;
+            }
+        }
+
+        if (glob->netacqtagopts.enabled) {
+            prov = corsaro_init_ipmeta_provider(glob->ipmeta,
+                        IPMETA_PROVIDER_NETACQ_EDGE,
+                        &(glob->netacqtagopts), glob->logger);
+            if (prov == NULL) {
+                corsaro_log(glob->logger,
+                        "error while enabling Netacq-Edge geo-location tagging.");
+            } else {
+                glob->netacqipmeta = prov;
+            }
+        }
     }
 
     while (glob->currenturi < glob->totaluris && !corsaro_halted) {

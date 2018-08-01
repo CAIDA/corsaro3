@@ -700,6 +700,11 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     memset(&(glob->maxtagopts), 0, sizeof(maxmind_opts_t));
     memset(&(glob->netacqtagopts), 0, sizeof(netacq_opts_t));
 
+    glob->ipmeta = NULL;
+    glob->maxmindipmeta = NULL;
+    glob->netacqipmeta = NULL;
+    glob->pfxipmeta = NULL;
+
     /* Need to grab the template first, in case we need it for logging.
      * This will mean we read the config file twice... :(
      */
@@ -912,6 +917,10 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
 
     if (glob->netacqtagopts.ds_name) {
         free(glob->netacqtagopts.ds_name);
+    }
+
+    if (glob->ipmeta) {
+        ipmeta_free(glob->ipmeta);
     }
 
     destroy_corsaro_logger(glob->logger);

@@ -87,6 +87,11 @@ typedef struct corsaro_trace_glob {
     maxmind_opts_t maxtagopts;
     netacq_opts_t netacqtagopts;
 
+    ipmeta_t *ipmeta; 
+    ipmeta_provider_t *maxmindipmeta;
+    ipmeta_provider_t *netacqipmeta;
+    ipmeta_provider_t *pfxipmeta;
+
     corsaro_trace_local_t **savedlocalstate;
     fn_hasher hasher;
     void *hasher_data;

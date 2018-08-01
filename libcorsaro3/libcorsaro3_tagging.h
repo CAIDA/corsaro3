@@ -86,9 +86,15 @@ typedef struct netacq_options {
     uint8_t enabled;
 } netacq_opts_t;
 
-corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger);
+corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
+        ipmeta_t *ipmeta);
+ipmeta_provider_t *corsaro_init_ipmeta_provider(ipmeta_t *ipmeta,
+        ipmeta_provider_id_t provid, void *options, corsaro_logger_t *logger);
 int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
-        ipmeta_provider_id_t provid, void *options);
+        ipmeta_provider_t *prov);
+int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
+        ipmeta_provider_t *prov);
+
 void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger);
 
 int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
