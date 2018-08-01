@@ -134,11 +134,9 @@ typedef struct corsaro_report_iptracker {
     uint8_t haltphase;
     pthread_t tid;
     pthread_mutex_t mutex;
-    corsaro_ip_hash_t *unstables;
-    corsaro_ip_hash_t *unstables_next;
+    corsaro_ip_hash_t *knownips;
+    corsaro_ip_hash_t *knownips_next;
     corsaro_memhandler_t *ip_handler;
-    corsaro_metric_ip_hash_t *stables;
-    corsaro_metric_ip_hash_t *stables_next;
     corsaro_memhandler_t *metric_handler;
 
     corsaro_metric_ip_hash_t *lastresult;
@@ -323,40 +321,13 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     return 0;
 }
 
-static void update_stable_metric(corsaro_report_iptracker_t *track,
-        uint64_t metricid, uint8_t issrc, corsaro_metric_ip_hash_t **stables) {
-
-    corsaro_metric_ip_hash_t *mhash;
-    corsaro_memsource_t *memsrc;
-
-    HASH_FIND(hh, *stables, &(metricid), sizeof(metricid), mhash);
-    if (!mhash) {
-        mhash = (corsaro_metric_ip_hash_t *)get_corsaro_memhandler_item(
-                track->metric_handler, &memsrc);
-        mhash->metricid = metricid;
-        mhash->srcips = 0;
-        mhash->destips = 0;
-        mhash->memsrc = memsrc;
-
-        HASH_ADD_KEYPTR(hh, *stables, &(mhash->metricid),
-                sizeof(mhash->metricid), mhash);
-    }
-
-    if (issrc) {
-        mhash->srcips ++;
-    } else {
-        mhash->destips ++;
-    }
-
-}
-
 static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
-        corsaro_ip_hash_t **unstables, uint32_t ipaddr) {
+        corsaro_ip_hash_t **knownips, uint32_t ipaddr) {
 
     corsaro_ip_hash_t *iphash;
     corsaro_memsource_t *memsrc;
 
-    HASH_FIND(hh, *unstables, &(ipaddr), sizeof(ipaddr), iphash);
+    HASH_FIND(hh, *knownips, &(ipaddr), sizeof(ipaddr), iphash);
     if (!iphash) {
         iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
                 track->ip_handler, &memsrc);
@@ -367,7 +338,7 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
         iphash->metriccount = 0;
         iphash->metricsseen = kh_init(mset);
 
-        HASH_ADD_KEYPTR(hh, *unstables, &(iphash->ipaddr),
+        HASH_ADD_KEYPTR(hh, *knownips, &(iphash->ipaddr),
                 sizeof(iphash->ipaddr), iphash);
     }
     return iphash;
@@ -441,7 +412,7 @@ static inline void update_metric_array(corsaro_ip_hash_t *iphash,
     }
 }
 
-static void update_unstable_metric(corsaro_report_iptracker_t *track,
+static void update_knownip_metric(corsaro_report_iptracker_t *track,
         uint64_t metricid, corsaro_ip_hash_t *iphash, uint8_t issrc,
         uint8_t *newip, corsaro_metric_ip_hash_t **metrictally) {
 
@@ -476,74 +447,24 @@ static void update_unstable_metric(corsaro_report_iptracker_t *track,
 
 }
 
-static inline int is_unstable_metric(uint64_t metricid) {
-
-    /* Unstable metrics are ones where the IP->metric mappings are 1:N,
-     * i.e., an IP can be observed as receiving a packet on both TCP port 22
-     * and TCP port 23.
-     *
-     * Stable metrics are ones where an IP can only map to one possible value,
-     * i.e., an IP can only belong to one ASN or be geo-located to one country.
-     */
-
-    return 1;
-
-    switch(metricid >> 32) {
-        case CORSARO_METRIC_CLASS_COMBINED:
-        case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
-        case CORSARO_METRIC_CLASS_TCP_DEST_PORT:
-        case CORSARO_METRIC_CLASS_UDP_SOURCE_PORT:
-        case CORSARO_METRIC_CLASS_UDP_DEST_PORT:
-        case CORSARO_METRIC_CLASS_ICMP_CODE:
-        case CORSARO_METRIC_CLASS_ICMP_TYPE:
-        case CORSARO_METRIC_CLASS_IP_PROTOCOL:
-            return 1;
-    }
-
-    return 0;
-}
-
-static void free_stables(corsaro_report_iptracker_t *track,
-        corsaro_metric_ip_hash_t **stables) {
+static void free_metrichash(corsaro_report_iptracker_t *track,
+        corsaro_metric_ip_hash_t **methash) {
     corsaro_metric_ip_hash_t *ipiter, *tmp;
 
-    HASH_ITER(hh, *stables, ipiter, tmp) {
-        HASH_DELETE(hh, *stables, ipiter);
+    HASH_ITER(hh, *methash, ipiter, tmp) {
+        HASH_DELETE(hh, *methash, ipiter);
         release_corsaro_memhandler_item(track->metric_handler, ipiter->memsrc);
     }
 }
 
-static void free_unstables(corsaro_report_iptracker_t *track,
-        corsaro_ip_hash_t **unstables) {
+static void free_knownips(corsaro_report_iptracker_t *track,
+        corsaro_ip_hash_t **knownips) {
     corsaro_ip_hash_t *ipiter, *tmp;
 
-    HASH_ITER(hh, *unstables, ipiter, tmp) {
+    HASH_ITER(hh, *knownips, ipiter, tmp) {
         kh_destroy(mset, ipiter->metricsseen);
-        HASH_DELETE(hh, *unstables, ipiter);
+        HASH_DELETE(hh, *knownips, ipiter);
         release_corsaro_memhandler_item(track->ip_handler, ipiter->memsrc);
-    }
-}
-
-static void merge_stables_into_result(corsaro_report_iptracker_t *track) {
-
-
-    corsaro_metric_ip_hash_t *m, *mettmp, *existing;
-    uint64_t metid;
-    corsaro_memsource_t *memsrc;
-
-    HASH_ITER(hh, track->stables, m, mettmp) {
-        HASH_DELETE(hh, track->stables, m);
-
-        HASH_FIND(hh, track->currentresult, &(m->metricid),
-                sizeof(m->metricid), existing);
-        if (!existing) {
-            HASH_ADD_KEYPTR(hh, track->currentresult, &(m->metricid),
-                    sizeof(m->metricid), m);
-        } else {
-            existing->srcips += m->srcips;
-            existing->destips += m->destips;
-            release_corsaro_memhandler_item(track->metric_handler, m->memsrc);
-        }
     }
 }
 
@@ -569,26 +490,23 @@ static void process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender,
 
     uint8_t newip = 0;
     int i;
-    corsaro_ip_hash_t **unstable = NULL;
+    corsaro_ip_hash_t **knownip = NULL;
     corsaro_metric_ip_hash_t **stable = NULL;
-    corsaro_metric_ip_hash_t **unstabletally = NULL;
+    corsaro_metric_ip_hash_t **knowniptally = NULL;
     corsaro_ip_hash_t *thisip = NULL;
 
     /* figure out if our sender has finished the interval already; if
      * so, we need to update the next interval not the current one.
      */
     if (libtrace_list_get_size(track->outstanding) == 0) {
-        unstable = &track->unstables;
-        unstabletally = &track->currentresult;
-        stable = &track->stables;
+        knownip = &track->knownips;
+        knowniptally = &track->currentresult;
     } else if (sender_in_outstanding(track->outstanding, sender)) {
-        unstable = &track->unstables_next;
-        unstabletally = &track->nextresult;
-        stable = &track->stables_next;
+        knownip = &track->knownips_next;
+        knowniptally = &track->nextresult;
     } else {
-        unstable = &track->unstables;
-        unstabletally = &track->currentresult;
-        stable = &track->stables;
+        knownip = &track->knownips;
+        knowniptally = &track->currentresult;
     }
 
     for (i = 0; i < body->numtags; i++) {
@@ -601,17 +519,11 @@ static void process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender,
             assert(body->tags[i] == 0);
         }
 
-        if (is_unstable_metric(body->tags[i])) {
-            if (!thisip) {
-                thisip = update_iphash(track, unstable, body->ipaddr);
-            }
-            update_unstable_metric(track, body->tags[i], thisip,
-                    body->issrc, &newip, unstabletally);
+        if (!thisip) {
+            thisip = update_iphash(track, knownip, body->ipaddr);
         }
-
-        else if (newip) {
-            update_stable_metric(track, body->tags[i], body->issrc, stable);
-        }
+        update_knownip_metric(track, body->tags[i], thisip,
+                body->issrc, &newip, knowniptally);
     }
 
 }
@@ -670,7 +582,6 @@ static uint32_t update_outstanding(libtrace_list_t *outl, uint32_t ts,
 static void *start_iptracker(void *tdata) {
     corsaro_report_iptracker_t *track;
     corsaro_report_ip_message_t msg;
-    corsaro_ip_hash_t *ipiter, *tmp;
     int i;
 
     track = (corsaro_report_iptracker_t *)tdata;
@@ -717,7 +628,7 @@ static void *start_iptracker(void *tdata) {
 
             pthread_mutex_unlock(&(track->mutex));
             corsaro_log(track->logger,
-                    "%p tracker thread has started tally for %u IPs\n", track, HASH_CNT(hh, track->unstables));
+                    "%p tracker thread has started tally for %u IPs\n", track, HASH_CNT(hh, track->knownips));
 
             /* End of interval, tally up results and update lastresults */
             if (track->lastresult != NULL) {
@@ -725,9 +636,6 @@ static void *start_iptracker(void *tdata) {
                         "error, ended report interval before we had dealt with the results from the previous one!");
                 assert(0);
             }
-
-            merge_stables_into_result(track);
-
 
             pthread_mutex_lock(&(track->mutex));
             track->lastresult = track->currentresult;
@@ -739,17 +647,11 @@ static void *start_iptracker(void *tdata) {
             }
             pthread_mutex_unlock(&(track->mutex));
 
-            HASH_ITER(hh, track->unstables, ipiter, tmp) {
-                kh_destroy(mset, ipiter->metricsseen);
-                HASH_DELETE(hh, track->unstables, ipiter);
-                release_corsaro_memhandler_item(track->ip_handler, ipiter->memsrc);
-            }
+            free_knownips(track, &(track->knownips));
 
-            track->stables = track->stables_next;
-            track->unstables = track->unstables_next;
+            track->knownips = track->knownips_next;
             track->currentresult = track->nextresult;
-            track->stables_next = NULL;
-            track->unstables_next = NULL;
+            track->knownips_next = NULL;
             track->nextresult = NULL;
             continue;
 
@@ -763,12 +665,10 @@ static void *start_iptracker(void *tdata) {
 
     }
 
-    free_stables(track, &(track->stables));
-    free_stables(track, &(track->stables_next));
-    free_stables(track, &(track->currentresult));
-    free_stables(track, &(track->nextresult));
-    free_unstables(track, &(track->unstables));
-    free_unstables(track, &(track->unstables_next));
+    free_metrichash(track, &(track->currentresult));
+    free_metrichash(track, &(track->nextresult));
+    free_knownips(track, &(track->knownips));
+    free_knownips(track, &(track->knownips_next));
     corsaro_log(track->logger, "exiting tracker thread...");
     pthread_exit(NULL);
 }
@@ -806,10 +706,8 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
                 sizeof(corsaro_report_ip_message_t));
         pthread_mutex_init(&(conf->iptrackers[i].mutex), NULL);
         conf->iptrackers[i].lastresultts = 0;
-        conf->iptrackers[i].unstables = NULL;
-        conf->iptrackers[i].unstables_next = NULL;
-        conf->iptrackers[i].stables = NULL;
-        conf->iptrackers[i].stables_next = NULL;
+        conf->iptrackers[i].knownips = NULL;
+        conf->iptrackers[i].knownips_next = NULL;
         conf->iptrackers[i].lastresult = NULL;
         conf->iptrackers[i].currentresult = NULL;
         conf->iptrackers[i].nextresult = NULL;
