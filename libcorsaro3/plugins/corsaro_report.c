@@ -78,6 +78,8 @@ typedef enum {
     CORSARO_METRIC_CLASS_COMBINED,
     CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
     CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
+    CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
+    CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
     CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
     CORSARO_METRIC_CLASS_TCP_DEST_PORT,
     CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
@@ -990,6 +992,13 @@ static inline int maxmind_tagged(corsaro_packet_tags_t *tags) {
     return 0;
 }
 
+static inline int netacq_tagged(corsaro_packet_tags_t *tags) {
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+        return 1;
+    }
+    return 0;
+}
+
 static char *metclasstostr(corsaro_report_metric_class_t class) {
 
     switch(class) {
@@ -1013,6 +1022,10 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
             return "Maxmind continent";
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
             return "Maxmind country";
+        case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
+            return "Netacq continent";
+        case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
+            return "Netacq country";
     }
 
     return "unknown";
@@ -1124,6 +1137,13 @@ static void process_tags(corsaro_packet_tags_t *tags, uint16_t iplen,
                 tags->maxmind_continent, 0, iplen, state, body, logger, issrc);
         process_single_tag(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
                 tags->maxmind_country, 0, iplen, state, body, logger, issrc);
+    }
+
+    if (netacq_tagged(tags)) {
+        process_single_tag(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
+                tags->netacq_continent, 0, iplen, state, body, logger, issrc);
+        process_single_tag(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
+                tags->netacq_country, 0, iplen, state, body, logger, issrc);
     }
 
 }
@@ -1316,6 +1336,18 @@ static int write_single_metric(corsaro_logger_t *logger,
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
             res->metrictype = "maxmind-country";
+            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+                    (int)((res->metricid >> 8) & 0xff));
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
+            res->metrictype = "netacq-continent";
+            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+                    (int)((res->metricid >> 8) & 0xff));
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
+            res->metrictype = "netacq-country";
             snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             res->metricval = valspace;
