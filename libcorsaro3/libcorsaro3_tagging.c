@@ -110,7 +110,7 @@ static inline char *create_prefix2asn_option_string(corsaro_logger_t *logger,
 
     if (pfxopts->pfx2as_file) {
         snprintf(fragment, FRAGSPACE, "-f %s ", pfxopts->pfx2as_file);
-        COPY_STRING(space, MAXSPACE, used, fragment, "maxmind");
+        COPY_STRING(space, MAXSPACE, used, fragment, "prefix2asn");
     }
 
     if (pfxopts->ds_name) {
@@ -368,8 +368,33 @@ static int update_netacq_tags(corsaro_logger_t *logger,
     tags->netacq_continent = *((uint16_t *)(rec->continent_code));
     tags->netacq_country = *((uint16_t *)(rec->country_code));
 
+    /* TODO regions, polygons etc */
+
     tags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
 
+    return 0;
+}
+
+static int update_pfx2as_tags(corsaro_logger_t *logger,
+        ipmeta_provider_t *prov, uint32_t addr, corsaro_packet_tags_t *tags) {
+
+    ipmeta_record_t *rec = NULL;
+
+    rec = ipmeta_lookup_single(prov, addr);
+
+    if (rec == NULL) {
+        return 0;
+    }
+
+    /* Original corsaro tagging ignored all "group" ASNs so I'm going
+     * to do the same for now.
+     */
+    if (rec->asn_cnt != 1) {
+        return 0;
+    }
+
+    tags->prefixasn = rec->asn[0];
+    tags->providers_used |= (1 << IPMETA_PROVIDER_PFX2AS);
     return 0;
 }
 
@@ -442,6 +467,12 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
                 break;
             case IPMETA_PROVIDER_NETACQ_EDGE:
                 if (update_netacq_tags(tagger->logger, prov,
+                            sin->sin_addr.s_addr, tags) != 0) {
+                    return -1;
+                }
+                break;
+            case IPMETA_PROVIDER_PFX2AS:
+                if (update_pfx2as_tags(tagger->logger, prov,
                             sin->sin_addr.s_addr, tags) != 0) {
                     return -1;
                 }
