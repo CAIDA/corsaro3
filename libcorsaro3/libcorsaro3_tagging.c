@@ -43,10 +43,15 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
         return NULL;
     }
 
+    /* TODO
+     * In theory, we could allocate and init ipmeta ourselves rather than
+     * making the caller do it for us -- corsaro_init_ipmeta_provider()
+     * would need to take a tagger instead of an ipmeta as a parameter,
+     * but that's probably not a big deal.
+     */
     tagger->logger = logger;
     tagger->ipmeta = ipmeta;
     tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
-    tagger->tagfreelist = libtrace_list_init(sizeof(corsaro_packet_tags_t *));
 
     return tagger;
 }
@@ -64,6 +69,9 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
     used += strlen(toadd); \
     space[used] = '\0';
 
+
+/* One day, someone might update libipmeta to not take horrible getopt
+ * style configuration and then these nasty functions could go away. */
 static inline char *create_maxmind_option_string(corsaro_logger_t *logger,
         maxmind_opts_t *maxopts) {
 
@@ -292,6 +300,8 @@ int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
         return 0;
     }
 
+    /* Try to find an existing instance of this provider in our provider
+     * list. */
     n = tagger->providers->head;
     while (n) {
         current = (ipmeta_provider_t **)(n->data);
@@ -304,32 +314,25 @@ int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
     }
 
     if (current == NULL) {
+        /* This provider type didn't exist before? In that case, just
+         * add it to the list. */
         libtrace_list_push_back(tagger->providers, &prov);
     } else {
+        /* Replace the existing one with our new provider.
+         *
+         * XXX We DO NOT free the old provider instance here, hopefully the
+         * caller still has a reference to it...
+         */
         n->data = &prov;
     }
     return 0;
 }
 
-
 void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger) {
 
-    libtrace_list_node_t *n;
-
     if (tagger) {
-
         if (tagger->providers) {
             libtrace_list_deinit(tagger->providers);
-        }
-
-        if (tagger->tagfreelist) {
-            n = tagger->tagfreelist->head;
-            while (n) {
-                corsaro_packet_tags_t *tag = *(corsaro_packet_tags_t **)(n->data);
-                free(tag);
-                n = n->next;
-            }
-            libtrace_list_deinit(tagger->tagfreelist);
         }
         free(tagger);
     }
@@ -406,6 +409,10 @@ static void update_basic_tags(corsaro_logger_t *logger,
     libtrace_icmp_t *icmp;
     uint32_t rem;
 
+    /* Basic tags refer to those that do not require any libipmeta providers
+     * to derive, e.g. port numbers, transport protocols etc.
+     */
+
     tags->protocol = 0;
     tags->src_port = 0;
     tags->dest_port = 0;
@@ -418,6 +425,8 @@ static void update_basic_tags(corsaro_logger_t *logger,
 
     tags->protocol = proto;
     if (proto == TRACE_IPPROTO_ICMP && rem >= 2) {
+        /* ICMP doesn't have ports, but we are interested in the type and
+         * code, so why not reuse the space in the tag structure :) */
         icmp = (libtrace_icmp_t *)transport;
         tags->src_port = icmp->type;
         tags->dest_port = icmp->code;
@@ -435,18 +444,30 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
     struct sockaddr_in *sin;
     libtrace_list_node_t *n;
 
+    memset(tags, 0, sizeof(corsaro_packet_tags_t));
     tags->providers_used = 0;
+
+    if (packet == NULL) {
+        return 0;
+    }
 
     update_basic_tags(tagger->logger, packet, tags);
     if (tagger->providers == NULL) {
         return 0;
     }
 
+    /* We only care about the source address on the telescope.
+     *
+     * If we want to tag bidirectional traffic in the future then we will
+     * have to expand our tag structure and run the providers against the
+     * dest address too.
+     */
     if (trace_get_source_address(packet, (struct sockaddr *)(&saddr)) == NULL)
     {
         return 0;
     }
 
+    /* Skip IPv6 traffic for now, libipmeta probably won't like it anyway */
     if (saddr.ss_family != AF_INET) {
         return 0;
     }
@@ -482,7 +503,6 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
                 printf("???: %u\n", ipmeta_get_provider_id(prov));
         }
     }
-
 
     return 0;
 }
