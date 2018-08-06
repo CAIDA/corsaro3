@@ -117,7 +117,6 @@ typedef struct corsaro_ip_hash {
 } PACKED corsaro_ip_hash_t;
 
 typedef struct corsaro_metric_ip_hash_t {
-    UT_hash_handle hh;
     uint64_t metricid;
     uint32_t srcips;
     uint32_t destips;
@@ -125,6 +124,7 @@ typedef struct corsaro_metric_ip_hash_t {
     uint64_t bytes;
     corsaro_memsource_t *memsrc;
 } PACKED corsaro_metric_ip_hash_t;
+KHASH_MAP_INIT_INT64(tally, corsaro_metric_ip_hash_t *);
 
 typedef struct corsaro_report_outstanding_interval {
     uint32_t interval_ts;
@@ -146,9 +146,9 @@ typedef struct corsaro_report_iptracker {
     corsaro_memhandler_t *ip_handler;
     corsaro_memhandler_t *metric_handler;
 
-    corsaro_metric_ip_hash_t *lastresult;
-    corsaro_metric_ip_hash_t *currentresult;
-    corsaro_metric_ip_hash_t *nextresult;
+    kh_tally_t *lastresult;
+    kh_tally_t *currentresult;
+    kh_tally_t *nextresult;
     corsaro_logger_t *logger;
     libtrace_list_t *outstanding;
 
@@ -414,10 +414,13 @@ static inline void update_metric_array(corsaro_ip_hash_t *iphash,
 
 static void update_knownip_metric(corsaro_report_iptracker_t *track,
         uint64_t metricid, corsaro_ip_hash_t *iphash, uint8_t issrc,
-        uint16_t iplen, uint8_t *newip, corsaro_metric_ip_hash_t **metrictally) {
+        uint16_t iplen, uint8_t *newip, kh_tally_t *metrictally) {
 
     corsaro_memsource_t *memsrc;
     corsaro_metric_ip_hash_t *m;
+    khiter_t khiter;
+    int khret;
+
     if (issrc && !(iphash->issrc & 0x01)) {
         iphash->issrc |= 0x01;
         *newip = 1;
@@ -426,8 +429,7 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         *newip = 1;
     }
 
-    HASH_FIND(hh, *metrictally, &metricid, sizeof(metricid), m);
-    if (!m) {
+    if ((khiter = kh_get(tally, metrictally, metricid)) == kh_end(metrictally)) {
         m = (corsaro_metric_ip_hash_t *)get_corsaro_memhandler_item(
                 track->metric_handler, &memsrc);
         m->metricid = metricid;
@@ -437,8 +439,10 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         m->packets = 0;
         m->bytes = 0;
 
-        HASH_ADD_KEYPTR(hh, *metrictally, &(m->metricid), sizeof(m->metricid),
-                m);
+        khiter = kh_put(tally, metrictally, metricid, &khret);
+        kh_value(metrictally, khiter) = m;
+    } else {
+        m = kh_value(metrictally, khiter);
     }
 
     if (iplen > 0) {
@@ -455,13 +459,18 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
 }
 
 static void free_metrichash(corsaro_report_iptracker_t *track,
-        corsaro_metric_ip_hash_t **methash) {
-    corsaro_metric_ip_hash_t *ipiter, *tmp;
+        kh_tally_t *methash) {
+    corsaro_metric_ip_hash_t *ipiter;
+    khiter_t i;
 
-    HASH_ITER(hh, *methash, ipiter, tmp) {
-        HASH_DELETE(hh, *methash, ipiter);
-        release_corsaro_memhandler_item(track->metric_handler, ipiter->memsrc);
+    for (i = kh_begin(methash); i != kh_end(methash); ++i) {
+        if (kh_exist(methash, i)) {
+            ipiter = kh_value(methash, i);
+            release_corsaro_memhandler_item(track->metric_handler, ipiter->memsrc);
+        }
     }
+    kh_destroy(tally, methash);
+
 }
 
 static void free_knownips(corsaro_report_iptracker_t *track,
@@ -498,7 +507,7 @@ static void process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender,
     uint8_t newip = 0;
     int i;
     corsaro_ip_hash_t **knownip = NULL;
-    corsaro_metric_ip_hash_t **knowniptally = NULL;
+    kh_tally_t *knowniptally = NULL;
     corsaro_ip_hash_t *thisip = NULL;
 
     /* figure out if our sender has finished the interval already; if
@@ -506,13 +515,13 @@ static void process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender,
      */
     if (libtrace_list_get_size(track->outstanding) == 0) {
         knownip = &track->knownips;
-        knowniptally = &track->currentresult;
+        knowniptally = track->currentresult;
     } else if (sender_in_outstanding(track->outstanding, sender)) {
         knownip = &track->knownips_next;
-        knowniptally = &track->nextresult;
+        knowniptally = track->nextresult;
     } else {
         knownip = &track->knownips;
-        knowniptally = &track->currentresult;
+        knowniptally = track->currentresult;
     }
 
     for (i = 0; i < body->numtags; i++) {
@@ -658,7 +667,7 @@ static void *start_iptracker(void *tdata) {
             track->knownips = track->knownips_next;
             track->currentresult = track->nextresult;
             track->knownips_next = NULL;
-            track->nextresult = NULL;
+            track->nextresult = kh_init(tally);
             continue;
 
         }
@@ -671,8 +680,8 @@ static void *start_iptracker(void *tdata) {
 
     }
 
-    free_metrichash(track, &(track->currentresult));
-    free_metrichash(track, &(track->nextresult));
+    free_metrichash(track, (track->currentresult));
+    free_metrichash(track, (track->nextresult));
     free_knownips(track, &(track->knownips));
     free_knownips(track, &(track->knownips_next));
     corsaro_log(track->logger, "exiting tracker thread...");
@@ -715,8 +724,8 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         conf->iptrackers[i].knownips = NULL;
         conf->iptrackers[i].knownips_next = NULL;
         conf->iptrackers[i].lastresult = NULL;
-        conf->iptrackers[i].currentresult = NULL;
-        conf->iptrackers[i].nextresult = NULL;
+        conf->iptrackers[i].currentresult = kh_init(tally);
+        conf->iptrackers[i].nextresult = kh_init(tally);
         conf->iptrackers[i].logger = p->logger;
         conf->iptrackers[i].sourcethreads = stdopts->procthreads;
         conf->iptrackers[i].haltphase = 0;
@@ -1014,24 +1023,6 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
     ((((uint64_t) class) << 32) + ((uint64_t)val))
 
 
-static inline void add_new_message_tag(corsaro_report_msg_body_t *body,
-        uint64_t metricid, uint16_t iplen, uint8_t issrc) {
-
-    assert(body->numtags < CORSARO_MAX_SUPPORTED_TAGS);
-
-    body->tags[body->numtags].metid = metricid;
-
-    /* Be careful not to count the packet twice per metric */ 
-    if (issrc) {
-        body->tags[body->numtags].size = iplen;
-    } else {
-        body->tags[body->numtags].size = 0;
-    }
-
-    body->numtags ++;
-
-}
-
 static inline void process_single_tag(corsaro_report_metric_class_t class,
         uint32_t tagval, uint32_t maxtagval, uint16_t iplen,
         corsaro_report_state_t *state, corsaro_report_msg_body_t *body,
@@ -1046,13 +1037,18 @@ static inline void process_single_tag(corsaro_report_metric_class_t class,
     }
 
     metricid = GEN_METRICID(class, tagval);
-    /*
-    if (issrc) {
-        update_basic_counter(state, metricid, iplen);
-    }
-    */
+    assert(body->numtags < CORSARO_MAX_SUPPORTED_TAGS);
 
-    add_new_message_tag(body, metricid, iplen, issrc);
+    body->tags[body->numtags].metid = metricid;
+
+    /* Be careful not to count the packet twice per metric */ 
+    if (issrc) {
+        body->tags[body->numtags].size = iplen;
+    } else {
+        body->tags[body->numtags].size = 0;
+    }
+
+    body->numtags ++;
 }
 
 
@@ -1373,9 +1369,17 @@ static void update_tracker_results(corsaro_report_result_t **results,
         corsaro_report_config_t *conf, corsaro_memhandler_t *reshandler) {
 
     corsaro_report_result_t *r;
-    corsaro_metric_ip_hash_t *iter, *tmp;
+    corsaro_metric_ip_hash_t *iter;
+    khiter_t i;
 
-    HASH_ITER(hh, tracker->lastresult, iter, tmp) {
+    for (i = kh_begin(tracker->lastresult); i != kh_end(tracker->lastresult);
+            ++i) {
+
+        if (!kh_exist(tracker->lastresult, i)) {
+            continue;
+        }
+        iter = kh_value(tracker->lastresult, i);
+
         HASH_FIND(hh, *results, &(iter->metricid), sizeof(iter->metricid),
                 r);
         if (!r) {
@@ -1388,10 +1392,10 @@ static void update_tracker_results(corsaro_report_result_t **results,
         r->pkt_cnt += iter->packets;
         r->bytes += iter->bytes;
 
-        HASH_DELETE(hh, tracker->lastresult, iter);
         release_corsaro_memhandler_item(tracker->metric_handler, iter->memsrc);
     }
-
+    kh_destroy(tally, tracker->lastresult);
+    tracker->lastresult = NULL;
 }
 
 int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
