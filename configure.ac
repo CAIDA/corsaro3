@@ -169,7 +169,10 @@ AM_CONDITIONAL([WITH_WANDIO], [test "x" == x])
 AC_CHECK_HEADERS([arpa/inet.h inttypes.h limits.h math.h stdlib.h string.h \
 			      time.h sys/time.h])
 
+
+
 # configure options for this monitor
+AC_CHECK_HEADERS(uthash.h, [uthash_h=true])
 
 # monitor name
 AC_MSG_CHECKING([for the monitor name to use])
@@ -306,6 +309,12 @@ if test "x$with_plugin_ipmeta" == xyes; then
    	AC_MSG_ERROR([libipmeta is required by the corsaro_ipmeta plugin])
 		      ])
 fi
+
+if test "x$with_plugin_report" == xyes &&
+   test "x$uthash_h" != "xtrue"; then
+   AC_MSG_ERROR([corsaro_report plugin requires uthash headers])
+fi
+
 
 # the filtergeo plugin requires the ipmeta plugin
 if test "x$with_plugin_filtergeo" == xyes &&
