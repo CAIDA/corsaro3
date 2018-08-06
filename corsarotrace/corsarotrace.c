@@ -327,12 +327,6 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     if (tv.tv_sec < tls->current_interval.time) {
-        corsaro_log(glob->logger,
-                "received a packet from *before* our current interval!");
-        corsaro_log(glob->logger,
-                "skipping packet, but this is probably a b00g.");
-        printf("%u %u\n", tv.tv_sec, tls->current_interval.time);
-        assert(0);
         return packet;
     }
 
