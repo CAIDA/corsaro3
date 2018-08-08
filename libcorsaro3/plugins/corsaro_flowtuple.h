@@ -33,6 +33,7 @@
 #include "ksort.h"
 #include "libcorsaro3.h"
 #include "libcorsaro3_plugin.h"
+#include "libcorsaro3_memhandler.h"
 
 corsaro_plugin_t *corsaro_flowtuple_alloc(void);
 
@@ -88,6 +89,9 @@ struct corsaro_flowtuple {
   /** The number of packets that comprise this flowtuple
       This is populated immediately before the tuple is written out */
   uint32_t packet_cnt;
+
+  
+  corsaro_memsource_t *memsrc;
 } PACKED;
 
 CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_flowtuple)
