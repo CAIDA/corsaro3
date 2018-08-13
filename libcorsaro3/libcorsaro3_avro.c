@@ -57,6 +57,9 @@ corsaro_avro_writer_t *corsaro_create_avro_writer(corsaro_logger_t *logger,
     w->logger = logger;
     w->iface = NULL;
 
+    w->encodespace = NULL;
+    w->encodesize = 0;
+    w->encodeused = 0;
     return w;
 
 }
@@ -102,6 +105,10 @@ void corsaro_destroy_avro_writer(corsaro_avro_writer_t *writer) {
 
     if (writer->out) {
         avro_file_writer_close(writer->out);
+    }
+
+    if (writer->encodespace) {
+        free(writer->encodespace);
     }
 
     free(writer);
@@ -222,7 +229,7 @@ int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname) {
 
     /* I assume a block size of zero just uses the default?? */
     ret = avro_file_writer_create_with_codec(fname, writer->schema,
-            &(writer->out), "deflate", 0);
+            &(writer->out), "deflate", 16 * 1024);
     if (ret) {
         corsaro_log(writer->logger,
                 "error opening Avro output file %s: %s", fname,
@@ -230,6 +237,85 @@ int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname) {
         return -1;
     }
 
+    return 0;
+}
+
+#define CORSARO_INIT_AVRO_ENCODING_SPACE (8096)
+
+int corsaro_start_avro_encoding(corsaro_avro_writer_t *writer) {
+
+    if (writer->encodespace == NULL) {
+        writer->encodespace = (char *)malloc(CORSARO_INIT_AVRO_ENCODING_SPACE);
+        writer->encodesize = CORSARO_INIT_AVRO_ENCODING_SPACE;
+    }
+
+    writer->encodeused = 0;
+    if (writer->encodespace == NULL) {
+        return -1;
+    }
+    return 0;
+}
+
+static inline void grow_encode_buffer(corsaro_avro_writer_t *writer) {
+    writer->encodespace = (char *)realloc(writer->encodespace,
+                writer->encodesize + CORSARO_INIT_AVRO_ENCODING_SPACE);
+    writer->encodesize += CORSARO_INIT_AVRO_ENCODING_SPACE;
+}
+
+int corsaro_encode_avro_field(corsaro_avro_writer_t *writer,
+        uint8_t fieldtype, void *fieldptr, uint32_t fieldlen) {
+
+    if (fieldtype == CORSARO_AVRO_LONG) {
+        int64_t l;
+        uint64_t n;
+
+        if (fieldlen == 1) {
+            l = *(uint8_t *)(fieldptr);
+        } else if (fieldlen == 2) {
+            l = *(uint16_t *)(fieldptr);
+        } else if (fieldlen == 4) {
+            l = *(uint32_t *)(fieldptr);
+        } else if (fieldlen == 8) {
+            l = *(uint64_t *)(fieldptr);
+        } else {
+            corsaro_log(writer->logger,
+                    "unexpected integer size of %u when encoding avro.",
+                    fieldlen);
+            return -1;
+        }
+
+        if (writer->encodesize - writer->encodeused < 8) {
+            grow_encode_buffer(writer);
+        }
+
+        n = (l << 1) ^ (l >> 63);
+
+        while (n & ~0x7F) {
+            writer->encodespace[writer->encodeused] = 
+                    (char)((((uint8_t) n) & 0x7F) | 0x80);
+            n >>= 7;
+            writer->encodeused ++;
+        }
+        writer->encodespace[writer->encodeused] = (char)n;
+        writer->encodeused ++;
+    } else if (fieldtype == CORSARO_AVRO_STRING) {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG, &fieldlen,
+                sizeof(fieldlen)) < 0) {
+            corsaro_log(writer->logger,
+                    "unable to encode length of avro string.");
+            return -1;
+        }
+
+        if (writer->encodesize - writer->encodeused < fieldlen) {
+            grow_encode_buffer(writer);
+        }
+        memcpy(writer->encodespace + writer->encodeused, fieldptr, fieldlen);
+        writer->encodeused += fieldlen;
+    } else {
+        corsaro_log(writer->logger,
+                "asked to encode unexpected avro type %u\n", fieldtype);
+        return -1;
+    }
     return 0;
 }
 
@@ -270,14 +356,24 @@ int corsaro_append_avro_writer(corsaro_avro_writer_t *writer,
     int ret = 0;
     errno = 0;
 
-    if (avro_file_writer_append_value(writer->out, value)) {
-        corsaro_log(writer->logger,
-                "Unable to append user record to Avro output file: %s",
-                avro_strerror());
-        ret = -1;
+    if (value == NULL) {
+        if (avro_file_writer_append_encoded(writer->out, writer->encodespace,
+                    writer->encodeused)) {
+            corsaro_log(writer->logger,
+                    "Unable to append encoded user record to Avro output file: %s",
+                    avro_strerror());
+            ret = -1;
+        }
+    } else {
+        if (avro_file_writer_append_value(writer->out, value)) {
+            corsaro_log(writer->logger,
+                    "Unable to encode user record for Avro output file: %s",
+                    avro_strerror());
+            ret = -1;
+        }
     }
 
-    else if (errno != 0) {
+    if (errno != 0) {
         corsaro_log(writer->logger,
                 "Error detected while writing user record to Avro output: %s",
                 strerror(errno));
