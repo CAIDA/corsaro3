@@ -46,6 +46,7 @@ libcorsaro3_la_SOURCES = 	\
         libcorsaro3_tagging.h           \
         libcorsaro3_memhandler.c        \
         libcorsaro3_memhandler.h        \
+        pqueue.c pqueue.h               \
         libcorsaro3.h
 
 libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \
