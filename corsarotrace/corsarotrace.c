@@ -593,10 +593,10 @@ int start_trace_input(corsaro_trace_global_t *glob) {
     }
 
     trace_set_combiner(glob->trace, &combiner_unordered, nothing);
-    /*
-    trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, glob->hasher,
-            glob->hasher_data);
-    */
+    if (glob->hasher_required) {
+        trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, glob->hasher,
+                glob->hasher_data);
+    }
     trace_set_perpkt_threads(glob->trace, glob->threads);
 
     if (glob->savedlocalstate == NULL) {

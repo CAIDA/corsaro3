@@ -435,6 +435,14 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "dohashing")) {
+        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+                &(glob->hasher_required), "hashing") < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "tagging")) {
         if (parse_onoff_option(glob, (char *)value->data.scalar.value,
                 &(glob->taggingon), "tagging") < 0) {
@@ -695,6 +703,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->savedlocalstate = NULL;
     glob->hasher = NULL;
     glob->hasher_data = NULL;
+    glob->hasher_required = 0;
 
     memset(&(glob->pfxtagopts), 0, sizeof(pfx2asn_opts_t));
     memset(&(glob->maxtagopts), 0, sizeof(maxmind_opts_t));

@@ -95,6 +95,7 @@ typedef struct corsaro_trace_glob {
     corsaro_trace_local_t **savedlocalstate;
     fn_hasher hasher;
     void *hasher_data;
+    uint8_t hasher_required;
 
 } corsaro_trace_global_t;
 
