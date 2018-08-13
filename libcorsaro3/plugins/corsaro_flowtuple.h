@@ -28,6 +28,7 @@
 #ifndef CORSARO_FLOWTUPLE_PLUGIN_H_
 #define CORSARO_FLOWTUPLE_PLUGIN_H_
 
+#include "pqueue.h"
 #include "config.h"
 #include "khash.h"
 #include "ksort.h"
@@ -90,8 +91,18 @@ struct corsaro_flowtuple {
       This is populated immediately before the tuple is written out */
   uint32_t packet_cnt;
 
-  
+  uint16_t maxmind_country;
+  uint16_t maxmind_continent;
+  uint16_t netacq_country;
+  uint16_t netacq_continent;
+  uint32_t prefixasn;
+  uint16_t tagproviders;
+
   corsaro_memsource_t *memsrc;
+  size_t pqueue_pos;
+  pqueue_pri_t pqueue_pri;
+  void *from;
+  int fromind;
 } PACKED;
 
 CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_flowtuple)

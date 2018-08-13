@@ -36,6 +36,7 @@
 #include <yaml.h>
 #include <sys/mman.h>
 
+#include "pqueue.h"
 #include "libcorsaro3.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_avro.h"
@@ -46,8 +47,6 @@
    'sixtuple' */
 /** The magic number for this plugin when not using /8 opts - "SIXU" */
 #define CORSARO_FLOWTUPLE_MAGIC 0x53495855
-
-#define CORSARO_FLOWTUPLE_MMAP_SIZE 4096
 
 /** Initialize the sorting functions and datatypes */
 KSORT_INIT(sixt, struct corsaro_flowtuple *, corsaro_flowtuple_lt);
@@ -75,22 +74,23 @@ typedef enum corsaro_flowtuple_sort {
 
 } corsaro_flowtuple_sort_t;
 
-struct corsaro_flowtuple_class {
-    uint16_t classtype;
-    uint64_t members;
-};
-
 /** Holds the state for an instance of this plugin */
 struct corsaro_flowtuple_state_t {
     /** Array of hash tables, one for each corsaro_flowtuple_class_type_t */
     khash_t(sixt) * st_hash;
 
+    /** Timestamp of the start of the current interval */
     uint32_t last_interval_start;
 
     /** The ID of the thread running this plugin instance */
     int threadid;
 
+    /** Custom memory allocator for doing efficient management of flowtuple
+     *  records.
+     */
     corsaro_memhandler_t *fthandler;
+
+    uint32_t pkt_cnt;
 };
 
 typedef struct corsaro_flowtuple_iterator {
@@ -140,7 +140,12 @@ static const char FLOWTUPLE_RESULT_SCHEMA[] =
       {\"name\": \"ttl\", \"type\": \"int\"}, \
       {\"name\": \"tcp_flags\", \"type\": \"int\"}, \
       {\"name\": \"ip_len\", \"type\": \"int\"}, \
-      {\"name\": \"packet_cnt\", \"type\": \"long\"}]}";
+      {\"name\": \"packet_cnt\", \"type\": \"long\"}, \
+      {\"name\": \"maxmind_continent\", \"type\": \"string\"}, \
+      {\"name\": \"maxmind_country\", \"type\": \"string\"}, \
+      {\"name\": \"netacq_continent\", \"type\": \"string\"}, \
+      {\"name\": \"netacq_country\", \"type\": \"string\"}, \
+      {\"name\": \"prefix2asn\", \"type\": \"long\"}]}";
 
 static corsaro_plugin_t corsaro_flowtuple_plugin = {
 
@@ -162,6 +167,7 @@ static int flowtuple_to_avro(corsaro_logger_t *logger, avro_value_t *av,
         void *flowtuple) {
     struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)flowtuple;
     avro_value_t field;
+    char valspace[128];
 
     CORSARO_AVRO_SET_FIELD(long, av, field, 0, "time", "flowtuple",
             ft->interval_ts);
@@ -184,131 +190,65 @@ static int flowtuple_to_avro(corsaro_logger_t *logger, avro_value_t *av,
     CORSARO_AVRO_SET_FIELD(long, av, field, 9, "packet_cnt", "flowtuple",
             ft->packet_cnt);
 
-    return 0;
-}
+    if (ft->tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
+        snprintf(valspace, 128, "%c%c", (int)(ft->maxmind_continent & 0xff),
+                (int)((ft->maxmind_continent >> 8) & 0xff));
 
+        CORSARO_AVRO_SET_FIELD(string, av, field, 10, "maxmind_continent",
+                "flowtuple", valspace);
 
-/* TODO create more generic wrappers for decoding avro fields */
-static inline int get_avro_long(avro_value_t *av, int64_t *avlong,
-        const char *fieldname, corsaro_logger_t *logger) {
+        snprintf(valspace, 128, "%c%c", (int)(ft->maxmind_country & 0xff),
+                (int)((ft->maxmind_country >> 8) & 0xff));
 
-    avro_value_t field;
-
-    if (avro_value_get_by_name(av, fieldname, &field, NULL)) {
-        corsaro_log(logger,
-                "unable to find a '%s' field in flowtuple Avro record.",
-                fieldname);
-        return -1;
+        CORSARO_AVRO_SET_FIELD(string, av, field, 11, "maxmind_country",
+                "flowtuple", valspace);
     }
 
-    if (avro_value_get_long(&field, avlong)) {
-        corsaro_log(logger,
-                "unable to extract '%s' field in flowtuple Avro record: %s",
-                fieldname, avro_strerror());
-        return -1;
+    if (ft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+        snprintf(valspace, 128, "%c%c", (int)(ft->netacq_continent & 0xff),
+                (int)((ft->netacq_continent >> 8) & 0xff));
+
+        CORSARO_AVRO_SET_FIELD(string, av, field, 12, "netacq_continent",
+                "flowtuple", valspace);
+
+        snprintf(valspace, 128, "%c%c", (int)(ft->netacq_country & 0xff),
+                (int)((ft->netacq_country >> 8) & 0xff));
+
+        CORSARO_AVRO_SET_FIELD(string, av, field, 13, "netacq_country",
+                "flowtuple", valspace);
     }
 
-    return 0;
-}
-
-static inline int get_avro_int(avro_value_t *av, int32_t *avint,
-        const char *fieldname, corsaro_logger_t *logger) {
-
-    avro_value_t field;
-
-    if (avro_value_get_by_name(av, fieldname, &field, NULL)) {
-        corsaro_log(logger,
-                "unable to find a '%s' field in flowtuple Avro record.",
-                fieldname);
-        return -1;
-    }
-
-    if (avro_value_get_int(&field, avint)) {
-        corsaro_log(logger,
-                "unable to extract '%s' field in flowtuple Avro record: %s",
-                fieldname, avro_strerror());
-        return -1;
+    if (ft->tagproviders & (1 << IPMETA_PROVIDER_PFX2AS)) {
+        CORSARO_AVRO_SET_FIELD(long, av, field, 14, "prefix2asn", "flowtuple",
+                ft->prefixasn);
     }
 
     return 0;
 }
 
-static struct corsaro_flowtuple *avro_to_flowtuple(corsaro_logger_t *logger,
-        avro_value_t *av) {
+static int ft_cmp_pri(void *next, void *curr) {
 
-    struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)malloc(
-            sizeof(struct corsaro_flowtuple));
+    struct corsaro_flowtuple *prevft, *nextft;
+    int res = 0;
 
-    int64_t avlong;
-    int32_t avint;
+    prevft = (struct corsaro_flowtuple *)curr;
+    nextft = (struct corsaro_flowtuple *)next;
+    res = corsaro_flowtuple_lt(nextft, prevft);
 
-    if (ft == NULL) {
-        corsaro_log(logger,
-                "unable to allocate memory for avro->flowtuple conversion.");
-        return NULL;
+    if (res == 0) {
+        return 1;
     }
+    return 0;
+}
 
-    /* TODO bounds checking on fields which are smaller than their
-     * corresponding avro type (e.g. uint8_t values should be < 256).
-     */
+static size_t ft_get_pos(void *a) {
+    struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)a;
+    return ft->pqueue_pos;
+}
 
-    if (get_avro_long(av, &avlong, "time", logger) < 0) {
-        goto fail;
-    }
-    ft->interval_ts = (uint32_t)(avlong);
-
-    if (get_avro_long(av, &avlong, "src_ip", logger) < 0) {
-        goto fail;
-    }
-    ft->src_ip = (uint32_t)(avlong);
-
-    if (get_avro_long(av, &avlong, "dst_ip", logger) < 0) {
-        goto fail;
-    }
-    ft->dst_ip = (uint32_t)(avlong);
-
-    if (get_avro_int(av, &avint, "src_port", logger) < 0) {
-        goto fail;
-    }
-    ft->src_port = (uint16_t)(avint);
-
-    if (get_avro_int(av, &avint, "dst_port", logger) < 0) {
-        goto fail;
-    }
-    ft->dst_port = (uint16_t)(avint);
-
-    if (get_avro_int(av, &avint, "protocol", logger) < 0) {
-        goto fail;
-    }
-    ft->protocol = (uint8_t)(avint);
-
-    if (get_avro_int(av, &avint, "ttl", logger) < 0) {
-        goto fail;
-    }
-    ft->ttl = (uint8_t)(avint);
-
-    if (get_avro_int(av, &avint, "tcp_flags", logger) < 0) {
-        goto fail;
-    }
-    ft->tcp_flags = (uint8_t)(avint);
-
-    if (get_avro_int(av, &avint, "ip_len", logger) < 0) {
-        goto fail;
-    }
-    ft->ip_len = (uint16_t)(avint);
-
-    if (get_avro_long(av, &avlong, "packet_cnt", logger) < 0) {
-        goto fail;
-    }
-    ft->packet_cnt = (uint32_t)(avlong);
-
-    return ft;
-
-fail:
-    free(ft);
-    return NULL;
-
-
+static void ft_set_pos(void *a, size_t pos) {
+    struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)a;
+    ft->pqueue_pos = pos;
 }
 
 
@@ -501,6 +441,7 @@ int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
     FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_start_interval", -1);
 
     state->last_interval_start = int_start->time;
+    state->pkt_cnt = 0;
     return 0;
 }
 
@@ -619,6 +560,7 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
         return 0;
     }
 
+    memset(&t, 0, sizeof(struct corsaro_flowtuple));
     t.ip_len = ntohs(ip_hdr->ip_len);
     t.src_ip = ntohl(ip_hdr->ip_src.s_addr);
     t.dst_ip = ntohl(ip_hdr->ip_dst.s_addr);
@@ -647,10 +589,31 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
         t.dst_port = trace_get_destination_port(packet);
     }
 
+    if (tags && tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
+        t.maxmind_continent = tags->maxmind_continent;
+        t.maxmind_country = tags->maxmind_country;
+    }
+
+    if (tags && tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+        t.netacq_continent = tags->netacq_continent;
+        t.netacq_country = tags->netacq_country;
+    }
+
+    if (tags && tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
+        t.prefixasn = tags->prefixasn;
+    }
+
+    if (tags) {
+        t.tagproviders = tags->providers_used;
+    } else {
+        t.tagproviders = 0;
+    }
+
     if (corsaro_flowtuple_add_inc(p->logger, state, &t, 1) != 0) {
         corsaro_log(p->logger, "could not increment value for flowtuple");
         return -1;
     }
+    state->pkt_cnt ++;
     return 0;
 }
 
@@ -689,65 +652,217 @@ int corsaro_flowtuple_halt_merging(corsaro_plugin_t *p, void *local) {
     return 0;
 }
 
-static int choose_next_merge_ft(corsaro_plugin_t *p,
-        corsaro_flowtuple_iterator_t *inputs, int inpcount) {
+static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
+        corsaro_avro_writer_t *writer, corsaro_logger_t *logger) {
 
-    corsaro_flowtuple_config_t *conf;
-    int candind = -1;
+    char valspace[128];
+
+    if (corsaro_start_avro_encoding(writer) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->interval_ts), sizeof(nextft->interval_ts)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->src_ip), sizeof(nextft->src_ip)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->dst_ip), sizeof(nextft->dst_ip)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->src_port), sizeof(nextft->src_port)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->dst_port), sizeof(nextft->dst_port)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->protocol), sizeof(nextft->protocol)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->ttl), sizeof(nextft->ttl)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->tcp_flags), sizeof(nextft->tcp_flags)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->ip_len), sizeof(nextft->ip_len)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->packet_cnt), sizeof(nextft->packet_cnt)) < 0) {
+        return;
+    }
+
+    if (nextft->tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
+        snprintf(valspace, 128, "%c%c", (int)(nextft->maxmind_continent & 0xff),
+                (int)((nextft->maxmind_continent >> 8) & 0xff));
+
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                    valspace, strlen(valspace)) < 0) {
+            return;
+        }
+
+        snprintf(valspace, 128, "%c%c", (int)(nextft->maxmind_country & 0xff),
+                (int)((nextft->maxmind_country >> 8) & 0xff));
+
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                    valspace, strlen(valspace)) < 0) {
+            return;
+        }
+
+    }
+
+    if (nextft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+        snprintf(valspace, 128, "%c%c", (int)(nextft->netacq_continent & 0xff),
+                (int)((nextft->netacq_continent >> 8) & 0xff));
+
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                    valspace, strlen(valspace)) < 0) {
+            return;
+        }
+
+        snprintf(valspace, 128, "%c%c", (int)(nextft->netacq_country & 0xff),
+                (int)((nextft->netacq_country >> 8) & 0xff));
+
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                    valspace, strlen(valspace)) < 0) {
+            return;
+        }
+
+    }
+
+    if (nextft->tagproviders & (1 << IPMETA_PROVIDER_PFX2AS)) {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                    &(nextft->prefixasn), sizeof(nextft->prefixasn)) < 0) {
+            return;
+        }
+
+    }
+
+    if (corsaro_append_avro_writer(writer, NULL) < 0) {
+        return;
+    }
+
+}
+
+static void merge_sorted_inputs(corsaro_plugin_t *p,
+        struct corsaro_flowtuple_merge_state_t *m,
+        corsaro_flowtuple_iterator_t *inputs, corsaro_fin_interval_t *fin) {
+
     int i;
+    struct corsaro_flowtuple *nextft, *prevft;
+    corsaro_memhandler_t *handler;
+    pqueue_t *pq;
+    uint64_t count = 0, exptotal = 0, combines = 0;
 
-    conf = (corsaro_flowtuple_config_t *)(p->config);
+    pq = pqueue_init(fin->threads_ended, ft_cmp_pri, ft_get_pos, ft_set_pos);
 
-    for (i = 0; i < inpcount; i++) {
-        if (inputs[i].state == CORSARO_RESULT_TYPE_EOF) {
-            continue;
-        }
+    if (!pq) {
+        corsaro_log(p->logger, "error while creating priority queue to sort flowtuple results.");
+        return;
+    }
 
-        while (inputs[i].nextft == NULL) {
-            if (inputs[i].sorted_keys == NULL) {
-                if (inputs[i].khiter == kh_end(inputs[i].hmap)) {
-                    inputs[i].state = CORSARO_RESULT_TYPE_EOF;
-                    break;
-                }
+    for (i = 0; i < fin->threads_ended; i++) {
+        exptotal += kh_size(inputs[i].hmap);
+        while (inputs[i].sortiter < kh_size(inputs[i].hmap)) {
+            nextft = inputs[i].sorted_keys[inputs[i].sortiter];
+            inputs[i].sortiter ++;
 
-                if (kh_exist(inputs[i].hmap, inputs[i].khiter)) {
-                    inputs[i].nextft = (struct corsaro_flowtuple *)kh_key(
-                            inputs[i].hmap, inputs[i].khiter);
-                }
-                inputs[i].khiter ++;
-            } else {
-                if (inputs[i].sortiter == kh_size(inputs[i].hmap)) {
-                    inputs[i].state = CORSARO_RESULT_TYPE_EOF;
-                    break;
-                }
-                inputs[i].nextft = inputs[i].sorted_keys[inputs[i].sortiter];
-                inputs[i].sortiter ++;
-            }
-        }
-
-
-        if (inputs[i].state == CORSARO_RESULT_TYPE_EOF) {
-            continue;
-        }
-
-        if (candind == -1) {
-            candind = i;
-            continue;
-        }
-
-        if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_DISABLED) {
-            /* order doesn't matter, just pick the first usable result */
+            nextft->from = (void *) &(inputs[i]);
+            nextft->fromind = i;
+            pqueue_insert(pq, nextft);
             break;
-        }
-
-        if (corsaro_flowtuple_lt(inputs[i].nextft, inputs[candind].nextft)) {
-            candind = i;
         }
     }
 
-    return candind;
+    prevft = NULL;
+    while ((nextft = (struct corsaro_flowtuple *)(pqueue_pop(pq)))) {
+        corsaro_flowtuple_iterator_t *ftsrc;
+        struct corsaro_flowtuple *toinsert;
+
+        ftsrc = (corsaro_flowtuple_iterator_t *)(nextft->from);
+
+        if (prevft && !corsaro_flowtuple_hash_equal(prevft, nextft)) {
+            _write_next_merged_ft(prevft,  m->writer, p->logger);
+            release_corsaro_memhandler_item(handler, prevft->memsrc);
+        } else if (prevft) {
+            combines ++;
+            nextft->packet_cnt += prevft->packet_cnt;
+            release_corsaro_memhandler_item(handler, prevft->memsrc);
+        }
+
+        count ++;
+
+        prevft = nextft;
+        handler = ftsrc->handler;
+        if (ftsrc->sortiter == kh_size(ftsrc->hmap)) {
+            continue;
+        }
+
+        toinsert = ftsrc->sorted_keys[ftsrc->sortiter];
+        ftsrc->sortiter ++;
+        toinsert->from = (void *)ftsrc;
+        toinsert->fromind = prevft->fromind;
+        pqueue_insert(pq, toinsert);
+
+
+    }
+
+    if (prevft) {
+        _write_next_merged_ft(prevft,  m->writer, p->logger);
+        release_corsaro_memhandler_item(handler, prevft->memsrc);
+    }
+
+    corsaro_close_avro_writer(m->writer);
 }
 
+
+static void merge_unsorted_inputs(corsaro_plugin_t *p,
+        struct corsaro_flowtuple_merge_state_t *m,
+        corsaro_flowtuple_iterator_t *inputs, corsaro_fin_interval_t *fin) {
+
+    int i;
+    khiter_t khiter;
+    struct corsaro_flowtuple *nextft;
+
+    uint64_t count = 0;
+
+    for (i = 0; i < fin->threads_ended; i++) {
+        for (khiter = kh_begin(inputs[i].hmap);
+                khiter != kh_end(inputs[i].hmap); ++khiter) {
+
+            if (!kh_exist(inputs[i].hmap, khiter)) {
+                continue;
+            }
+
+            nextft = (struct corsaro_flowtuple *)kh_key(inputs[i].hmap,
+                    khiter);
+
+            _write_next_merged_ft(nextft, m->writer, p->logger);
+            release_corsaro_memhandler_item(inputs[i].handler,
+                        nextft->memsrc);
+            count ++;
+        }
+    }
+}
 
 int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
         void **tomerge, corsaro_fin_interval_t *fin) {
@@ -756,7 +871,6 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
     corsaro_flowtuple_config_t *conf;
     corsaro_flowtuple_iterator_t *inputs;
     int i, candind;
-    avro_value_t *avrores;
     int inputsready;
 
     conf = (corsaro_flowtuple_config_t *)(p->config);
@@ -835,28 +949,10 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
         corsaro_log(p->logger, "flowtuple sorting is complete, now merging");
+        merge_sorted_inputs(p, m, inputs, fin);
+    } else {
+        merge_unsorted_inputs(p, m, inputs, fin);
     }
-    do {
-        candind = choose_next_merge_ft(p, inputs, fin->threads_ended);
-        if (candind == -1) {
-            break;
-        }
-
-        avrores = corsaro_populate_avro_item(m->writer, inputs[candind].nextft,
-                flowtuple_to_avro);
-        if (avrores == NULL) {
-            corsaro_log(p->logger,
-                    "error while converting flowtuple to avro format, skipping.");
-        } else {
-            if (corsaro_append_avro_writer(m->writer, avrores) == -1) {
-
-            }
-        }
-
-        release_corsaro_memhandler_item(inputs[candind].handler,
-                    inputs[candind].nextft->memsrc);
-        inputs[candind].nextft = NULL;
-    } while (candind != -1);
 
     /* All inputs are exhausted */
     for (i = 0; i < fin->threads_ended; i++) {
