@@ -420,6 +420,7 @@ static void update_basic_tags(corsaro_logger_t *logger,
     transport = trace_get_transport(packet, &proto, &rem);
 
     if (transport == NULL) {
+        /* transport header is missing or this is an non-initial IP fragment */
         return;
     }
 
@@ -430,9 +431,10 @@ static void update_basic_tags(corsaro_logger_t *logger,
         icmp = (libtrace_icmp_t *)transport;
         tags->src_port = icmp->type;
         tags->dest_port = icmp->code;
-    } else if (proto == TRACE_IPPROTO_TCP || proto == TRACE_IPPROTO_UDP) {
-        tags->src_port = trace_get_source_port(packet);
-        tags->dest_port = trace_get_destination_port(packet);
+    } else if ((proto == TRACE_IPPROTO_TCP || proto == TRACE_IPPROTO_UDP) &&
+            rem >= 4) {
+        tags->src_port = ntohs(*((uint16_t *)transport));
+        tags->dest_port = ntohs(*(((uint16_t *)transport) + 1));
     }
     tags->providers_used |= 1;
 }
