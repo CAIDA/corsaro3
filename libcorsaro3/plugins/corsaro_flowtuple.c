@@ -392,6 +392,7 @@ void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
             sizeof(struct corsaro_flowtuple), 1000000);
 
     state->st_hash = kh_init(sixt);
+    kh_resize_sixt(state->st_hash, 1000000);
 
     return state;
 }
@@ -497,7 +498,7 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
 
 /** Either add the given flowtuple to the hash, or increment the current count
  */
-int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
+static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
         struct corsaro_flowtuple_state_t *state, struct corsaro_flowtuple *t,
         uint32_t increment) {
   kh_sixt_t *hash = state->st_hash;
@@ -570,23 +571,17 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     t.tcp_flags = 0; /* in case we don't find a tcp header */
 
     t.ttl = ip_hdr->ip_ttl;
+    t.src_port = tags->src_port;
+    t.dst_port = tags->dest_port;
 
-    if (ip_hdr->ip_p == TRACE_IPPROTO_ICMP &&
-            (icmp_hdr = trace_get_icmp(packet)) != NULL) {
-        t.src_port = icmp_hdr->type;
-        t.dst_port = icmp_hdr->code;
-    } else {
-        if (ip_hdr->ip_p == TRACE_IPPROTO_TCP &&
+    if (ip_hdr->ip_p == TRACE_IPPROTO_TCP &&
                 (tcp_hdr = trace_get_tcp(packet)) != NULL) {
-            /* we have ignore the NS flag because it doesn't fit in
-               an 8 bit field. blame alberto (ak - 2/2/12) */
-            t.tcp_flags =
-                ((tcp_hdr->cwr << 7) | (tcp_hdr->ece << 6) | (tcp_hdr->urg << 5) |
-                 (tcp_hdr->ack << 4) | (tcp_hdr->psh << 3) | (tcp_hdr->rst << 2) |
-                 (tcp_hdr->syn << 1) | (tcp_hdr->fin << 0));
-        }
-        t.src_port = trace_get_source_port(packet);
-        t.dst_port = trace_get_destination_port(packet);
+        /* we have ignore the NS flag because it doesn't fit in
+           an 8 bit field. blame alberto (ak - 2/2/12) */
+        t.tcp_flags =
+            ((tcp_hdr->cwr << 7) | (tcp_hdr->ece << 6) | (tcp_hdr->urg << 5) |
+             (tcp_hdr->ack << 4) | (tcp_hdr->psh << 3) | (tcp_hdr->rst << 2) |
+             (tcp_hdr->syn << 1) | (tcp_hdr->fin << 0));
     }
 
     if (tags && tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
