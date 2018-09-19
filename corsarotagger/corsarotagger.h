@@ -76,6 +76,7 @@ struct corsaro_tagger_local {
     corsaro_packet_tagger_t *tagger;
     void *pubsock;
     uint8_t stopped;
+    uint64_t errorcount;
 };
 
 corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,

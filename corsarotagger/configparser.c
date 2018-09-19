@@ -491,7 +491,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->netacqipmeta = NULL;
     glob->pfxipmeta = NULL;
 
-    glob->zmq_ctxt = zmq_ctxt_new();
+    glob->zmq_ctxt = zmq_ctx_new();
 
     /* Create global logger */
     if (glob->logmode == GLOBAL_LOGMODE_STDERR) {
@@ -643,7 +643,7 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
     }
 
     if (glob->zmq_ctxt) {
-        zmq_ctxt_destroy(glob->zmq_ctxt);
+        zmq_ctx_destroy(glob->zmq_ctxt);
     }
 
     destroy_corsaro_logger(glob->logger);

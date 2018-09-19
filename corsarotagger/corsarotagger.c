@@ -74,6 +74,7 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
 
     tls->stopped = 0;
     tls->tagger = corsaro_create_packet_tagger(glob->logger, glob->ipmeta);
+    tls->errorcount = 0;
 
     if (tls->tagger == NULL) {
         corsaro_log(glob->logger,
@@ -112,7 +113,7 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         tls->stopped = 1;
     }
 
-    if (zmq_bind(tls->pubsock, glob->pubsockname) != 0) {
+    if (zmq_bind(tls->pubsock, glob->pubqueuename) != 0) {
         corsaro_log(glob->logger,
                 "error while binding zeromq publisher socket in thread %d:%s",
                 trace_get_perpkt_thread_id(t), strerror(errno));
@@ -201,8 +202,8 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
     trace_set_perpkt_threads(glob->trace, glob->threads);
 
     if (glob->savedlocalstate == NULL) {
-        glob->savedlocalstate = (corsaro_trace_local_t **)malloc(
-                sizeof(corsaro_trace_local_t) * glob->threads);
+        glob->savedlocalstate = (corsaro_tagger_local_t **)malloc(
+                sizeof(corsaro_tagger_local_t) * glob->threads);
     }
 
     if (!processing) {
@@ -425,10 +426,6 @@ int main(int argc, char *argv[]) {
     if (processing) {
         trace_destroy_callback_set(processing);
     }
-    if (reporter) {
-        trace_destroy_callback_set(reporter);
-    }
-
     return 0;
 
 
