@@ -738,7 +738,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (glob->taggingon) {
-        glob->ipmeta = ipmeta_init();
+        glob->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
 
         if (glob->pfxtagopts.enabled) {
             prov = corsaro_init_ipmeta_provider(glob->ipmeta,

@@ -52,6 +52,8 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
     tagger->logger = logger;
     tagger->ipmeta = ipmeta;
     tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
+    tagger->tagfreelist = libtrace_list_init(sizeof(corsaro_packet_tags_t *));
+    tagger->providermask = 0;
 
     return tagger;
 }
@@ -275,6 +277,7 @@ int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
     }
 
     libtrace_list_push_back(tagger->providers, &prov);
+    tagger->providermask |= (1 << (ipmeta_get_provider_id(prov) - 1));
 
     return 0;
 }
@@ -317,6 +320,7 @@ int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
         /* This provider type didn't exist before? In that case, just
          * add it to the list. */
         libtrace_list_push_back(tagger->providers, &prov);
+        tagger->providermask |= (1 << (ipmeta_get_provider_id(prov) - 1));
     } else {
         /* Replace the existing one with our new provider.
          *
@@ -339,11 +343,7 @@ void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger) {
 }
 
 static int update_maxmind_tags(corsaro_logger_t *logger,
-        ipmeta_provider_t *prov, uint32_t addr, corsaro_packet_tags_t *tags) {
-
-    ipmeta_record_t *rec = NULL;
-
-    rec = ipmeta_lookup_single(prov, addr);
+        ipmeta_record_t *rec, corsaro_packet_tags_t *tags) {
 
     if (rec == NULL) {
         return 0;
@@ -358,11 +358,7 @@ static int update_maxmind_tags(corsaro_logger_t *logger,
 }
 
 static int update_netacq_tags(corsaro_logger_t *logger,
-        ipmeta_provider_t *prov, uint32_t addr, corsaro_packet_tags_t *tags) {
-
-    ipmeta_record_t *rec = NULL;
-
-    rec = ipmeta_lookup_single(prov, addr);
+        ipmeta_record_t *rec, corsaro_packet_tags_t *tags) {
 
     if (rec == NULL) {
         return 0;
@@ -379,11 +375,7 @@ static int update_netacq_tags(corsaro_logger_t *logger,
 }
 
 static int update_pfx2as_tags(corsaro_logger_t *logger,
-        ipmeta_provider_t *prov, uint32_t addr, corsaro_packet_tags_t *tags) {
-
-    ipmeta_record_t *rec = NULL;
-
-    rec = ipmeta_lookup_single(prov, addr);
+        ipmeta_record_t *rec, corsaro_packet_tags_t *tags) {
 
     if (rec == NULL) {
         return 0;
@@ -445,9 +437,10 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
     struct sockaddr_storage saddr;
     struct sockaddr_in *sin;
     libtrace_list_node_t *n;
-
-    memset(tags, 0, sizeof(corsaro_packet_tags_t));
+    ipmeta_record_set_t *records;
+    ipmeta_record_t *rec;
     tags->providers_used = 0;
+    uint32_t numips = 0;
 
     if (packet == NULL) {
         return 0;
@@ -476,33 +469,33 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
 
     sin = (struct sockaddr_in *)(&saddr);
 
-    n = tagger->providers->head;
-    while (n) {
-        ipmeta_provider_t *prov = *((ipmeta_provider_t **)(n->data));
-        n = n->next;
+    records = ipmeta_record_set_init();
+    if (ipmeta_lookup_single(tagger->ipmeta, sin->sin_addr.s_addr,
+            tagger->providermask, records) < 0) {
+        corsaro_log(tagger->logger, "error while performing ipmeta lookup");
+        return -1;
+    }
 
-        switch(ipmeta_get_provider_id(prov)) {
+    while ((rec = ipmeta_record_set_next(records, &numips)) != NULL) {
+        switch(rec->source) {
             case IPMETA_PROVIDER_MAXMIND:
-                if (update_maxmind_tags(tagger->logger, prov,
-                            sin->sin_addr.s_addr, tags) != 0) {
+                if (update_maxmind_tags(tagger->logger, rec, tags) != 0) {
                     return -1;
                 }
                 break;
             case IPMETA_PROVIDER_NETACQ_EDGE:
-                if (update_netacq_tags(tagger->logger, prov,
-                            sin->sin_addr.s_addr, tags) != 0) {
+                if (update_netacq_tags(tagger->logger, rec, tags) != 0) {
                     return -1;
                 }
                 break;
             case IPMETA_PROVIDER_PFX2AS:
-                if (update_pfx2as_tags(tagger->logger, prov,
-                            sin->sin_addr.s_addr, tags) != 0) {
+                if (update_pfx2as_tags(tagger->logger, rec, tags) != 0) {
                     return -1;
                 }
                 break;
             /* TODO other provider methods */
             default:
-                printf("???: %u\n", ipmeta_get_provider_id(prov));
+                printf("???: %u\n", rec->source);
         }
     }
 
