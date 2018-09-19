@@ -43,6 +43,12 @@
  */
 #define CORSARO_MAX_SUPPORTED_TAGS 16
 
+enum {
+    CORSARO_FILTERBIT_SPOOFED = 1,
+    CORSARO_FILTERBIT_ERRATIC = 2,
+    CORSARO_FILTERBIT_NONROUTABLE = 4,
+};
+
 /** A set of tags that have been derived for an individual packet. */
 typedef struct corsaro_packet_tags {
 
@@ -88,9 +94,10 @@ typedef struct corsaro_packet_tags {
      *  for the source IP, as determined using the netacq-edge data.
      *  Encoded as a uint16_t, one byte for each character. */
     uint16_t netacq_continent;
-
-    /** The post-IP protocol used by the packet */
     uint8_t protocol;
+    /** Bitmask showing which high level filters this packet matches, i.e.
+     * is it spoofed, is it erratic, is it non-routable */
+    uint16_t highlevelfilterbits;
 } corsaro_packet_tags_t;
 
 /** Structure that maintains state required for tagging packets. */

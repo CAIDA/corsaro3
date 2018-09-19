@@ -29,6 +29,7 @@
 #include <string.h>
 
 #include <libipmeta.h>
+#include "libcorsaro3_filtering.h"
 #include "libcorsaro3_tagging.h"
 #include "libcorsaro3_log.h"
 
@@ -431,6 +432,23 @@ static void update_basic_tags(corsaro_logger_t *logger,
     tags->providers_used |= 1;
 }
 
+static inline void update_filter_tags(corsaro_logger_t *logger,
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
+
+
+    if (corsaro_apply_spoofing_filter(logger, packet)) {
+        tags->highlevelfilterbits |= CORSARO_FILTERBIT_SPOOFED;
+    }
+
+    if (corsaro_apply_erratic_filter(logger, packet)) {
+        tags->highlevelfilterbits |= CORSARO_FILTERBIT_ERRATIC;
+    }
+
+    if (corsaro_apply_routable_filter(logger, packet)) {
+        tags->highlevelfilterbits |= CORSARO_FILTERBIT_NONROUTABLE;
+    }
+}
+
 int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
         corsaro_packet_tags_t *tags, libtrace_packet_t *packet) {
 
@@ -442,11 +460,10 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
     tags->providers_used = 0;
     uint32_t numips = 0;
 
-    if (packet == NULL) {
-        return 0;
-    }
-
+    memset(tags, 0, sizeof(corsaro_packet_tags_t));
     update_basic_tags(tagger->logger, packet, tags);
+    update_filter_tags(tagger->logger, packet, tags);
+
     if (tagger->providers == NULL) {
         return 0;
     }
