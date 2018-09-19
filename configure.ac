@@ -371,6 +371,7 @@ AC_CONFIG_FILES([Makefile libcorsaro/Makefile libcorsaro/plugins/Makefile
                         libcorsaro3/plugins/Makefile
                         libcorsaro3/libcorsaro3.h
                         corsarotrace/Makefile
+                        corsarotagger/Makefile
 			tools/Makefile 
 			common/Makefile
 			common/libpatricia/Makefile

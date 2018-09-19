@@ -22,8 +22,20 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-SUBDIRS = common libcorsaro3 corsarotrace corsarotagger
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro3
+
+bin_PROGRAMS = corsarotagger
+
+# main corsaro program
+corsarotagger_SOURCES = \
+	corsarotagger.c \
+        configparser.c \
+        configparser.h \
+        corsarotagger.h
+
+corsarotagger_LDADD = -lcorsaro3
+
+corsarotagger_LDFLAGS = -L$(top_builddir)/libcorsaro3
 
 ACLOCAL_AMFLAGS = -I m4
 
