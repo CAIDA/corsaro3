@@ -516,6 +516,8 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
         }
     }
 
+    ipmeta_record_set_free(&records);
+
     return 0;
 }
 

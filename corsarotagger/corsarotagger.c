@@ -113,9 +113,9 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         tls->stopped = 1;
     }
 
-    if (zmq_bind(tls->pubsock, glob->pubqueuename) != 0) {
+    if (zmq_connect(tls->pubsock, glob->pubqueuename) != 0) {
         corsaro_log(glob->logger,
-                "error while binding zeromq publisher socket in thread %d:%s",
+                "error while connecting zeromq publisher socket in thread %d:%s",
                 trace_get_perpkt_thread_id(t), strerror(errno));
         tls->stopped = 1;
     }
