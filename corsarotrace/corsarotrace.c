@@ -37,43 +37,22 @@
 #include <errno.h>
 
 #include <libtrace.h>
-#include <libtrace_parallel.h>
-#include <libtrace/message_queue.h>
+#include <zmq.h>
 
 #include "libcorsaro3_log.h"
 #include "corsarotrace.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_filtering.h"
-
-/* This version of corsaro is solely for the analysis of captured packets,
- * either via a live interface or from a trace file on disk.
- *
- * It is built on top of parallel libtrace, so we can have multiple
- * processing threads that each run the plugins against a subset of the
- * captured packets. The results from each thread+plugin will be written
- * to a temporary output file.
- *
- * We also have a single reporting thread which will merge the processing
- * results into a coherent output file for each plugin. This is where things
- * can get a little complicated -- we'll have to read and parse each of
- * the temporary output files but only once all processing threads have
- * finished writing to their respective file.
- */
-
-
-libtrace_callback_set_t *processing = NULL;
-libtrace_callback_set_t *reporter = NULL;
+#include "taggedpacket.pb-c.h"
 
 volatile int corsaro_halted = 0;
-volatile int trace_halted = 0;
 
 static void cleanup_signal(int sig) {
     (void)sig;
     corsaro_halted = 1;
-    trace_halted = 1;
 }
 
-
+#if 0
 static void publish_file_closed_message(libtrace_t *trace,
         libtrace_thread_t *t, uint32_t last_interval, uint32_t rotatets) {
 
@@ -140,6 +119,7 @@ static inline int corsarotrace_interval_end(corsaro_logger_t *logger,
         libtrace_t *trace,
         libtrace_thread_t *t, corsaro_trace_local_t *tls, uint32_t ts) {
     void **interval_data;
+    libtrace_stat_t *stats;
     interval_data = corsaro_push_end_plugins(tls->plugins,
             tls->current_interval.number, ts);
 
@@ -152,6 +132,15 @@ static inline int corsarotrace_interval_end(corsaro_logger_t *logger,
                 tls->current_interval.time, ts,
                 tls->plugins->plugincount, interval_data);
     }
+    stats = trace_create_statistics();
+    trace_get_thread_statistics(trace, t, stats);
+
+    corsaro_log(logger,
+            "thread %d stats: %lu seen, %lu dropped, %lu missing",
+            trace_get_perpkt_thread_id(t), stats->accepted,
+            stats->dropped, stats->missing);
+    free(stats);
+
     tls->pkts_outstanding = 0;
     return 0;
 }
@@ -644,6 +633,69 @@ int start_trace_input(corsaro_trace_global_t *glob) {
     return 0;
 }
 
+#endif
+
+static void *start_worker(void *tdata) {
+
+    corsaro_trace_worker_t *tls = (corsaro_trace_worker_t *)tdata;
+
+    pthread_exit(NULL);
+}
+
+static int receive_tagged_packet(corsaro_trace_global_t *glob) {
+
+    /* TODO receive message, decode it, forward to an appropriate worker */
+    zmq_msg_t zmsg;
+    zmq_msg_init(&zmsg);
+    uint16_t filttags = 1000;
+    int rcvsize;
+    char *rcvspace;
+    TaggedPacket *tp;
+
+    if (zmq_msg_recv(&zmsg, glob->zmq_subsock, 0) < 0) {
+        corsaro_log(glob->logger,
+                "error while receiving message from sub socket: %s",
+                strerror(errno));
+        return -1;
+    }
+
+    if (zmq_msg_size(&zmsg) != sizeof(filttags)) {
+        corsaro_log(glob->logger,
+                "unexpected item received on sub socket, was expecting filter tags");
+        return -1;
+    }
+
+    filttags = ntohs(*(uint16_t *)zmq_msg_data(&zmsg));
+    zmq_msg_close(&zmsg);
+
+    zmq_msg_init(&zmsg);
+    if (zmq_msg_recv(&zmsg, glob->zmq_subsock, 0) < 0) {
+        corsaro_log(glob->logger,
+                "error while receiving message from sub socket: %s",
+                strerror(errno));
+        return -1;
+    }
+
+    rcvsize = zmq_msg_size(&zmsg);
+    rcvspace = (char *)zmq_msg_data(&zmsg);
+
+    tp = tagged_packet__unpack(NULL, rcvsize, rcvspace);
+    if (tp == NULL) {
+        corsaro_log(glob->logger,
+                "error while unpacking message received from sub socket");
+        return -1;
+    }
+
+    if (filttags & CORSARO_FILTERBIT_NONROUTABLE) {
+        printf("%u  %u.%u  %u %u %u\n", filttags, tp->ts_sec, tp->ts_usec,
+                tp->pktlen, tp->flowhash, tp->tagcount);
+    }
+    zmq_msg_close(&zmsg);
+    tagged_packet__free_unpacked(tp, NULL);
+
+    return 0;
+}
+
 void usage(char *prog) {
     printf("Usage: %s [ -l logmode ] -c configfile \n\n", prog);
     printf("Accepted logmodes:\n");
@@ -651,20 +703,15 @@ void usage(char *prog) {
 
 }
 
-int main(int argc, char *argv[]) {
+static corsaro_trace_global_t *configure_corsaro(int argc, char *argv[]) {
 
+    corsaro_trace_global_t *glob = NULL;
     char *configfile = NULL;
     char *logmodestr = NULL;
-    corsaro_trace_global_t *glob = NULL;
-    int logmode = GLOBAL_LOGMODE_STDERR;
-    ipmeta_provider_t *prov;
-
     struct sigaction sigact;
-    sigset_t sig_before, sig_block_all;
-    libtrace_stat_t *stats;
+    int logmode = GLOBAL_LOGMODE_STDERR;
 
     /* Replaced old getopt-based nightmare with a proper YAML config file. */
-
     while (1) {
         int optind;
         struct option long_options[] = {
@@ -689,18 +736,18 @@ int main(int argc, char *argv[]) {
                 break;
             case 'h':
                 usage(argv[0]);
-                return 1;
+                return NULL;
             default:
                 fprintf(stderr, "corsarotrace: unsupported option: %c\n", c);
                 usage(argv[0]);
-                return 1;
+                return NULL;
         }
     }
 
     if (configfile == NULL) {
         fprintf(stderr, "corsarotrace: no config file specified. Use -c to specify one.\n");
         usage(argv[0]);
-        return 1;
+        return NULL;
     }
 
     if (logmodestr != NULL) {
@@ -719,7 +766,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "corsarotrace: unexpected logmode: %s\n",
                     logmodestr);
             usage(argv[0]);
-            return 1;
+            return NULL;
         }
     }
 
@@ -727,122 +774,125 @@ int main(int argc, char *argv[]) {
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags = SA_RESTART;
 
-
     sigaction(SIGINT, &sigact, NULL);
     sigaction(SIGTERM, &sigact, NULL);
     signal(SIGPIPE, SIG_IGN);
 
     glob = corsaro_trace_init_global(configfile, logmode);
+    return glob;
+}
+
+int main(int argc, char *argv[]) {
+
+    corsaro_trace_global_t *glob = NULL;
+    int hwm = 100000;
+    int linger = 1000;
+    sigset_t sig_before, sig_block_all;
+    int i;
+    corsaro_trace_worker_t *workers;
+    zmq_pollitem_t pollitems[1];
+
+    glob = configure_corsaro(argc, argv);
     if (glob == NULL) {
         return 1;
     }
 
-    if (glob->taggingon) {
-        glob->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
+    glob->zmq_workersocks = calloc(glob->threads, sizeof(void *));
+    workers = calloc(glob->threads, sizeof(corsaro_trace_worker_t));
 
-        if (glob->pfxtagopts.enabled) {
-            prov = corsaro_init_ipmeta_provider(glob->ipmeta,
-                        IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts),
-                        glob->logger);
-            if (prov == NULL) {
-                corsaro_log(glob->logger,
-                        "error while enabling prefix->asn tagging.");
-            } else {
-                glob->pfxipmeta = prov;
-            }
-        }
-
-        if (glob->maxtagopts.enabled) {
-            prov = corsaro_init_ipmeta_provider(glob->ipmeta,
-                        IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts),
-                        glob->logger);
-            if (prov == NULL) {
-                corsaro_log(glob->logger,
-                        "error while enabling Maxmind geo-location tagging.");
-            } else {
-                glob->maxmindipmeta = prov;
-            }
-        }
-
-        if (glob->netacqtagopts.enabled) {
-            prov = corsaro_init_ipmeta_provider(glob->ipmeta,
-                        IPMETA_PROVIDER_NETACQ_EDGE,
-                        &(glob->netacqtagopts), glob->logger);
-            if (prov == NULL) {
-                corsaro_log(glob->logger,
-                        "error while enabling Netacq-Edge geo-location tagging.");
-            } else {
-                glob->netacqipmeta = prov;
-            }
-        }
-    }
-
-    while (glob->currenturi < glob->totaluris && !corsaro_halted) {
-
-        sigemptyset(&sig_block_all);
-        if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
-            corsaro_log(glob->logger, "unable to disable signals before starting threads.");
-            return 1;
-        }
-        trace_halted = 0;
-        /* Create trace and start processing threads */
-        if (start_trace_input(glob) < 0) {
-            corsaro_log(glob->logger, "failed to start packet source %s.",
-                    glob->inputuris[glob->currenturi]);
-            glob->currenturi ++;
-            trace_destroy(glob->trace);
-            glob->trace = NULL;
-            continue;
-        }
-
-        if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
-            corsaro_log(glob->logger, "unable to re-enable signals after starting threads.");
+    for (i = 0; i < glob->threads; i++) {
+        char sockname[30];
+        glob->zmq_workersocks[i] = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
+        snprintf(sockname, 30, "inproc://worker%d", i);
+        if (zmq_bind(glob->zmq_workersocks[i], sockname) != 0) {
+            corsaro_log(glob->logger,
+                    "unable to bind push socket for worker %d: %s", i,
+                    strerror(errno));
             return 1;
         }
 
-        while (!trace_halted) {
-            sleep(1);
-        }
-        if (!trace_has_finished(glob->trace)) {
-            glob->currenturi ++;
-            trace_pstop(glob->trace);
-        } else {
-            glob->currenturi ++;
+        if (zmq_setsockopt(glob->zmq_workersocks[i], ZMQ_SNDHWM, &hwm,
+                sizeof(hwm)) < 0) {
+            corsaro_log(glob->logger,
+                    "unable to set HWM for push socket for worker %d: %s", i,
+                    strerror(errno));
+            return 1;
         }
 
-        /* Join on input trace */
-        trace_join(glob->trace);
-        stats = trace_get_statistics(glob->trace, NULL);
-        if (stats->dropped_valid) {
-            corsaro_log(glob->logger, "dropped packet count: %lu",
-                    stats->dropped);
-        } else {
-            corsaro_log(glob->logger, "dropped packet count: unknown");
-        }
-
-        if (stats->missing_valid) {
-            corsaro_log(glob->logger, "missing packet count: %lu",
-                    stats->missing);
-        } else {
-            corsaro_log(glob->logger, "missing packet count: unknown");
-        }
-
-
-        trace_destroy(glob->trace);
-        glob->trace = NULL;
+        workers[i].glob = glob;
     }
 
-    /* Join on merging thread */
+    sigemptyset(&sig_block_all);
+    if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
+        corsaro_log(glob->logger,
+                "unable to disable signals before starting worker threads.");
+        return 1;
+    }
+
+    for (i = 0; i < glob->threads; i++) {
+        pthread_create(&(workers[i].threadid), NULL, start_worker,
+                &(workers[i]));
+    }
+
+    if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
+        corsaro_log(glob->logger,
+                "unable to re-enable signals after starting worker threads.");
+        return 1;
+    }
+
+    glob->zmq_subsock = zmq_socket(glob->zmq_ctxt, ZMQ_SUB);
+    if (zmq_bind(glob->zmq_subsock, glob->subqueuename) < 0) {
+        corsaro_log(glob->logger,
+                "unable to bind to socket for receiving tagged packets: %s",
+                strerror(errno));
+        return 1;
+    }
+
+    /* TODO */
+    /* subscribe to the desired packet streams, based on our filter options */
+    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, "", 0) < 0) {
+        corsaro_log(glob->logger,
+                "unable to subscribe to all streams of tagged packets: %s",
+                strerror(errno));
+        return 1;
+    }
+
+    pollitems[0].socket = glob->zmq_subsock;
+    pollitems[0].fd = 0;
+    pollitems[0].events = ZMQ_POLLIN;
+    pollitems[0].revents = 0;
+
+    while (!corsaro_halted) {
+        /* poll our sub socket */
+        if (zmq_poll(pollitems, 1, 1000) < 0) {
+            corsaro_log(glob->logger,
+                    "error while polling socket for incoming tagged packets");
+            break;
+        }
+
+        if (pollitems[0].revents == ZMQ_POLLIN) {
+            if (receive_tagged_packet(glob) < 0) {
+                break;
+            }
+        }
+
+    }
+
+    for (i = 0; i < glob->threads; i++) {
+        /* TODO send halt message to all workers */
+
+        pthread_join(workers[i].threadid, NULL);
+        zmq_setsockopt(glob->zmq_workersocks[i], ZMQ_LINGER, &linger,
+                sizeof(linger));
+        zmq_close(glob->zmq_workersocks[i]);
+    }
+
+    zmq_close(glob->zmq_subsock);
+    free(glob->zmq_workersocks);
+    free(workers);
+
     corsaro_log(glob->logger, "all threads have joined, exiting.");
-
     corsaro_trace_free_global(glob);
-
-    if (processing) {
-        trace_destroy_callback_set(processing);
-    }
-    if (reporter) {
-        trace_destroy_callback_set(reporter);
-    }
 
     return 0;
 }

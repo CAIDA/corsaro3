@@ -51,77 +51,52 @@ typedef struct corsaro_trace_msg {
     void **plugindata;
 } corsaro_trace_msg_t;
 
-typedef struct corsaro_trace_local corsaro_trace_local_t;
+typedef struct corsaro_trace_worker corsaro_trace_worker_t;
 
 typedef struct corsaro_trace_glob {
     corsaro_plugin_t *active_plugins;
     corsaro_logger_t *logger;
     char *template;
     char *logfilename;
-    char **inputuris;
+    char *subqueuename;
     char *filterstring;
     char *monitorid;
 
-    int currenturi;
-    int totaluris;
-    int alloceduris;
-    libtrace_t *trace;
-    libtrace_filter_t *filter;
     uint32_t boundstartts;
     uint32_t boundendts;
     uint32_t interval;
     uint32_t rotatefreq;
 
-    uint8_t promisc;
-    uint8_t taggingon;
     uint8_t logmode;
     uint8_t threads;
     uint8_t plugincount;
 
-    char *treefiltername;
     uint8_t removespoofed;
     uint8_t removeerratic;
     uint8_t removerouted;
 
-    pfx2asn_opts_t pfxtagopts;
-    maxmind_opts_t maxtagopts;
-    netacq_opts_t netacqtagopts;
-
-    ipmeta_t *ipmeta; 
-    ipmeta_provider_t *maxmindipmeta;
-    ipmeta_provider_t *netacqipmeta;
-    ipmeta_provider_t *pfxipmeta;
-
-    corsaro_trace_local_t **savedlocalstate;
-    fn_hasher hasher;
-    void *hasher_data;
-    uint8_t hasher_required;
+    void *zmq_ctxt;
+    void *zmq_subsock;
+    void **zmq_workersocks;
 
 } corsaro_trace_global_t;
 
-struct corsaro_trace_local {
+struct corsaro_trace_worker {
+    corsaro_trace_global_t *glob;
+    pthread_t threadid;
 
     corsaro_interval_t current_interval;
     corsaro_interval_t lastrotateinterval;
     corsaro_plugin_set_t *plugins;
     uint64_t pkts_outstanding;
-    uint64_t pkts_since_tick;
-    uint32_t next_report;
-    uint32_t next_rotate;
+
     uint32_t last_ts;
     uint8_t stopped;
 
-    libtrace_list_t *customfilters;
-    corsaro_packet_tagger_t *tagger;
+    void *zmq_pullsock;
+    void *zmq_pushsock;
+
 };
-
-typedef struct corsaro_trace_waiter {
-    uint8_t stops_seen;
-    corsaro_fin_interval_t *finished_intervals;
-    uint32_t next_rotate_interval;
-    corsaro_plugin_set_t *pluginset;
-
-} corsaro_trace_waiter_t;
 
 corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode);
 void corsaro_trace_free_global(corsaro_trace_global_t *glob);
