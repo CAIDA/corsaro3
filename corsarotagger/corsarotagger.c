@@ -42,6 +42,8 @@
 #include "libcorsaro3_tagging.h"
 #include "corsarotagger.h"
 #include "libcorsaro3_filtering.h"
+#include "libcorsaro3_memhandler.h"
+#include "taggedpacket.pb-c.h"
 
 libtrace_callback_set_t *processing = NULL;
 
@@ -104,6 +106,13 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         tls->stopped = 1;
     }
 
+    tls->msg_source = malloc(sizeof(corsaro_memhandler_t));
+    tls->ptag_source = malloc(sizeof(corsaro_memhandler_t));
+    init_corsaro_memhandler(glob->logger, tls->msg_source,
+            sizeof(TaggedPacket), 100);
+    init_corsaro_memhandler(glob->logger, tls->ptag_source,
+            sizeof(PacketTag), 1000);
+
     /* TODO create zmq socket for publishing */
     tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUB);
     if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
@@ -146,22 +155,128 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         zmq_setsockopt(tls->pubsock, ZMQ_LINGER, &linger, sizeof(linger));
     }
     zmq_close(tls->pubsock);
+
+    destroy_corsaro_memhandler(tls->msg_source);
+    destroy_corsaro_memhandler(tls->ptag_source);
+
     corsaro_log(glob->logger, "halted packet tagging thread %d, errors=%lu",
             trace_get_perpkt_thread_id(t), tls->errorcount);
     free(tls);
 }
 
-static int corsaro_publish_tags(corsaro_tagger_local_t *tls,
+static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
+        corsaro_tagger_local_t *tls,
         corsaro_packet_tags_t *tags, libtrace_packet_t *packet) {
 
-    /* TODO
-     * use filter tags to determine envelope value
-     * required metadata: timestamp, packet length
-     * possible future extensions: wire length, link type, flow id hash
-     * serialise metadata, packet contents, tags into buffer for sending
-     * publish onto zmq socket
+    TaggedPacket *tp = NULL;
+    struct timeval tv;
+    uint32_t rem, packedlen;
+    void *pktcontents, *packbuf;
+    libtrace_linktype_t linktype;
+    PacketTag *ptags[16];
+    int tagcount = 0, i, ret;
+    corsaro_memsource_t *tpsrc;
+    corsaro_memsource_t *ptagsrc[16];
+
+    pktcontents = trace_get_layer2(packet, &linktype, &rem);
+    if (rem == 0 || pktcontents == NULL) {
+        return 0;
+    }
+
+    if (linktype != TRACE_TYPE_ETH) {
+        return 0;
+    }
+
+    tv = trace_get_timeval(packet);
+
+    tp = (TaggedPacket *)get_corsaro_memhandler_item(tls->msg_source,
+            &tpsrc);
+
+    tagged_packet__init(tp);
+    /* possible metadata future extensions: wire length, link type, flow id hash
      */
-    return 0;
+    tp->ts_sec = tv.tv_sec;
+    tp->ts_usec = tv.tv_usec;
+    tp->pktlen = rem;
+    tp->pktcontent.data = pktcontents;
+    tp->pktcontent.len = rem;
+
+    if (tags->providers_used & 1) {
+        tagcount += 3;      // protocol, src port and dest port
+    }
+
+#if 0
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
+        tagcount += 1;      // prefixasn
+    }
+
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
+        tagcount += 2;      // country and continent
+    }
+
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+        tagcount += 4;      // polygon, region, country and continent
+    }
+#endif
+
+    i = 0;
+
+    if (tags->providers_used & 1) {
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item(tls->ptag_source,
+                &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_PROTOCOL;
+        ptags[i]->tagval = tags->protocol;
+        i++;
+
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item(tls->ptag_source,
+                &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_SOURCEPORT;
+        ptags[i]->tagval = tags->src_port;
+        i++;
+
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item(tls->ptag_source,
+                &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_DESTPORT;
+        ptags[i]->tagval = tags->dest_port;
+        i++;
+    }
+
+    tp->tags = ptags;
+
+    packedlen = tagged_packet__get_packed_size(tp);
+    packbuf = malloc(packedlen);
+    tagged_packet__pack(tp, packbuf);
+
+    ret = 0;
+    if (zmq_send(tls->pubsock, &(tags->highlevelfilterbits),
+            sizeof(tags->highlevelfilterbits), ZMQ_SNDMORE) < 0) {
+        corsaro_log(glob->logger,
+                "error while publishing tagged packet: %s", strerror(errno));
+        tls->errorcount ++;
+        ret = -1;
+        goto endpublish;
+    }
+
+    if (zmq_send(tls->pubsock, packbuf, packedlen, 0) < 0) {
+        corsaro_log(glob->logger,
+                "error while publishing tagged packet: %s", strerror(errno));
+        tls->errorcount ++;
+        ret = -1;
+        goto endpublish;
+    }
+
+endpublish:
+    for (i = 0; i < tagcount; i++) {
+        release_corsaro_memhandler_item(tls->ptag_source, ptagsrc[i]);
+    }
+    release_corsaro_memhandler_item(tls->msg_source, tpsrc);
+    free(packbuf);
+
+
+    return ret;
 }
 
 static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
@@ -178,7 +293,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     if (corsaro_tag_packet(tls->tagger, &packettags, packet) != 0) {
         corsaro_log(glob->logger, "error while attempting to tag a packet");
         tls->errorcount ++;
-    } else if (corsaro_publish_tags(tls, &packettags, packet) != 0) {
+    } else if (corsaro_publish_tags(glob, tls, &packettags, packet) != 0) {
         corsaro_log(glob->logger, "error while attempting to tag a packet");
         tls->errorcount ++;
     }

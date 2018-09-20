@@ -35,6 +35,7 @@
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_filtering.h"
 #include "libcorsaro3_tagging.h"
+#include "libcorsaro3_memhandler.h"
 
 typedef struct corsaro_tagger_local corsaro_tagger_local_t;
 
@@ -77,6 +78,9 @@ struct corsaro_tagger_local {
     void *pubsock;
     uint8_t stopped;
     uint64_t errorcount;
+
+    corsaro_memhandler_t *msg_source;
+    corsaro_memhandler_t *ptag_source;
 };
 
 corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,

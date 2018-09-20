@@ -1,0 +1,17 @@
+syntax="proto2";
+
+message TaggedPacket {
+    required uint32 ts_sec = 1;
+    required uint32 ts_usec = 2;
+    required uint32 pktlen = 3;
+
+    required bytes pktcontent = 10;
+    repeated PacketTag tags = 11;
+
+}
+
+message PacketTag {
+    required uint32 tagid = 1;
+    required uint32 tagval = 2;
+}
+// vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

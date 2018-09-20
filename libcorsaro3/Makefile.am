@@ -31,6 +31,14 @@ lib_LTLIBRARIES = libcorsaro3.la
 
 include_HEADERS = libcorsaro3_log.h libcorsaro3.h
 
+MOSTLYCLEANFILES = taggedpacket.pb-c.c taggedpacket.pb-c.h
+BUILTSOURCES = taggedpacket.pb-c.c taggedpacket.pb-c.h
+
+taggedpacket.pb-c.c taggedpacket.pb-c.h: Makefile
+	$(PROTOC) --c_out=. taggedpacket.proto
+
+dist_noinst_DATA=taggedpacket.proto
+
 libcorsaro3_la_SOURCES = 	\
 	libcorsaro3_log.c 		\
 	libcorsaro3_log.h 		\
@@ -47,12 +55,13 @@ libcorsaro3_la_SOURCES = 	\
         libcorsaro3_memhandler.c        \
         libcorsaro3_memhandler.h        \
         pqueue.c pqueue.h               \
+        taggedpacket.pb-c.c taggedpacket.pb-c.h \
         libcorsaro3.h
 
 libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \
 	$(top_builddir)/libcorsaro3/plugins/libcorsaro3plugins.la
-
-libcorsaro3_la_LDFLAGS = -version-info @CORSARO_MAJOR_VERSION@:@CORSARO_MINOR_VERSION@:@CORSARO_MID_VERSION@
+libcorsaro3_la_CFLAGS=@PROTOBUF_C_CFLAGS@
+libcorsaro3_la_LDFLAGS = -version-info @CORSARO_MAJOR_VERSION@:@CORSARO_MINOR_VERSION@:@CORSARO_MID_VERSION@ @PROTOBUF_C_LIBS@
 
 ACLOCAL_AMFLAGS = -I m4
 
