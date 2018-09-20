@@ -177,6 +177,7 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     int tagcount = 0, i, ret;
     corsaro_memsource_t *tpsrc;
     corsaro_memsource_t *ptagsrc[16];
+    uint16_t tosend;
 
     pktcontents = trace_get_layer2(packet, &linktype, &rem);
     if (rem == 0 || pktcontents == NULL) {
@@ -193,13 +194,13 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
             &tpsrc);
 
     tagged_packet__init(tp);
-    /* possible metadata future extensions: wire length, link type, flow id hash
-     */
+    /* possible metadata future extensions: wire length, link type */
     tp->ts_sec = tv.tv_sec;
     tp->ts_usec = tv.tv_usec;
     tp->pktlen = rem;
     tp->pktcontent.data = pktcontents;
     tp->pktcontent.len = rem;
+    tp->flowhash = 0;       // TODO
 
     if (tags->providers_used & 1) {
         tagcount += 3;      // protocol, src port and dest port
@@ -245,14 +246,15 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     }
 
     tp->tags = ptags;
+    tp->tagcount = tagcount;
 
     packedlen = tagged_packet__get_packed_size(tp);
     packbuf = malloc(packedlen);
     tagged_packet__pack(tp, packbuf);
 
     ret = 0;
-    if (zmq_send(tls->pubsock, &(tags->highlevelfilterbits),
-            sizeof(tags->highlevelfilterbits), ZMQ_SNDMORE) < 0) {
+    tosend = htons(tags->highlevelfilterbits);
+    if (zmq_send(tls->pubsock, &tosend, sizeof(tosend), ZMQ_SNDMORE) < 0) {
         corsaro_log(glob->logger,
                 "error while publishing tagged packet: %s", strerror(errno));
         tls->errorcount ++;
@@ -300,6 +302,22 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     return packet;
 }
 
+static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
+        void *global, void *local, uint64_t tick) {
+
+    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
+    libtrace_stat_t *stats;
+
+    stats = trace_create_statistics();
+    trace_get_thread_statistics(trace, t, stats);
+
+    corsaro_log(glob->logger,
+            "thread %d stats: %lu seen, %lu missing, %lu dropped",
+            trace_get_perpkt_thread_id(t), stats->accepted,
+            stats->missing, stats->dropped);
+    free(stats);
+}
+
 static int start_trace_input(corsaro_tagger_global_t *glob) {
 
     glob->trace = trace_create(glob->inputuris[glob->currenturi]);
@@ -315,6 +333,7 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
                 glob->hasher_data);
     }
     trace_set_perpkt_threads(glob->trace, glob->threads);
+    trace_set_tick_interval(glob->trace, 60 * 1000);
 
     if (glob->savedlocalstate == NULL) {
         glob->savedlocalstate = (corsaro_tagger_local_t **)malloc(
@@ -326,6 +345,7 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
         trace_set_starting_cb(processing, init_trace_processing);
         trace_set_stopping_cb(processing, halt_trace_processing);
         trace_set_packet_cb(processing, per_packet);
+        trace_set_tick_interval_cb(processing, process_tick);
     }
 
     if (glob->filterstring) {
@@ -352,8 +372,6 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
 
     return 0;
 }
-
-
 
 void usage(char *prog) {
     printf("Usage: %s [ -l logmode ] -c configfile \n\n", prog);
