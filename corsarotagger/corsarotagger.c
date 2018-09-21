@@ -251,7 +251,7 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     }
 
     tp->tags = ptags;
-    tp->tagcount = tagcount;
+    tp->n_tags = tagcount;
 
     packedlen = tagged_packet__get_packed_size(tp);
     packbuf = malloc(packedlen);
