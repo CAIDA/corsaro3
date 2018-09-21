@@ -55,6 +55,7 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
     tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
     tagger->tagfreelist = libtrace_list_init(sizeof(corsaro_packet_tags_t *));
     tagger->providermask = 0;
+    tagger->records = ipmeta_record_set_init();
 
     return tagger;
 }
@@ -339,6 +340,19 @@ void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger) {
         if (tagger->providers) {
             libtrace_list_deinit(tagger->providers);
         }
+
+        if (tagger->tagfreelist) {
+            n = tagger->tagfreelist->head;
+            while (n) {
+                corsaro_packet_tags_t *tag = *(corsaro_packet_tags_t **)(n->data);
+                free(tag);
+                n = n->next;
+            }
+            libtrace_list_deinit(tagger->tagfreelist);
+        }
+        if (tagger->records) {
+            ipmeta_record_set_free(&tagger->records);
+        }
         free(tagger);
     }
 }
@@ -455,7 +469,6 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
     struct sockaddr_storage saddr;
     struct sockaddr_in *sin;
     libtrace_list_node_t *n;
-    ipmeta_record_set_t *records;
     ipmeta_record_t *rec;
     tags->providers_used = 0;
     uint32_t numips = 0;
@@ -486,14 +499,14 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
 
     sin = (struct sockaddr_in *)(&saddr);
 
-    records = ipmeta_record_set_init();
+    ipmeta_record_set_clear(tagger->records);
     if (ipmeta_lookup_single(tagger->ipmeta, sin->sin_addr.s_addr,
-            tagger->providermask, records) < 0) {
+            tagger->providermask, tagger->records) < 0) {
         corsaro_log(tagger->logger, "error while performing ipmeta lookup");
         return -1;
     }
 
-    while ((rec = ipmeta_record_set_next(records, &numips)) != NULL) {
+    while ((rec = ipmeta_record_set_next(tagger->records, &numips)) != NULL) {
         switch(rec->source) {
             case IPMETA_PROVIDER_MAXMIND:
                 if (update_maxmind_tags(tagger->logger, rec, tags) != 0) {
@@ -515,8 +528,6 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
                 printf("???: %u\n", rec->source);
         }
     }
-
-    ipmeta_record_set_free(&records);
 
     return 0;
 }

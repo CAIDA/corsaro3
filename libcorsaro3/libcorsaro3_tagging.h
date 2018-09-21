@@ -126,6 +126,7 @@ typedef struct corsaro_packet_tagger {
     /** List of active libipmeta providers */
     libtrace_list_t *providers;
     libtrace_list_t *tagfreelist;
+    ipmeta_record_set_t *records;
     uint32_t providermask;
 } corsaro_packet_tagger_t;
 
