@@ -177,6 +177,10 @@ uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
  */
 void release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
         corsaro_memsource_t *itemsource);
+uint8_t *get_corsaro_memhandler_item_nolock(corsaro_memhandler_t *handler,
+        corsaro_memsource_t **itemsource);
+void release_corsaro_memhandler_item_nolock(corsaro_memhandler_t *handler,
+        corsaro_memsource_t *itemsource);
 
 #endif
 

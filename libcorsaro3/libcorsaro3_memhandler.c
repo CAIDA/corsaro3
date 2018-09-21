@@ -207,16 +207,15 @@ void add_corsaro_memhandler_user(corsaro_memhandler_t *handler) {
     pthread_mutex_unlock(&handler->mutex);
 }
 
-uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
-        corsaro_memsource_t **itemsource) {
-    uint8_t *mem;
+static inline uint8_t *_get_corsaro_memhandler_item(
+        corsaro_memhandler_t *handler, corsaro_memsource_t **itemsource) {
 
+    uint8_t *mem;
     /* If the current blob still have slots available, just return one
      * of those. Otherwise, we need to create a new blob and grab the first
      * slot from that.
      */
 
-    pthread_mutex_lock(&handler->mutex);
     if (handler->current->nextavail >= handler->current->alloceditems) {
 
         if (handler->current->released == handler->current->alloceditems) {
@@ -247,15 +246,34 @@ uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
             handler->current->itemsize);
     handler->current->nextavail ++;
     *itemsource = handler->current;
+    return mem;
+}
+
+uint8_t *get_corsaro_memhandler_item(corsaro_memhandler_t *handler,
+        corsaro_memsource_t **itemsource) {
+    uint8_t *mem;
+
+    /* If the current blob still have slots available, just return one
+     * of those.
+     * Otherwise, we need to create a new handler and grab the first slot
+     * from that.
+     */
+
+    pthread_mutex_lock(&handler->mutex);
+    mem = _get_corsaro_memhandler_item(handler, itemsource);
     pthread_mutex_unlock(&handler->mutex);
     return mem;
 
 }
 
-void release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
+uint8_t *get_corsaro_memhandler_item_nolock(corsaro_memhandler_t *handler,
+        corsaro_memsource_t **itemsource) {
+    return _get_corsaro_memhandler_item(handler, itemsource);
+}
+
+static void _release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
         corsaro_memsource_t *itemsource) {
 
-    pthread_mutex_lock(&handler->mutex);
     itemsource->released ++;
 
     if (itemsource->released > handler->items_per_blob) {
@@ -283,6 +301,19 @@ void release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
         free(tmp);
     }
 
+}
+
+void release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
+        corsaro_memsource_t *itemsource) {
+
+    pthread_mutex_lock(&handler->mutex);
+    _release_corsaro_memhandler_item(handler, itemsource);
     pthread_mutex_unlock(&handler->mutex);
 }
+
+void release_corsaro_memhandler_item_nolock(corsaro_memhandler_t *handler,
+        corsaro_memsource_t *itemsource) {
+    _release_corsaro_memhandler_item(handler, itemsource);
+}
+
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
