@@ -205,7 +205,7 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     tp->pktlen = rem;
     tp->pktcontent.data = pktcontents;
     tp->pktcontent.len = rem;
-    tp->flowhash = 0;       // TODO
+    tp->flowhash = tags->ft_hash;
 
     if (tags->providers_used & 1) {
         tagcount += 3;      // protocol, src port and dest port

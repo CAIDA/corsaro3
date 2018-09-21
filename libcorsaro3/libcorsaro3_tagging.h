@@ -112,6 +112,7 @@ typedef struct corsaro_packet_tags {
     /** Bitmask showing which high level filters this packet matches, i.e.
      * is it spoofed, is it erratic, is it non-routable */
     uint16_t highlevelfilterbits;
+    uint32_t ft_hash;       // hashed flowtuple id
 } corsaro_packet_tags_t;
 
 /** Structure that maintains state required for tagging packets. */

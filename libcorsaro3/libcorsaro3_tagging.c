@@ -33,6 +33,32 @@
 #include "libcorsaro3_tagging.h"
 #include "libcorsaro3_log.h"
 
+typedef struct hash_fields {
+    uint32_t src_ip;
+    uint32_t dst_ip;
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint16_t ip_len;
+    uint8_t ttl;
+    uint8_t tcpflags;
+    uint8_t protocol;
+} hash_fields_t;
+
+#define CORSARO_TAG_SHIFT_AND_XOR(value) \
+  h ^= (h << 5) + (h >> 27) + (value)
+
+static inline uint32_t calc_flow_hash(hash_fields_t *hf) {
+    uint32_t h = hf->src_ip * 59;
+    CORSARO_TAG_SHIFT_AND_XOR(hf->dst_ip);
+    CORSARO_TAG_SHIFT_AND_XOR(((uint32_t)hf->src_port) << 16);
+    CORSARO_TAG_SHIFT_AND_XOR((uint32_t)hf->dst_port);
+    CORSARO_TAG_SHIFT_AND_XOR((((uint32_t)hf->ttl) << 24) |
+            (((uint32_t)hf->tcpflags) << 16));
+    CORSARO_TAG_SHIFT_AND_XOR((((uint32_t)hf->protocol) << 8) |
+            (((uint32_t)hf->ip_len)));
+    return h;
+}
+
 corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
         ipmeta_t *ipmeta) {
 
@@ -412,9 +438,12 @@ static void update_basic_tags(corsaro_logger_t *logger,
         libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
 
     void *transport;
+    libtrace_ip_t *ip;
     uint8_t proto;
     libtrace_icmp_t *icmp;
+    libtrace_tcp_t *tcp;
     uint32_t rem;
+    hash_fields_t hashdata;
 
     /* Basic tags refer to those that do not require any libipmeta providers
      * to derive, e.g. port numbers, transport protocols etc.
@@ -431,6 +460,18 @@ static void update_basic_tags(corsaro_logger_t *logger,
         return;
     }
 
+    ip = trace_get_ip(packet);
+    if (!ip) {
+        return;
+    }
+
+    memset(&hashdata, 0, sizeof(hashdata));
+    hashdata.src_ip = ntohl(ip->ip_src.s_addr);
+    hashdata.dst_ip = ntohl(ip->ip_dst.s_addr);
+    hashdata.protocol = ip->ip_p;
+    hashdata.ttl = ip->ip_ttl;
+    hashdata.ip_len = ntohs(ip->ip_len);
+
     tags->protocol = proto;
     if (proto == TRACE_IPPROTO_ICMP && rem >= 2) {
         /* ICMP doesn't have ports, but we are interested in the type and
@@ -442,7 +483,20 @@ static void update_basic_tags(corsaro_logger_t *logger,
             rem >= 4) {
         tags->src_port = ntohs(*((uint16_t *)transport));
         tags->dest_port = ntohs(*(((uint16_t *)transport) + 1));
+
+        if (proto == TRACE_IPPROTO_TCP && rem >= sizeof(libtrace_tcp_t)) {
+            tcp = (libtrace_tcp_t *)transport;
+            hashdata.tcpflags =
+                    ((tcp->cwr << 7) | (tcp->ece << 6) | (tcp->urg << 5) |
+                     (tcp->ack << 4) | (tcp->psh << 3) | (tcp->rst << 2) |
+                     (tcp->syn << 1) | (tcp->fin));
+        }
     }
+
+    hashdata.src_port = tags->src_port;
+    hashdata.dst_port = tags->dest_port;
+
+    tags->ft_hash = calc_flow_hash(&hashdata);
     tags->providers_used |= 1;
 }
 
