@@ -625,10 +625,11 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
     }                               \
 
 
-int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+static int _apply_spoofing_filter(corsaro_logger_t *logger,
+        libtrace_ip_t *ip, libtrace_tcp_t *tcp, libtrace_udp_t *udp,
+        uint32_t translen, uint16_t source_port, uint16_t dest_port,
+        uint8_t *tcppayload) {
 
-    PREPROCESS_PACKET
     if (_apply_abnormal_protocol_filter(logger, ip, tcp, tcppayload) > 0) {
         return 1;
     }
@@ -665,10 +666,12 @@ int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
     return 0;
 }
 
-int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+static int _apply_erratic_filter(corsaro_logger_t *logger,
+        libtrace_ip_t *ip, libtrace_tcp_t *tcp, libtrace_udp_t *udp,
+        libtrace_icmp_t *icmp,
+        uint32_t payloadlen, uint16_t source_port, uint16_t dest_port,
+        uint8_t *tcppayload, uint8_t *udppayload) {
 
-    PREPROCESS_PACKET
     if (udppayload && _apply_udp_0x31_filter(logger, ip, udp, udppayload,
             payloadlen) > 0) {
         return 1;
@@ -717,11 +720,30 @@ int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+static inline int _apply_routable_filter(corsaro_logger_t *logger,
+        libtrace_ip_t *ip) {
+    return _apply_rfc5735_filter(logger, ip);
+}
+
+int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+    PREPROCESS_PACKET
+    return _apply_erratic_filter(logger, ip, tcp, udp, icmp, payloadlen,
+            source_port, dest_port, tcppayload, udppayload);
+}
+
+int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+    PREPROCESS_PACKET
+    return _apply_spoofing_filter(logger, ip, tcp, udp, translen, source_port,
+            dest_port, tcppayload);
+}
+
 int corsaro_apply_routable_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
     PREPROCESS_PACKET
-    return _apply_rfc5735_filter(logger, ip);
+    return _apply_routable_filter(logger, ip);
 }
 
 int corsaro_apply_abnormal_protocol_filter(corsaro_logger_t *logger,
@@ -924,6 +946,105 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
     return NULL;
 }
 
+int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
+        libtrace_packet_t *packet, corsaro_filter_torun_t *torun,
+        int torun_count) {
+    int i;
+
+    PREPROCESS_PACKET
+
+    for (i = 0; i < torun_count; i++) {
+        switch(torun[i].filterid) {
+            case CORSARO_FILTERID_SPOOFED:
+                torun[i].result = _apply_spoofing_filter(logger, ip, tcp,
+                        udp, translen, source_port, dest_port, tcppayload);
+                break;
+            case CORSARO_FILTERID_ERRATIC:
+                torun[i].result = _apply_erratic_filter(logger, ip, tcp,
+                        udp, icmp, payloadlen, source_port, dest_port,
+                        tcppayload, udppayload);
+                break;
+            case CORSARO_FILTERID_ROUTED:
+                torun[i].result = _apply_routable_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
+                torun[i].result = _apply_abnormal_protocol_filter(logger, ip,
+                        tcp, tcppayload);
+                break;
+            case CORSARO_FILTERID_TTL_200:
+                torun[i].result =_apply_ttl200_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_FRAGMENT:
+                torun[i].result =_apply_fragment_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_LAST_SRC_IP_0:
+                torun[i].result =_apply_last_src_byte0_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_LAST_SRC_IP_255:
+                torun[i].result =_apply_last_src_byte255_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_SAME_SRC_DEST_IP:
+                torun[i].result =_apply_same_src_dest_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_UDP_PORT_0:
+                torun[i].result =_apply_udp_port_zero_filter(logger, udp,
+                        translen, source_port, dest_port);
+                break;
+            case CORSARO_FILTERID_TCP_PORT_0:
+                torun[i].result =_apply_tcp_port_zero_filter(logger, tcp,
+                        translen, source_port, dest_port);
+                break;
+            case CORSARO_FILTERID_RFC5735:
+                torun[i].result =_apply_rfc5735_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_BACKSCATTER:
+                torun[i].result =_apply_backscatter_filter(logger, tcp, udp,
+                        icmp, source_port, tcppayload);
+                break;
+            case CORSARO_FILTERID_BITTORRENT:
+                torun[i].result =_apply_bittorrent_filter(logger, ip, udp,
+                        (uint16_t *)udppayload, payloadlen);
+                break;
+            case CORSARO_FILTERID_UDP_0X31:
+                torun[i].result =_apply_udp_0x31_filter(logger, ip, udp,
+                        udppayload, payloadlen);
+                break;
+            case CORSARO_FILTERID_UDP_IPLEN_96:
+                torun[i].result =_apply_udp_iplen_96_filter(logger, ip);
+                break;
+            case CORSARO_FILTERID_PORT_53:
+                torun[i].result =_apply_port_53_filter(logger, source_port,
+                        dest_port);
+                break;
+            case CORSARO_FILTERID_TCP_PORT_23:
+                torun[i].result =_apply_port_tcp23_filter(logger, tcp,
+                        source_port, dest_port);
+                break;
+            case CORSARO_FILTERID_TCP_PORT_80:
+                torun[i].result =_apply_port_tcp80_filter(logger, tcp,
+                        source_port, dest_port);
+                break;
+            case CORSARO_FILTERID_TCP_PORT_5000:
+                torun[i].result =_apply_port_tcp5000_filter(logger, tcp,
+                        source_port, dest_port);
+                break;
+            case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
+                torun[i].result =_apply_dns_resp_oddport_filter(logger, ip,
+                        (uint16_t *)udppayload, payloadlen);
+                break;
+            case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
+                torun[i].result =_apply_netbios_name_filter(logger, ip,
+                        (uint16_t *)udppayload, payloadlen, source_port,
+                        dest_port);
+                break;
+            default:
+                corsaro_log(logger, "Warning: no filter callback for id %d -- please add one to corsaro_apply_multiple_filters()", torun[i].filterid);
+                return -1;
+        }
+    }
+    return 0;
+}
+
 int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
         corsaro_builtin_filter_id_t filtid, libtrace_packet_t *packet) {
 
@@ -936,11 +1057,14 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
 
     switch(filtid) {
         case CORSARO_FILTERID_SPOOFED:
-            return corsaro_apply_spoofing_filter(logger, packet);
+            return _apply_spoofing_filter(logger, ip, tcp,
+                        udp, translen, source_port, dest_port, tcppayload);
         case CORSARO_FILTERID_ERRATIC:
-            return corsaro_apply_erratic_filter(logger, packet);
+            return _apply_erratic_filter(logger, ip, tcp,
+                    udp, icmp, payloadlen, source_port, dest_port,
+                    tcppayload, udppayload);
         case CORSARO_FILTERID_ROUTED:
-            return corsaro_apply_routable_filter(logger, packet);
+            return _apply_routable_filter(logger, ip);
         case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
             return _apply_abnormal_protocol_filter(logger, ip, tcp, tcppayload);
         case CORSARO_FILTERID_TTL_200:

@@ -504,15 +504,26 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
         libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
 
 
-    if (corsaro_apply_spoofing_filter(logger, packet)) {
+    corsaro_filter_torun_t torun[3];
+
+    torun[0].filterid = CORSARO_FILTERID_SPOOFED;
+    torun[0].result = 255;
+    torun[1].filterid = CORSARO_FILTERID_ERRATIC;
+    torun[1].result = 255;
+    torun[2].filterid = CORSARO_FILTERID_ROUTED;
+    torun[2].result = 255;
+
+    corsaro_apply_multiple_filters(logger, packet, torun, 3);
+
+    if (torun[0].result == 1) {
         tags->highlevelfilterbits |= CORSARO_FILTERBIT_SPOOFED;
     }
 
-    if (corsaro_apply_erratic_filter(logger, packet)) {
+    if (torun[1].result == 1) {
         tags->highlevelfilterbits |= CORSARO_FILTERBIT_ERRATIC;
     }
 
-    if (corsaro_apply_routable_filter(logger, packet)) {
+    if (torun[2].result == 1) {
         tags->highlevelfilterbits |= CORSARO_FILTERBIT_NONROUTABLE;
     }
 }

@@ -69,6 +69,11 @@ typedef enum {
     CORSARO_FILTERID_MAX
 } corsaro_builtin_filter_id_t;
 
+typedef struct corsaro_filter_torun {
+    corsaro_builtin_filter_id_t filterid;
+    uint8_t result;
+} corsaro_filter_torun_t;
+
 int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
         corsaro_builtin_filter_id_t filtid, libtrace_packet_t *packet);
 const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
@@ -84,6 +89,15 @@ int corsaro_apply_custom_filters_OR(corsaro_logger_t *logger,
         libtrace_list_t *filtlist, libtrace_packet_t *packet);
 int corsaro_apply_single_custom_filter(corsaro_logger_t *logger,
         corsaro_filter_t *filter, libtrace_packet_t *packet);
+
+/* Function for running multiple filters in a single function call,
+ * can be more efficient since we don't end up doing multiple IP, TCP, etc.
+ * header lookups for each filter as can happen if you apply the filters
+ * individually.
+ */
+int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
+        libtrace_packet_t *packet, corsaro_filter_torun_t *torun,
+        int torun_count);
 
 /* High level built-in filters */
 int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
