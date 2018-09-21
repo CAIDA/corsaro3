@@ -33,11 +33,8 @@
 #include "libcorsaro3_log.h"
 
 static inline int _apply_ttl200_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip) {
 
-    libtrace_ip_t *ip;
-
-    ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
     }
@@ -52,11 +49,8 @@ static inline int _apply_ttl200_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_fragment_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip) {
 
-    libtrace_ip_t *ip;
-
-    ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
     }
@@ -69,11 +63,8 @@ static inline int _apply_fragment_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_last_src_byte0_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip) {
 
-    libtrace_ip_t *ip;
-
-    ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
     }
@@ -87,11 +78,8 @@ static inline int _apply_last_src_byte0_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_last_src_byte255_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip) {
 
-    libtrace_ip_t *ip;
-
-    ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
     }
@@ -105,11 +93,8 @@ static inline int _apply_last_src_byte255_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_same_src_dest_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip) {
 
-    libtrace_ip_t *ip;
-
-    ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
     }
@@ -121,29 +106,18 @@ static inline int _apply_same_src_dest_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_udp_port_zero_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_udp_t *udp, uint32_t udplen, uint16_t source_port,
+        uint16_t dest_port) {
 
-    libtrace_udp_t *udp;
-    void *transport;
-    uint8_t proto;
-    uint32_t rem;
-
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (!transport) {
-        return -1;
-    }
-
-    if (proto != TRACE_IPPROTO_UDP) {
+    if (!udp) {
         return 0;
     }
 
-    if (rem < 4) {
+    if (udplen < 4) {
         return -1;
     }
-    udp = (libtrace_udp_t *)transport;
 
-    /* Don't bother byteswapping since zero is the same regardless */
-    if (udp->source == 0 || udp->dest == 0) {
+    if (source_port == 0 || dest_port == 0) {
         return 1;
     }
 
@@ -151,29 +125,18 @@ static inline int _apply_udp_port_zero_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_tcp_port_zero_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_tcp_t *tcp, uint32_t tcplen, uint16_t source_port,
+        uint16_t dest_port) {
 
-    libtrace_tcp_t *tcp;
-    void *transport;
-    uint8_t proto;
-    uint32_t rem;
-
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (!transport) {
-        return -1;
-    }
-
-    if (proto != TRACE_IPPROTO_TCP) {
+    if (!tcp) {
         return 0;
     }
 
-    if (rem < 4) {
+    if (tcplen < 4) {
         return -1;
     }
-    tcp = (libtrace_tcp_t *)transport;
 
-    /* Don't bother byteswapping since zero is the same regardless */
-    if (tcp->source == 0 || tcp->dest == 0) {
+    if (source_port == 0 || dest_port == 0) {
         return 1;
     }
 
@@ -181,39 +144,17 @@ static inline int _apply_tcp_port_zero_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_udp_0x31_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip, libtrace_udp_t *udp, uint8_t *udppayload,
+        uint32_t payloadlen) {
 
-    void *transport;
-    uint8_t *udppayload;
-    libtrace_udp_t *udp;
-    uint8_t proto;
-    uint32_t rem;
-    libtrace_ip_t *ip;
     uint8_t pattern[10] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x31, 0x00};
-
-    ip = trace_get_ip(packet);
-    if (!ip) {
-        return -1;
-    }
-
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (!transport) {
-        return -1;
-    }
-
-    if (proto != TRACE_IPPROTO_UDP) {
-        return 0;
-    }
-
-    udp = (libtrace_udp_t *)transport;
-    udppayload = (uint8_t *)trace_get_payload_from_udp(udp, &rem);
 
     if (udppayload == NULL) {
         return 0;
     }
 
-    if (rem < 10) {
+    if (payloadlen < 10) {
         return 0;
     }
 
@@ -229,20 +170,13 @@ static inline int _apply_udp_0x31_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_udp_iplen_96_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip) {
 
-    libtrace_ip_t *ip;
-    void *transport;
-    uint8_t proto;
-    uint32_t rem;
-
-    ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
     }
 
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (proto == TRACE_IPPROTO_UDP && ntohs(ip->ip_len) == 96) {
+    if (ip->ip_p == TRACE_IPPROTO_UDP && ntohs(ip->ip_len) == 96) {
         return 1;
     }
 
@@ -250,10 +184,9 @@ static inline int _apply_udp_iplen_96_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_port_53_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        uint16_t source_port, uint16_t dest_port) {
 
-    if (trace_get_source_port(packet) == 53 ||
-            trace_get_destination_port(packet) == 53) {
+    if (source_port == 53 || dest_port == 53) {
         return 1;
     }
 
@@ -261,11 +194,9 @@ static inline int _apply_port_53_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_port_tcp23_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_tcp_t *tcp, uint16_t source_port, uint16_t dest_port) {
 
-    if (trace_get_tcp(packet) != NULL &&
-            (trace_get_source_port(packet) == 23 ||
-             trace_get_destination_port(packet) == 23)) {
+    if (tcp != NULL && (source_port == 23 || dest_port == 23)) {
         return 1;
     }
 
@@ -273,11 +204,9 @@ static inline int _apply_port_tcp23_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_port_tcp80_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_tcp_t *tcp, uint16_t source_port, uint16_t dest_port) {
 
-    if (trace_get_tcp(packet) != NULL &&
-            (trace_get_source_port(packet) == 80 ||
-             trace_get_destination_port(packet) == 80)) {
+    if (tcp != NULL && (source_port == 80 || dest_port == 80)) {
         return 1;
     }
 
@@ -285,11 +214,9 @@ static inline int _apply_port_tcp80_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_port_tcp5000_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_tcp_t *tcp, uint16_t source_port, uint16_t dest_port) {
 
-    if (trace_get_tcp(packet) != NULL &&
-            (trace_get_source_port(packet) == 5000 ||
-             trace_get_destination_port(packet) == 5000)) {
+    if (tcp != NULL && (source_port == 5000 || dest_port == 5000)) {
         return 1;
     }
 
@@ -297,37 +224,17 @@ static inline int _apply_port_tcp5000_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_dns_resp_oddport_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip, uint16_t *udppayload, uint32_t payloadlen) {
 
-    void *transport;
-    uint8_t proto;
-    uint32_t rem;
-    libtrace_udp_t *udp;
-    uint16_t *udppayload;
-    libtrace_ip_t *ip;
-
-    ip = trace_get_ip(packet);
-    if (!ip) {
-        return -1;
-    }
-
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (!transport) {
-        return -1;
-    }
-
-    if (proto != TRACE_IPPROTO_UDP) {
+    if (udppayload == NULL) {
         return 0;
     }
-
-    udp = (libtrace_udp_t *)transport;
-    udppayload = (uint16_t *)trace_get_payload_from_udp(udp, &rem);
 
     if (ntohs(ip->ip_len) <= 42) {
         return 0;
     }
 
-    if (rem < 20 - sizeof(libtrace_udp_t)) {
+    if (payloadlen < 12) {
         return 0;
     }
 
@@ -360,33 +267,14 @@ static inline int _apply_dns_resp_oddport_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_netbios_name_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip, uint16_t *udppayload, uint32_t payloadlen,
+        uint16_t source_port, uint16_t dest_port) {
 
-    void *transport;
-    uint8_t proto;
-    uint32_t rem;
-    libtrace_udp_t *udp;
-    uint16_t *udppayload;
-    libtrace_ip_t *ip;
-
-    ip = trace_get_ip(packet);
-    if (!ip) {
-        return -1;
-    }
-
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (!transport) {
-        return -1;
-    }
-
-    if (proto != TRACE_IPPROTO_UDP) {
+    if (!udppayload) {
         return 0;
     }
 
-    udp = (libtrace_udp_t *)transport;
-    udppayload = (uint16_t *)trace_get_payload_from_udp(udp, &rem);
-
-    if (ntohs(udp->source) != 137 || ntohs(udp->dest) != 137) {
+    if (source_port != 137 || dest_port != 137) {
         return 0;
     }
 
@@ -394,23 +282,23 @@ static inline int _apply_netbios_name_filter(corsaro_logger_t *logger,
         return 0;
     }
 
-    if (rem < 28 - sizeof(libtrace_udp_t)) {
+    if (payloadlen < 20) {
         return 0;
     }
 
-    if (ntohs(udppayload[6]) != 0x2043) {
+    if (udppayload[6] != htons(0x2043)) {
         return 0;
     }
 
-    if (ntohs(udppayload[7]) != 0x4b41) {
+    if (udppayload[7] != htons(0x4b41)) {
         return 0;
     }
 
-    if (ntohs(udppayload[8]) != 0x4141) {
+    if (udppayload[8] != htons(0x4141)) {
         return 0;
     }
 
-    if (ntohs(udppayload[9]) != 0x4141) {
+    if (udppayload[9] != htons(0x4141)) {
         return 0;
     }
 
@@ -418,39 +306,18 @@ static inline int _apply_netbios_name_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_backscatter_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
-
-    libtrace_tcp_t *tcp;
-    libtrace_udp_t *udp;
-    libtrace_icmp_t *icmp;
-    void *transport;
-    uint8_t proto;
-    uint32_t rem;
-
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (!transport) {
-        return -1;
-    }
+        libtrace_tcp_t *tcp, libtrace_udp_t *udp, libtrace_icmp_t *icmp,
+        uint16_t source_port, uint8_t *tcppayload) {
 
     /* TODO return different positive values for filter quality analysis */
 
     /* UDP backscatter -- just DNS for now */
-    if (proto == TRACE_IPPROTO_UDP) {
-        udp = (libtrace_udp_t *)transport;
-        if (rem < 2) {
-            return -1;
-        }
-        if (ntohs(udp->source) == 53) {
+    if (udp) {
+        if (source_port == 53) {
             return 1;
         }
-    }
-    
-    if (proto == TRACE_IPPROTO_ICMP) {
-        icmp = (libtrace_icmp_t *)transport;
-        if (rem < 1) {
-            return -1;
-        }
-        switch(icmp->type) {
+    } else if (icmp) {
+        switch(icmp->type) {       
             case 0:     // echo reply
             case 3:     // dest unreachable
             case 4:     // source quench
@@ -462,13 +329,7 @@ static inline int _apply_backscatter_filter(corsaro_logger_t *logger,
             case 18:    // address mask reply
                 return 1;
         }
-    }
-
-    if (proto == TRACE_IPPROTO_TCP) {
-        tcp = (libtrace_tcp_t *)transport;
-        if (rem < sizeof(libtrace_tcp_t)) {
-            return -1;
-        }
+    } else if (tcp && tcppayload) {
         /* No SYN-ACKs and no RSTs */
         if ((tcp->syn && tcp->ack) || tcp->rst) {
             return 1;
@@ -478,12 +339,10 @@ static inline int _apply_backscatter_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip) {
 
-    libtrace_ip_t *ip;
     uint32_t srcip;
 
-    ip = trace_get_ip(packet);
     if (!ip) {
         return -1;
     }
@@ -566,32 +425,25 @@ static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_abnormal_protocol_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip, libtrace_tcp_t *tcp, uint8_t *tcppayload) {
 
-    uint8_t ipproto;
-    uint32_t rem;
-    void *transport;
-    libtrace_tcp_t *tcp;
-
-    transport = trace_get_transport(packet, &ipproto, &rem);
-    if (!transport) {
+    if (!ip) {
         return -1;
     }
 
-    if (ipproto == TRACE_IPPROTO_ICMP || ipproto == TRACE_IPPROTO_UDP) {
+    if (ip->ip_p == TRACE_IPPROTO_ICMP || ip->ip_p == TRACE_IPPROTO_UDP) {
         return 0;
     }
 
-    if (ipproto == TRACE_IPPROTO_IPV6) {
+    if (ip->ip_p == TRACE_IPPROTO_IPV6) {
         return 0;
     }
 
-    if (ipproto != TRACE_IPPROTO_TCP) {
+    if (ip->ip_p != TRACE_IPPROTO_TCP) {
         return 1;
     }
 
-    tcp = (libtrace_tcp_t *)transport;
-    if (rem < sizeof(libtrace_tcp_t)) {
+    if (!tcppayload) {
         return -1;       // filter it?
     }
 
@@ -658,44 +510,27 @@ static inline int _apply_abnormal_protocol_filter(corsaro_logger_t *logger,
 }
 
 static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
-        libtrace_packet_t *packet) {
+        libtrace_ip_t *ip, libtrace_udp_t *udp, uint16_t *udppayload,
+        uint32_t payloadlen) {
 
-    void *transport;
-    uint8_t proto;
-    uint32_t rem;
-    libtrace_udp_t *udp;
-    uint16_t *udppayload;
-    libtrace_ip_t *ip;
     uint32_t *ptr32;
     uint16_t udplen;
+    uint16_t iplen;
     uint8_t last10pat[10] = {0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00};
 
-    
-    ip = trace_get_ip(packet);
-    if (!ip) {
-        return -1;
-    }
-
-    transport = trace_get_transport(packet, &proto, &rem);
-    if (!transport) {
-        return -1;
-    }
-
-    if (proto != TRACE_IPPROTO_UDP) {
+    if (!udp) {
         return 0;
     }
-
-    udp = (libtrace_udp_t *)transport;
-    udppayload = (uint16_t *)trace_get_payload_from_udp(udp, &rem);
     ptr32 = (uint32_t *)(udppayload);
     udplen = ntohs(udp->len);
+    iplen = ntohs(ip->ip_len);
 
     /* XXX This filter is frightening and should definitely be double
      * checked. */
 
     /* TODO return different positive values for filter quality analysis */
-    if (udplen >= 20 && rem >= 12) {
+    if (udplen >= 20 && payloadlen >= 12) {
         if (ntohl(ptr32[0]) == 0x64313a61 || ntohl(ptr32[0]) == 0x64313a72) {
             if (ntohl(ptr32[1]) == 0x64323a69 && ntohl(ptr32[2]) == 0x6432303a)
             {
@@ -703,7 +538,7 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
             }
         }
     }
-    if (udplen >= 48 && rem >= 40) {
+    if (udplen >= 48 && payloadlen >= 40) {
         if (ntohl(ptr32[5]) == 0x13426974 && ntohl(ptr32[6]) == 0x546f7272 &&
                 ntohl(ptr32[7]) == 0x656e7420 &&
                 ntohl(ptr32[8]) == 0x70726f74 &&
@@ -711,21 +546,21 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
             return 1;
         }
     }
-    if (ntohs(ip->ip_len) >= 0x3a) {
+    if (iplen >= 0x3a) {
         if (ntohs(udppayload[0]) == 0x4102 || ntohs(udppayload[0]) == 0x2102
                 || ntohs(udppayload[0]) == 0x3102
                 || ntohs(udppayload[0]) == 0x1102) {
 
-            if (rem >= udplen - sizeof(libtrace_udp_t)) {
+            if (payloadlen >= udplen - sizeof(libtrace_udp_t)) {
                 uint8_t *ptr8 = (uint8_t *)udppayload;
-                ptr8 += (rem - 10);
+                ptr8 += (payloadlen - 10);
                 if (memcmp(ptr8, last10pat, 10) == 0) {
                     return 1;
                 }
             }
         }
     }
-    if (ntohs(ip->ip_len) == 0x30) {
+    if (iplen == 0x30) {
         if (ntohs(udppayload[0]) == 0x4100 || ntohs(udppayload[0]) == 0x2100
                 || ntohs(udppayload[0]) == 0x3102
                 || ntohs(udppayload[0]) == 0x1100) {
@@ -733,7 +568,7 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
             return 1;
         }
     }
-    if (ntohs(ip->ip_len) == 61) {
+    if (iplen == 61) {
         if (ntohl(ptr32[3]) == 0x7fffffff && ntohl(ptr32[4]) == 0xab020400 &&
                 ntohl(ptr32[5]) == 0x01000000 &&
                 ntohl(ptr32[6]) == 0x08000000 && ptr32[7] == 0) {
@@ -743,38 +578,88 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+#define PREPROCESS_PACKET            \
+    libtrace_ip_t *ip = NULL;       \
+    libtrace_tcp_t *tcp = NULL;     \
+    libtrace_udp_t *udp = NULL;     \
+    libtrace_icmp_t *icmp = NULL;     \
+    uint8_t *udppayload = NULL;     \
+    uint8_t *tcppayload = NULL;     \
+    uint32_t payloadlen = 0;        \
+    uint32_t translen = 0;          \
+    uint16_t source_port = 0;       \
+    uint16_t dest_port = 0;         \
+                                    \
+    ip = trace_get_ip(packet);      \
+                                    \
+    if (ip) {                       \
+        uint32_t rem;               \
+        uint8_t proto;              \
+        void *transport = trace_get_transport(packet, &proto, &rem);    \
+        translen = rem;             \
+                                    \
+        if (proto == TRACE_IPPROTO_UDP) {           \
+            udp = (libtrace_udp_t *)transport;      \
+            if (rem >= 4) {                         \
+                source_port = ntohs(udp->source);   \
+                dest_port = ntohs(udp->dest);       \
+            }                                       \
+            udppayload = (uint8_t *)trace_get_payload_from_udp(udp, &rem);  \
+            payloadlen = rem;                       \
+        }                                           \
+        else if (proto == TRACE_IPPROTO_TCP) {      \
+            tcp = (libtrace_tcp_t *)transport;      \
+            if (rem >= 4) {                         \
+                source_port = ntohs(tcp->source);   \
+                dest_port = ntohs(tcp->dest);       \
+            }                                       \
+            tcppayload = (uint8_t *)trace_get_payload_from_tcp(tcp, &rem);  \
+            payloadlen = rem;                       \
+        } else if (proto == TRACE_IPPROTO_ICMP) {   \
+            icmp = (libtrace_icmp_t *)transport;    \
+            if (rem >= 2) {                         \
+                source_port = icmp->type;           \
+                dest_port = icmp->code;             \
+            }                                       \
+        }                                           \
+    }                               \
+
+
 int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    if (_apply_abnormal_protocol_filter(logger, packet) > 0) {
+    PREPROCESS_PACKET
+    if (_apply_abnormal_protocol_filter(logger, ip, tcp, tcppayload) > 0) {
         return 1;
     }
 
-    if (_apply_ttl200_filter(logger, packet) > 0) {
+    if (_apply_ttl200_filter(logger, ip) > 0) {
         return 1;
     }
 
-    if (_apply_fragment_filter(logger, packet) > 0) {
+    if (_apply_fragment_filter(logger, ip) > 0) {
         return 1;
     }
 
-    if (_apply_last_src_byte0_filter(logger, packet) > 0) {
+    if (_apply_last_src_byte0_filter(logger, ip) > 0) {
         return 1;
     }
 
-    if (_apply_last_src_byte255_filter(logger, packet) > 0) {
+    if (_apply_last_src_byte255_filter(logger, ip) > 0) {
         return 1;
     }
 
-    if (_apply_same_src_dest_filter(logger, packet) > 0) {
+    if (_apply_same_src_dest_filter(logger, ip) > 0) {
         return 1;
     }
 
-    if (_apply_udp_port_zero_filter(logger, packet) > 0) {
+    if (_apply_udp_port_zero_filter(logger, udp, translen, source_port,
+                dest_port) > 0) {
         return 1;
     }
 
-    if (_apply_tcp_port_zero_filter(logger, packet) > 0) {
+    if (_apply_tcp_port_zero_filter(logger, tcp, translen, source_port,
+                dest_port) > 0) {
         return 1;
     }
     return 0;
@@ -783,43 +668,49 @@ int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
 int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    if (_apply_udp_0x31_filter(logger, packet) > 0) {
+    PREPROCESS_PACKET
+    if (udppayload && _apply_udp_0x31_filter(logger, ip, udp, udppayload,
+            payloadlen) > 0) {
         return 1;
     }
 
-    if (_apply_udp_iplen_96_filter(logger, packet) > 0) {
+    if (ip && _apply_udp_iplen_96_filter(logger, ip) > 0) {
         return 1;
     }
 
-    if (_apply_port_53_filter(logger, packet) > 0) {
+    if (_apply_port_53_filter(logger, source_port, dest_port) > 0) {
         return 1;
     }
 
-    if (_apply_port_tcp23_filter(logger, packet) > 0) {
+    if (_apply_port_tcp23_filter(logger, tcp, source_port, dest_port) > 0) {
         return 1;
     }
 
-    if (_apply_port_tcp80_filter(logger, packet) > 0) {
+    if (_apply_port_tcp80_filter(logger, tcp, source_port, dest_port) > 0) {
         return 1;
     }
 
-    if (_apply_port_tcp5000_filter(logger, packet) > 0) {
+    if (_apply_port_tcp5000_filter(logger, tcp, source_port, dest_port) > 0) {
         return 1;
     }
 
-    if (_apply_dns_resp_oddport_filter(logger, packet) > 0) {
+    if (udppayload && _apply_dns_resp_oddport_filter(logger, ip, 
+            (uint16_t *)udppayload, payloadlen) > 0) {
         return 1;
     }
 
-    if (_apply_netbios_name_filter(logger, packet) > 0) {
+    if (_apply_netbios_name_filter(logger, ip, (uint16_t *)udppayload,
+                payloadlen, source_port, dest_port) > 0) {
         return 1;
     }
 
-    if (_apply_backscatter_filter(logger, packet) > 0) {
+    if (_apply_backscatter_filter(logger, tcp, udp, icmp, source_port,
+                tcppayload) > 0) {
         return 1;
     }
 
-    if (_apply_bittorrent_filter(logger, packet) > 0) {
+    if (_apply_bittorrent_filter(logger, ip, udp, (uint16_t *)udppayload,
+                payloadlen) > 0) {
         return 1;
     }
 
@@ -829,121 +720,142 @@ int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
 int corsaro_apply_routable_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_rfc5735_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_rfc5735_filter(logger, ip);
 }
 
 int corsaro_apply_abnormal_protocol_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
-
-    return _apply_abnormal_protocol_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_abnormal_protocol_filter(logger, ip, tcp, tcppayload);
 }
 
 int corsaro_apply_ttl200_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_ttl200_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_ttl200_filter(logger, ip);
 }
 
 int corsaro_apply_fragment_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_fragment_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_fragment_filter(logger, ip);
 }
 
 int corsaro_apply_last_src_byte0_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_last_src_byte0_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_last_src_byte0_filter(logger, ip);
 }
 
 int corsaro_apply_last_src_byte255_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
-
-    return _apply_last_src_byte255_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_last_src_byte255_filter(logger, ip);
 }
 
 int corsaro_apply_same_src_dest_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_same_src_dest_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_same_src_dest_filter(logger, ip);
 }
 
 int corsaro_apply_udp_port_zero_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
-
-    return _apply_udp_port_zero_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_udp_port_zero_filter(logger, udp, translen, source_port,
+            dest_port);
 }
 
 int corsaro_apply_tcp_port_zero_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_tcp_port_zero_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_tcp_port_zero_filter(logger, tcp, translen, source_port,
+            dest_port);
 }
 
 int corsaro_apply_rfc5735_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
-
-    return _apply_rfc5735_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_rfc5735_filter(logger, ip);
 }
 
 int corsaro_apply_backscatter_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_backscatter_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_backscatter_filter(logger, tcp, udp, icmp, source_port,
+            tcppayload);
 }
 
 int corsaro_apply_bittorrent_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_bittorrent_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_bittorrent_filter(logger, ip, udp, (uint16_t *)udppayload,
+            payloadlen);
 }
 
 int corsaro_apply_udp_0x31_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_udp_0x31_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_udp_0x31_filter(logger, ip, udp, udppayload, payloadlen);
 }
 
 int corsaro_apply_udp_iplen_96_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_udp_iplen_96_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_udp_iplen_96_filter(logger, ip);
 }
 
 int corsaro_apply_port_53_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_port_53_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_port_53_filter(logger, source_port, dest_port);
 }
 
 int corsaro_apply_port_tcp23_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_port_tcp23_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_port_tcp23_filter(logger, tcp, source_port, dest_port);
 }
 
 int corsaro_apply_port_tcp80_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_port_tcp80_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_port_tcp80_filter(logger, tcp, source_port, dest_port);
 }
 
 int corsaro_apply_port_tcp5000_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_port_tcp5000_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_port_tcp5000_filter(logger, tcp, source_port, dest_port);
 }
 
 int corsaro_apply_dns_resp_oddport_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
-
-    return _apply_dns_resp_oddport_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_dns_resp_oddport_filter(logger, ip,
+            (uint16_t *)udppayload, payloadlen);
 }
 
 int corsaro_apply_netbios_name_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
-    return _apply_netbios_name_filter(logger, packet);
+    PREPROCESS_PACKET
+    return _apply_netbios_name_filter(logger, ip, (uint16_t *)udppayload,
+            payloadlen, source_port, dest_port);
 }
 
 
@@ -1015,6 +927,7 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
 int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
         corsaro_builtin_filter_id_t filtid, libtrace_packet_t *packet) {
 
+    PREPROCESS_PACKET
     if (filtid < 0 || filtid >= CORSARO_FILTERID_MAX) {
         corsaro_log(logger, "Attempted to apply invalid filter using id %d",
                 filtid);
@@ -1029,43 +942,53 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
         case CORSARO_FILTERID_ROUTED:
             return corsaro_apply_routable_filter(logger, packet);
         case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
-            return _apply_abnormal_protocol_filter(logger, packet);
+            return _apply_abnormal_protocol_filter(logger, ip, tcp, tcppayload);
         case CORSARO_FILTERID_TTL_200:
-            return _apply_ttl200_filter(logger, packet);
+            return _apply_ttl200_filter(logger, ip);
         case CORSARO_FILTERID_FRAGMENT:
-            return _apply_fragment_filter(logger, packet);
+            return _apply_fragment_filter(logger, ip);
         case CORSARO_FILTERID_LAST_SRC_IP_0:
-            return _apply_last_src_byte0_filter(logger, packet);
+            return _apply_last_src_byte0_filter(logger, ip);
         case CORSARO_FILTERID_LAST_SRC_IP_255:
-            return _apply_last_src_byte255_filter(logger, packet);
+            return _apply_last_src_byte255_filter(logger, ip);
         case CORSARO_FILTERID_SAME_SRC_DEST_IP:
-            return _apply_same_src_dest_filter(logger, packet);
+            return _apply_same_src_dest_filter(logger, ip);
         case CORSARO_FILTERID_UDP_PORT_0:
-            return _apply_udp_port_zero_filter(logger, packet);
+            return _apply_udp_port_zero_filter(logger, udp, translen,
+                    source_port, dest_port);
         case CORSARO_FILTERID_TCP_PORT_0:
-            return _apply_tcp_port_zero_filter(logger, packet);
+            return _apply_tcp_port_zero_filter(logger, tcp, translen,
+                    source_port, dest_port);
         case CORSARO_FILTERID_RFC5735:
-            return _apply_rfc5735_filter(logger, packet);
+            return _apply_rfc5735_filter(logger, ip);
         case CORSARO_FILTERID_BACKSCATTER:
-            return _apply_backscatter_filter(logger, packet);
+            return _apply_backscatter_filter(logger, tcp, udp, icmp,
+                    source_port, tcppayload);
         case CORSARO_FILTERID_BITTORRENT:
-            return _apply_bittorrent_filter(logger, packet);
+            return _apply_bittorrent_filter(logger, ip, udp,
+                    (uint16_t *)udppayload, payloadlen);
         case CORSARO_FILTERID_UDP_0X31:
-            return _apply_udp_0x31_filter(logger, packet);
+            return _apply_udp_0x31_filter(logger, ip, udp, udppayload,
+                    payloadlen);
         case CORSARO_FILTERID_UDP_IPLEN_96:
-            return _apply_udp_iplen_96_filter(logger, packet);
+            return _apply_udp_iplen_96_filter(logger, ip);
         case CORSARO_FILTERID_PORT_53:
-            return _apply_port_53_filter(logger, packet);
+            return _apply_port_53_filter(logger, source_port, dest_port);
         case CORSARO_FILTERID_TCP_PORT_23:
-            return _apply_port_tcp23_filter(logger, packet);
+            return _apply_port_tcp23_filter(logger, tcp, source_port,
+                    dest_port);
         case CORSARO_FILTERID_TCP_PORT_80:
-            return _apply_port_tcp80_filter(logger, packet);
+            return _apply_port_tcp80_filter(logger, tcp, source_port,
+                    dest_port);
         case CORSARO_FILTERID_TCP_PORT_5000:
-            return _apply_port_tcp5000_filter(logger, packet);
+            return _apply_port_tcp5000_filter(logger, tcp, source_port,
+                    dest_port);
         case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
-            return _apply_dns_resp_oddport_filter(logger, packet);
+            return _apply_dns_resp_oddport_filter(logger, ip,
+                    (uint16_t *)udppayload, payloadlen);
         case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
-            return _apply_netbios_name_filter(logger, packet);
+            return _apply_netbios_name_filter(logger, ip,
+                    (uint16_t *)udppayload, payloadlen, source_port, dest_port);
         default:
             corsaro_log(logger, "Warning: no filter callback for id %d -- please add one to corsaro_apply_filter_by_id()", filtid);
     }
