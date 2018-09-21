@@ -271,7 +271,8 @@ uint8_t *get_corsaro_memhandler_item_nolock(corsaro_memhandler_t *handler,
     return _get_corsaro_memhandler_item(handler, itemsource);
 }
 
-static void _release_corsaro_memhandler_item(corsaro_memhandler_t *handler,
+static inline void _release_corsaro_memhandler_item(
+        corsaro_memhandler_t *handler,
         corsaro_memsource_t *itemsource) {
 
     itemsource->released ++;
