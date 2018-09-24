@@ -388,6 +388,10 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         return NULL;
     }
 
+    if (glob->subqueuename == NULL) {
+        glob->subqueuename = strdup("ipc:///tmp/corsarotagger");
+    }
+
     log_configuration(glob);
 
     /* Ok to cleanse this now, the config parsing above should have made
@@ -411,10 +415,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         corsaro_log(glob->logger, "interval must be a non-zero, non-negative number of seconds, exiting.");
         corsaro_trace_free_global(glob);
         return NULL;
-    }
-
-    if (glob->subqueuename == NULL) {
-        glob->subqueuename = strdup("ipc:///tmp/corsarotagger");
     }
 
     stdopts.template = glob->template;
