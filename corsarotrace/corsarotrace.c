@@ -648,7 +648,7 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
     zmq_msg_t zmsg;
     zmq_msg_init(&zmsg);
     uint16_t filttags = 1000;
-    int rcvsize;
+    int rcvsize, i;
     char *rcvspace;
     TaggedPacket *tp;
 
@@ -686,9 +686,10 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
         return -1;
     }
 
-    if (filttags & CORSARO_FILTERBIT_NONROUTABLE) {
-        printf("%u  %u.%u  %u %u %u\n", filttags, tp->ts_sec, tp->ts_usec,
-                tp->pktlen, tp->flowhash, tp->tagcount);
+    printf("%u  %u.%u  %u %u %lu\n", filttags, tp->ts_sec, tp->ts_usec,
+            tp->pktlen, tp->flowhash, tp->n_tags);
+    for (i = 0; i < tp->n_tags; i++) {
+        printf("    %u = %u\n", tp->tags[i]->tagid, tp->tags[i]->tagval);
     }
     zmq_msg_close(&zmsg);
     tagged_packet__free_unpacked(tp, NULL);
@@ -782,6 +783,53 @@ static corsaro_trace_global_t *configure_corsaro(int argc, char *argv[]) {
     return glob;
 }
 
+static inline int subscribe_streams(corsaro_trace_global_t *glob) {
+
+    uint8_t tosub[8];
+    int i;
+    uint16_t subbytes;
+
+    memset(tosub, 1, sizeof(uint8_t) * 8);
+
+    /* If nothing is removed, then subscribe to everything */
+    if (glob->removespoofed == 0 && glob->removeerratic == 0 &&
+            glob->removerouted == 0) {
+
+        if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, "", 0) < 0) {
+            corsaro_log(glob->logger,
+                    "unable to subscribe to all streams of tagged packets: %s",
+                    strerror(errno));
+            return -1;
+        }
+        return 0;
+    }
+
+    for (i = 0; i < 8; i++) {
+        if ((i & CORSARO_FILTERBIT_ERRATIC) && glob->removeerratic) {
+            tosub[i] = 0;
+        }
+        if ((i & CORSARO_FILTERBIT_SPOOFED) && glob->removespoofed) {
+            tosub[i] = 0;
+        }
+        if ((i & CORSARO_FILTERBIT_NONROUTABLE) == 0 && glob->removerouted) {
+            tosub[i] = 0;
+        }
+
+        if (tosub[i]) {
+            subbytes = htons((uint16_t)i);
+            if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, &subbytes,
+                    sizeof(subbytes)) < 0) {
+                corsaro_log(glob->logger,
+                        "unable to subscribe to stream of tagged packets: %s",
+                        strerror(errno));
+                return -1;
+            }
+        }
+    }
+    return 0;
+
+}
+
 int main(int argc, char *argv[]) {
 
     corsaro_trace_global_t *glob = NULL;
@@ -848,12 +896,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* TODO */
     /* subscribe to the desired packet streams, based on our filter options */
-    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, "", 0) < 0) {
-        corsaro_log(glob->logger,
-                "unable to subscribe to all streams of tagged packets: %s",
-                strerror(errno));
+    if (subscribe_streams(glob) < 0) {
         return 1;
     }
 
