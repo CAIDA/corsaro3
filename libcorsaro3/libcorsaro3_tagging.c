@@ -80,7 +80,6 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
     tagger->ipmeta = ipmeta;
     tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
     tagger->tagfreelist = libtrace_list_init(sizeof(corsaro_packet_tags_t *));
-    tagger->providermask = 0;
     tagger->records = ipmeta_record_set_init();
 
     return tagger;
@@ -305,7 +304,6 @@ int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
     }
 
     libtrace_list_push_back(tagger->providers, &prov);
-    tagger->providermask |= (1 << (ipmeta_get_provider_id(prov) - 1));
 
     return 0;
 }
@@ -348,7 +346,6 @@ int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
         /* This provider type didn't exist before? In that case, just
          * add it to the list. */
         libtrace_list_push_back(tagger->providers, &prov);
-        tagger->providermask |= (1 << (ipmeta_get_provider_id(prov) - 1));
     } else {
         /* Replace the existing one with our new provider.
          *
@@ -566,7 +563,7 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
 
     ipmeta_record_set_clear(tagger->records);
     if (ipmeta_lookup_single(tagger->ipmeta, sin->sin_addr.s_addr,
-            tagger->providermask, tagger->records) < 0) {
+            0, tagger->records) < 0) {
         corsaro_log(tagger->logger, "error while performing ipmeta lookup");
         return -1;
     }

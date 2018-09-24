@@ -128,7 +128,6 @@ typedef struct corsaro_packet_tagger {
     libtrace_list_t *providers;
     libtrace_list_t *tagfreelist;
     ipmeta_record_set_t *records;
-    uint32_t providermask;
 } corsaro_packet_tagger_t;
 
 /** Set of configuration options for the libipmeta prefix2asn provider. */
