@@ -65,12 +65,13 @@ typedef struct corsaro_tagger_glob {
     ipmeta_provider_t *netacqipmeta;
     ipmeta_provider_t *pfxipmeta;
 
-    corsaro_tagger_local_t **savedlocalstate;
     fn_hasher hasher;
     void *hasher_data;
     uint8_t hasher_required;
 
     void *zmq_ctxt;
+
+    corsaro_tagger_local_t *threaddata;
 } corsaro_tagger_global_t;
 
 struct corsaro_tagger_local {
@@ -78,6 +79,9 @@ struct corsaro_tagger_local {
     void *pubsock;
     uint8_t stopped;
     uint64_t errorcount;
+
+    uint64_t lastmisscount;
+    uint64_t lastaccepted;
 
     corsaro_memhandler_t *msg_source;
     corsaro_memhandler_t *ptag_source;

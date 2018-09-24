@@ -477,7 +477,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->filter = NULL;
     glob->logger = NULL;
 
-    glob->savedlocalstate = NULL;
+    glob->threaddata = NULL;
     glob->hasher = NULL;
     glob->hasher_data = NULL;
     glob->hasher_required = 0;
@@ -581,8 +581,8 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
         trace_destroy_filter(glob->filter);
     }
 
-    if (glob->savedlocalstate) {
-        free(glob->savedlocalstate);
+    if (glob->threaddata) {
+        free(glob->threaddata);
     }
 
     if (glob->hasher_data) {

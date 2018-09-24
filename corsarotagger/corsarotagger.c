@@ -56,53 +56,41 @@ static void cleanup_signal(int sig) {
     trace_halted = 1;
 }
 
-static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
-        void *global) {
-    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
-    corsaro_tagger_local_t *tls;
+static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
+        int threadid, corsaro_tagger_global_t *glob) {
     int hwm = 100000;
-
-    if (glob->currenturi > 0) {
-        return glob->savedlocalstate[trace_get_perpkt_thread_id(t)];
-    }
-
-    tls = (corsaro_tagger_local_t *)malloc(sizeof(corsaro_tagger_local_t));
-
-    if (tls == NULL) {
-        corsaro_log(glob->logger,
-                "out of memory while starting packet processing thread.");
-        return NULL;
-    }
 
     tls->stopped = 0;
     tls->tagger = corsaro_create_packet_tagger(glob->logger, glob->ipmeta);
     tls->errorcount = 0;
+    tls->lastmisscount = 0;
+    tls->lastaccepted = 0;
 
     if (tls->tagger == NULL) {
         corsaro_log(glob->logger,
                 "out of memory while creating packet tagger.");
         tls->stopped = 1;
-        return tls;
+        return;
     }
 
     if (corsaro_enable_ipmeta_provider(tls->tagger, glob->pfxipmeta) < 0) {
         corsaro_log(glob->logger,
                 "error while enabling prefix->asn tagging in thread %d",
-                trace_get_perpkt_thread_id(t));
+                threadid);
         tls->stopped = 1;
     }
 
     if (corsaro_enable_ipmeta_provider(tls->tagger, glob->netacqipmeta) < 0) {
         corsaro_log(glob->logger,
                 "error while enabling Netacq-Edge geo-location tagging in thread %d",
-                trace_get_perpkt_thread_id(t));
+                threadid);
         tls->stopped = 1;
     }
 
     if (corsaro_enable_ipmeta_provider(tls->tagger, glob->maxmindipmeta) < 0) {
         corsaro_log(glob->logger,
                 "error while enabling Maxmind geo-location tagging in thread %d",
-                trace_get_perpkt_thread_id(t));
+                threadid);
         tls->stopped = 1;
     }
 
@@ -118,35 +106,37 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
         corsaro_log(glob->logger,
                 "error while setting HWM for zeromq publisher socket in thread %d:%s",
-                trace_get_perpkt_thread_id(t), strerror(errno));
+                threadid, strerror(errno));
         tls->stopped = 1;
     }
 
     if (zmq_connect(tls->pubsock, glob->pubqueuename) != 0) {
         corsaro_log(glob->logger,
                 "error while connecting zeromq publisher socket in thread %d:%s",
-                trace_get_perpkt_thread_id(t), strerror(errno));
+                threadid, strerror(errno));
         tls->stopped = 1;
     }
+
+}
+
+static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
+        void *global) {
+    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
+    corsaro_tagger_local_t *tls;
+
+    tls = &(glob->threaddata[trace_get_perpkt_thread_id(t)]);
 
     return tls;
 }
 
-static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
-        void *global, void *local) {
-    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
-    corsaro_tagger_local_t *tls = (corsaro_tagger_local_t *)local;
+static void halt_trace_processing(corsaro_tagger_global_t *glob,
+        corsaro_tagger_local_t *tls, int threadid) {
     int linger = 1000;
 
     /* -1 because we don't increment currenturi until all of the threads have
      * stopped for the trace, so current and total will never be equal at this
      * point.
      */
-    if (glob->currenturi < glob->totaluris - 1) {
-        glob->savedlocalstate[trace_get_perpkt_thread_id(t)] = tls;
-        return;
-    }
-
     if (tls->tagger) {
         corsaro_destroy_packet_tagger(tls->tagger);
     }
@@ -160,8 +150,7 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     destroy_corsaro_memhandler(tls->ptag_source);
 
     corsaro_log(glob->logger, "halted packet tagging thread %d, errors=%lu",
-            trace_get_perpkt_thread_id(t), tls->errorcount);
-    free(tls);
+            threadid, tls->errorcount);
 }
 
 static void simple_free(void *data, void *hint) {
@@ -211,19 +200,18 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
         tagcount += 3;      // protocol, src port and dest port
     }
 
-#if 0
-    if (tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
-        tagcount += 1;      // prefixasn
-    }
-
     if (tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
         tagcount += 2;      // country and continent
     }
 
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
+        tagcount += 1;      // prefixasn
+    }
+
+
     if (tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
         tagcount += 4;      // polygon, region, country and continent
     }
-#endif
 
     i = 0;
 
@@ -247,6 +235,61 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
         packet_tag__init(ptags[i]);
         ptags[i]->tagid = CORSARO_TAGID_DESTPORT;
         ptags[i]->tagval = tags->dest_port;
+        i++;
+    }
+
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
+                tls->ptag_source, &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_PREFIXASN;
+        ptags[i]->tagval = tags->prefixasn;
+        i++;
+    }
+
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
+                tls->ptag_source, &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_MAXMIND_CONTINENT;
+        ptags[i]->tagval = tags->maxmind_continent;
+        i++;
+
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
+                tls->ptag_source, &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_MAXMIND_COUNTRY;
+        ptags[i]->tagval = tags->maxmind_country;
+        i++;
+    }
+
+    if (tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
+                tls->ptag_source, &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_NETACQ_CONTINENT;
+        ptags[i]->tagval = tags->netacq_continent;
+        i++;
+
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
+                tls->ptag_source, &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_NETACQ_COUNTRY;
+        ptags[i]->tagval = tags->netacq_country;
+        i++;
+
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
+                tls->ptag_source, &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_NETACQ_REGION;
+        ptags[i]->tagval = tags->netacq_region;
+        i++;
+
+        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
+                tls->ptag_source, &(ptagsrc[i]));
+        packet_tag__init(ptags[i]);
+        ptags[i]->tagid = CORSARO_TAGID_NETACQ_POLYGON;
+        ptags[i]->tagval = tags->netacq_polygon;
         i++;
     }
 
@@ -312,15 +355,28 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local, uint64_t tick) {
 
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
+    corsaro_tagger_local_t *tls = (corsaro_tagger_local_t *)local;
     libtrace_stat_t *stats;
 
     stats = trace_create_statistics();
     trace_get_thread_statistics(trace, t, stats);
 
+/*
     corsaro_log(glob->logger,
             "thread %d stats: %lu seen, %lu missing, %lu dropped",
             trace_get_perpkt_thread_id(t), stats->accepted,
             stats->missing, stats->dropped);
+*/
+    if (stats->missing > tls->lastmisscount) {
+        corsaro_log(glob->logger,
+                "thread %d dropped %lu packets in last minute (accepted %lu)",
+                trace_get_perpkt_thread_id(t),
+                stats->missing - tls->lastmisscount,
+                tls->lastaccepted - stats->accepted);
+        tls->lastmisscount = stats->missing;
+    }
+    tls->lastaccepted = stats->accepted;
+
     free(stats);
 }
 
@@ -341,15 +397,10 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
     trace_set_perpkt_threads(glob->trace, glob->threads);
     trace_set_tick_interval(glob->trace, 60 * 1000);
 
-    if (glob->savedlocalstate == NULL) {
-        glob->savedlocalstate = (corsaro_tagger_local_t **)malloc(
-                sizeof(corsaro_tagger_local_t) * glob->threads);
-    }
-
     if (!processing) {
         processing = trace_create_callback_set();
         trace_set_starting_cb(processing, init_trace_processing);
-        trace_set_stopping_cb(processing, halt_trace_processing);
+        //trace_set_stopping_cb(processing, halt_trace_processing);
         trace_set_packet_cb(processing, per_packet);
         trace_set_tick_interval_cb(processing, process_tick);
     }
@@ -393,7 +444,7 @@ int main(int argc, char *argv[]) {
     corsaro_tagger_global_t *glob = NULL;
     int logmode = GLOBAL_LOGMODE_STDERR;
     ipmeta_provider_t *prov;
-
+    int i;
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
@@ -503,6 +554,12 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    glob->threaddata = calloc(glob->threads, sizeof(corsaro_tagger_local_t));
+
+    for (i = 0; i < glob->threads; i++) {
+        init_tagger_thread_data(&(glob->threaddata[i]), i, glob);
+    }
+
     while (glob->currenturi < glob->totaluris && !corsaro_halted) {
         sigemptyset(&sig_block_all);
         if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
@@ -560,6 +617,9 @@ int main(int argc, char *argv[]) {
     /* Join on merging thread */
     corsaro_log(glob->logger, "all threads have joined, exiting.");
 
+    for (i = 0; i < glob->threads; i++) {
+        halt_trace_processing(glob, &(glob->threaddata[i]), i);
+    }
     corsaro_tagger_free_global(glob);
 
     if (processing) {
