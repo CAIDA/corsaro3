@@ -37,12 +37,19 @@
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_filtering.h"
 #include "libcorsaro3_tagging.h"
+#include "taggedpacket.pb-c.h"
 
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
     CORSARO_TRACE_MSG_STOP = 1,
     CORSARO_TRACE_MSG_ROTATE = 2,
+    CORSARO_TRACE_MSG_PACKET = 3,
 };
+
+typedef struct corsaro_worker_msg {
+    uint8_t type;
+    TaggedPacket *tp;
+} corsaro_worker_msg_t;
 
 typedef struct corsaro_trace_msg {
     uint8_t type;
@@ -84,12 +91,15 @@ typedef struct corsaro_trace_glob {
 struct corsaro_trace_worker {
     corsaro_trace_global_t *glob;
     pthread_t threadid;
+    int workerid;
 
     corsaro_interval_t current_interval;
     corsaro_interval_t lastrotateinterval;
     corsaro_plugin_set_t *plugins;
     uint64_t pkts_outstanding;
 
+    uint32_t next_report;
+    uint32_t next_rotate;
     uint32_t last_ts;
     uint8_t stopped;
 

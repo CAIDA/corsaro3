@@ -45,6 +45,14 @@
 #include "libcorsaro3_filtering.h"
 #include "taggedpacket.pb-c.h"
 
+typedef struct pcaphdr_t {
+    uint32_t ts_sec;        /* Seconds portion of the timestamp */
+    uint32_t ts_usec;       /* Microseconds portion of the timestamp */
+    uint32_t caplen;        /* Capture length of the packet */
+    uint32_t wirelen;       /* The wire length of the packet */
+} pcaphdr_t;
+
+
 volatile int corsaro_halted = 0;
 
 static void cleanup_signal(int sig) {
@@ -635,10 +643,270 @@ int start_trace_input(corsaro_trace_global_t *glob) {
 
 #endif
 
+static int worker_per_packet(corsaro_trace_worker_t *tls,
+        libtrace_packet_t *packet, corsaro_packet_tags_t *ptags,
+        TaggedPacket *tp) {
+
+
+    if (tls->current_interval.time == 0) {
+
+        /* Need a first ts to set our initial interval alignments, so skip
+         * any packets that we receive before then.
+         */
+        if (!tp->has_first_ts) {
+            return 0;
+        }
+        /* First non-ignored packet */
+        if (tls->glob->interval <= 0) {
+            corsaro_log(tls->glob->logger,
+                    "interval has somehow been assigned a bad value of %u\n",
+                    tls->glob->interval);
+            return -1;
+        }
+
+        tls->current_interval.time = tp->first_ts - (tp->first_ts %
+                tls->glob->interval);
+        tls->lastrotateinterval.time = tls->current_interval.time -
+                (tls->current_interval.time %
+                (tls->glob->interval * tls->glob->rotatefreq));
+
+        corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
+                tls->current_interval.time);
+
+        tls->next_report = tls->current_interval.time + tls->glob->interval;
+        tls->next_rotate = tls->lastrotateinterval.time +
+                (tls->glob->interval * tls->glob->rotatefreq);
+    }
+
+    if (tp->ts_sec < tls->current_interval.time) {
+        return 0;
+    }
+
+    /* check if we have passed the end of an interval */
+    while (tls->next_report && tp->ts_sec >= tls->next_report) {
+
+        /* end interval TODO */
+
+        if (tls->glob->rotatefreq > 0 && tp->ts_sec >= tls->next_rotate) {
+
+            /* push rotate message TODO */
+            tls->next_rotate += (tls->glob->interval * tls->glob->rotatefreq);
+        }
+        tls->current_interval.number ++;
+        tls->current_interval.time = tls->next_report;
+        corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
+            tls->current_interval.time);
+        tls->next_report += tls->glob->interval;
+        tls->pkts_outstanding = 0;
+    }
+
+    tls->pkts_outstanding ++;
+    tls->last_ts = tp->ts_sec;
+    corsaro_push_packet_plugins(tls->plugins, packet, ptags);
+
+}
+
+static inline void reconstruct_packet_tags(TaggedPacket *tp,
+        corsaro_packet_tags_t *ptags, corsaro_logger_t *logger) {
+
+    int i;
+
+    ptags->highlevelfilterbits = 0;
+    ptags->ft_hash = tp->flowhash;
+    ptags->providers_used = 0;
+
+    for (i = 0; i < tp->n_tags; i++) {
+        switch(tp->tags[i]->tagid) {
+            case CORSARO_TAGID_NETACQ_REGION:
+                ptags->netacq_region = tp->tags[i]->tagval;
+                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
+                break;
+            case CORSARO_TAGID_NETACQ_POLYGON:
+                ptags->netacq_polygon = tp->tags[i]->tagval;
+                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
+                break;
+            case CORSARO_TAGID_NETACQ_COUNTRY:
+                ptags->netacq_country = tp->tags[i]->tagval;
+                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
+                break;
+            case CORSARO_TAGID_NETACQ_CONTINENT:
+                ptags->netacq_continent = tp->tags[i]->tagval;
+                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
+                break;
+            case CORSARO_TAGID_MAXMIND_COUNTRY:
+                ptags->maxmind_country = tp->tags[i]->tagval;
+                ptags->providers_used |= (1 << IPMETA_PROVIDER_MAXMIND);
+                break;
+            case CORSARO_TAGID_MAXMIND_CONTINENT:
+                ptags->maxmind_continent = tp->tags[i]->tagval;
+                ptags->providers_used |= (1 << IPMETA_PROVIDER_MAXMIND);
+                break;
+            case CORSARO_TAGID_PREFIXASN:
+                ptags->prefixasn = tp->tags[i]->tagval;
+                ptags->providers_used |= (1 << IPMETA_PROVIDER_PFX2AS);
+                break;
+            case CORSARO_TAGID_SOURCEPORT:
+                ptags->src_port = tp->tags[i]->tagval;
+                ptags->providers_used |= (1);
+                break;
+            case CORSARO_TAGID_DESTPORT:
+                ptags->dest_port = tp->tags[i]->tagval;
+                ptags->providers_used |= (1);
+                break;
+            case CORSARO_TAGID_PROTOCOL:
+                ptags->protocol = tp->tags[i]->tagval;
+                ptags->providers_used |= (1);
+                break;
+            default:
+                corsaro_log(logger,
+                        "unexpected tag ID %u -- ignoring", tp->tags[i]->tagid);
+                break;
+        }
+    }
+}
+
+static inline void fast_construct_packet(libtrace_t *deadtrace,
+        libtrace_packet_t *packet, TaggedPacket *tp, uint16_t *packetbufsize)
+{
+
+    /* Clone of trace_construct_packet() but designed to minimise
+     * memory reallocations.
+     */
+    pcaphdr_t pcaphdr;
+
+    pcaphdr.ts_sec = tp->ts_sec;
+    pcaphdr.ts_usec = tp->ts_usec;
+    pcaphdr.caplen = tp->pktlen;
+    pcaphdr.wirelen = tp->pktlen;
+
+    packet->trace = deadtrace;
+    if (*packetbufsize < tp->pktlen + sizeof(pcaphdr)) {
+        packet->buffer = realloc(packet->buffer, tp->pktlen + sizeof(pcaphdr));
+        *packetbufsize = tp->pktlen + sizeof(pcaphdr);
+    }
+
+    packet->buf_control = TRACE_CTRL_PACKET;
+    packet->header = packet->buffer;
+    packet->payload = ((char *)(packet->buffer) + sizeof(pcaphdr));
+
+    memcpy(packet->payload, tp->pktcontent.data, tp->pktlen);
+    memcpy(packet->header, &pcaphdr, sizeof(pcaphdr));
+    packet->type = TRACE_RT_DATA_DLT + TRACE_DLT_EN10MB;
+
+    packet->l2_header = packet->payload;
+    packet->l3_header = NULL;
+    packet->l4_header = NULL;
+    packet->link_type = TRACE_TYPE_ETH;
+    packet->l3_ethertype = 0;
+    packet->transport_proto = 0;
+    packet->capture_length = tp->pktlen;
+    packet->wire_length = tp->pktlen;
+    packet->payload_length = -1;
+    packet->l2_remaining = tp->pktlen;
+    packet->l3_remaining = 0;
+    packet->l4_remaining = 0;
+    packet->refcount = 0;
+
+}
+
 static void *start_worker(void *tdata) {
 
     corsaro_trace_worker_t *tls = (corsaro_trace_worker_t *)tdata;
+    corsaro_worker_msg_t incoming;
+    char sockname[30];
+    libtrace_t *deadtrace = NULL;
+    libtrace_packet_t *packet = NULL;
+    uint64_t packetsseen = 0;
+    uint16_t pktalloc = 0;
+    corsaro_packet_tags_t ptags;
 
+    deadtrace = trace_create_dead("pcapfile");
+    packet = trace_create_packet();
+
+    assert(deadtrace && packet);
+
+    snprintf(sockname, 30, "inproc://worker%d", tls->workerid);
+    tls->zmq_pullsock = zmq_socket(tls->glob->zmq_ctxt, ZMQ_PULL);
+    if (zmq_connect(tls->zmq_pullsock, sockname) < 0) {
+        corsaro_log(tls->glob->logger,
+                "error while connecting to worker %d pull socket: %s",
+                tls->workerid, strerror(errno));
+        goto endworker;
+    }
+
+    tls->plugins = corsaro_start_plugins(tls->glob->logger,
+            tls->glob->active_plugins, tls->glob->plugincount,
+            tls->workerid);
+
+    if (tls->plugins == NULL) {
+        corsaro_log(tls->glob->logger, "worker %d unable to start plugins.",
+                tls->workerid);
+        goto endworker;
+    }
+
+    while (1) {
+        if (zmq_recv(tls->zmq_pullsock, &incoming, sizeof(incoming), 0) < 0) {
+            corsaro_log(tls->glob->logger,
+                    "error receiving message on worker %d pull socket: %s",
+                    tls->workerid, strerror(errno));
+            break;
+        }
+
+        if (incoming.type == CORSARO_TRACE_MSG_STOP) {
+            break;
+        }
+
+        if (incoming.type != CORSARO_TRACE_MSG_PACKET) {
+            corsaro_log(tls->glob->logger,
+                    "received invalid message type %d on worker %d pull socket",
+                    incoming.type, tls->workerid);
+            break;
+        }
+        packetsseen ++;
+        fast_construct_packet(deadtrace, packet, incoming.tp, &pktalloc);
+        reconstruct_packet_tags(incoming.tp, &ptags, tls->glob->logger);
+
+        if (tls->glob->boundstartts && incoming.tp->ts_sec <
+                    tls->glob->boundstartts) {
+            tagged_packet__free_unpacked(incoming.tp, NULL);
+            continue;
+        }
+
+        if (tls->glob->boundendts && incoming.tp->ts_sec >=
+                tls->glob->boundendts) {
+            /* push end interval message for glob->boundendts TODO */
+
+            /* push close file message for interval and boundendts TODO */
+            tagged_packet__free_unpacked(incoming.tp, NULL);
+            break;
+        }
+
+        if (worker_per_packet(tls, packet, &ptags, incoming.tp) < 0) {
+            corsaro_log(tls->glob->logger,
+                    "error while processing received packet in worker %d",
+                    tls->workerid);
+            tagged_packet__free_unpacked(incoming.tp, NULL);
+            break;
+        }
+/*
+        printf("%u  %u.%u  %u %u %lu\n", filttags, tp->ts_sec, tp->ts_usec,
+                tp->pktlen, tp->flowhash, tp->n_tags);
+        for (i = 0; i < tp->n_tags; i++) {
+            printf("    %u = %u\n", tp->tags[i]->tagid, tp->tags[i]->tagval);
+        }
+*/
+        tagged_packet__free_unpacked(incoming.tp, NULL);
+    }
+
+endworker:
+    if (tls->plugins && corsaro_stop_plugins(tls->plugins) == -1) {
+        corsaro_log(tls->glob->logger, "error while stopping plugins.");
+    }
+
+    trace_destroy_packet(packet);
+    trace_destroy_dead(deadtrace);
+    zmq_close(tls->zmq_pullsock);
+    printf("worker thread %d saw %lu packets\n", tls->workerid, packetsseen);
     pthread_exit(NULL);
 }
 
@@ -651,6 +919,7 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
     int rcvsize, i;
     char *rcvspace;
     TaggedPacket *tp;
+    corsaro_worker_msg_t jobmsg;
 
     if (zmq_msg_recv(&zmsg, glob->zmq_subsock, 0) < 0) {
         corsaro_log(glob->logger,
@@ -686,13 +955,18 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
         return -1;
     }
 
-    printf("%u  %u.%u  %u %u %lu\n", filttags, tp->ts_sec, tp->ts_usec,
-            tp->pktlen, tp->flowhash, tp->n_tags);
-    for (i = 0; i < tp->n_tags; i++) {
-        printf("    %u = %u\n", tp->tags[i]->tagid, tp->tags[i]->tagval);
+    jobmsg.type = CORSARO_TRACE_MSG_PACKET;
+    jobmsg.tp = tp;
+
+    if (zmq_send(glob->zmq_workersocks[tp->flowhash % glob->threads],
+            &jobmsg, sizeof(jobmsg), 0) < 0) {
+        corsaro_log(glob->logger,
+                "error while pushing tagged packet to worker thread %d: %s",
+                tp->flowhash % glob->threads, strerror(errno));
+        return -1;
     }
+
     zmq_msg_close(&zmsg);
-    tagged_packet__free_unpacked(tp, NULL);
 
     return 0;
 }
@@ -837,6 +1111,7 @@ int main(int argc, char *argv[]) {
     int linger = 1000;
     sigset_t sig_before, sig_block_all;
     int i;
+    corsaro_worker_msg_t halt;
     corsaro_trace_worker_t *workers;
     zmq_pollitem_t pollitems[1];
 
@@ -868,6 +1143,7 @@ int main(int argc, char *argv[]) {
         }
 
         workers[i].glob = glob;
+        workers[i].workerid = i;
     }
 
     sigemptyset(&sig_block_all);
@@ -922,8 +1198,16 @@ int main(int argc, char *argv[]) {
 
     }
 
+    halt.type = CORSARO_TRACE_MSG_STOP;
+    halt.tp = NULL;
+
     for (i = 0; i < glob->threads; i++) {
-        /* TODO send halt message to all workers */
+
+        if (zmq_send(glob->zmq_workersocks[i], &halt, sizeof(halt), 0) < 0) {
+            corsaro_log(glob->logger, "error sending halt message to worker %d",
+                    i);
+            return 1;
+        }
 
         pthread_join(workers[i].threadid, NULL);
         zmq_setsockopt(glob->zmq_workersocks[i], ZMQ_LINGER, &linger,
