@@ -78,6 +78,7 @@ struct corsaro_tagger_local {
     corsaro_packet_tagger_t *tagger;
     void *pubsock;
     uint8_t stopped;
+    uint8_t sentfirstts;
     uint64_t errorcount;
 
     uint64_t lastmisscount;

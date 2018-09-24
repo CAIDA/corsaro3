@@ -5,6 +5,7 @@ message TaggedPacket {
     required uint32 ts_usec = 2;
     required uint32 pktlen = 3;
     required uint32 flowhash = 4;
+    optional uint32 first_ts = 5;
 
     required bytes pktcontent = 10;
     repeated PacketTag tags = 11;

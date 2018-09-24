@@ -158,8 +158,8 @@ static void simple_free(void *data, void *hint) {
 }
 
 static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
-        corsaro_tagger_local_t *tls,
-        corsaro_packet_tags_t *tags, libtrace_packet_t *packet) {
+        corsaro_tagger_local_t *tls, corsaro_packet_tags_t *tags,
+        libtrace_packet_t *packet, struct timeval *ftv) {
 
     TaggedPacket *tp = NULL;
     struct timeval tv;
@@ -195,6 +195,13 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     tp->pktcontent.data = pktcontents;
     tp->pktcontent.len = rem;
     tp->flowhash = tags->ft_hash;
+
+    if (ftv->tv_sec > 0) {
+        tp->has_first_ts = 1;
+        tp->first_ts = ftv->tv_sec;
+    } else {
+        tp->has_first_ts = 0;
+    }
 
     if (tags->providers_used & 1) {
         tagcount += 3;      // protocol, src port and dest port
@@ -336,16 +343,35 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
     corsaro_tagger_local_t *tls = (corsaro_tagger_local_t *)local;
     corsaro_packet_tags_t packettags;
+    const libtrace_packet_t *firstpkt;
+    struct timeval firsttv;
 
     if (tls->stopped) {
         return packet;
     }
 
+    memset(&firsttv, 0, sizeof(firsttv));
+
+    while (!tls->sentfirstts) {
+        int ret;
+        ret = trace_get_first_packet(trace, NULL, &firstpkt, NULL);
+        if (ret == -1) {
+            return packet;
+        }
+        if (ret == 0) {
+            usleep(10);
+            continue;
+        }
+        firsttv = trace_get_timeval(firstpkt);
+        tls->sentfirstts = 1;
+    }
+
     if (corsaro_tag_packet(tls->tagger, &packettags, packet) != 0) {
         corsaro_log(glob->logger, "error while attempting to tag a packet");
         tls->errorcount ++;
-    } else if (corsaro_publish_tags(glob, tls, &packettags, packet) != 0) {
-        corsaro_log(glob->logger, "error while attempting to tag a packet");
+    } else if (corsaro_publish_tags(glob, tls, &packettags, packet,
+            &firsttv) != 0) {
+        corsaro_log(glob->logger, "error while attempting to publish a packet");
         tls->errorcount ++;
     }
     return packet;
@@ -372,7 +398,7 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
                 "thread %d dropped %lu packets in last minute (accepted %lu)",
                 trace_get_perpkt_thread_id(t),
                 stats->missing - tls->lastmisscount,
-                tls->lastaccepted - stats->accepted);
+                stats->accepted - tls->lastaccepted);
         tls->lastmisscount = stats->missing;
     }
     tls->lastaccepted = stats->accepted;
