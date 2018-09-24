@@ -593,8 +593,8 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
     ip = trace_get_ip(packet);      \
                                     \
     if (ip) {                       \
-        uint32_t rem;               \
-        uint8_t proto;              \
+        uint32_t rem = 0;           \
+        uint8_t proto = 0;          \
         void *transport = trace_get_transport(packet, &proto, &rem);    \
         translen = rem;             \
                                     \
