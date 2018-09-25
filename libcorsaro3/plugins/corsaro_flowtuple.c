@@ -405,7 +405,7 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
 
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
-    corsaro_flowtuple_interim_t *interim;
+    corsaro_flowtuple_interim_t *interim = NULL;
     kh_sixt_t *h;
 
     FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_end_interval", NULL);
@@ -788,7 +788,6 @@ static void merge_sorted_inputs(corsaro_plugin_t *p,
         release_corsaro_memhandler_item(handler, prevft->memsrc);
     }
 
-    corsaro_close_avro_writer(m->writer);
 }
 
 
