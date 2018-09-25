@@ -643,19 +643,79 @@ int start_trace_input(corsaro_trace_global_t *glob) {
 
 #endif
 
+static int push_interval_result(corsaro_trace_worker_t *tls,
+        void **result) {
+
+    corsaro_result_msg_t res;
+
+    res.type = CORSARO_TRACE_MSG_MERGE;
+    res.source = tls->workerid;
+    res.interval_num = tls->current_interval.number;
+    res.interval_time = tls->current_interval.time;
+    res.plugindata = result;
+
+    if (zmq_send(tls->zmq_pushsock, &res, sizeof(res), 0) < 0) {
+        corsaro_log(tls->glob->logger,
+                "error while pushing result from worker %d: %s",
+                tls->workerid, strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
+static int push_rotate_output(corsaro_trace_worker_t *tls, uint32_t ts) {
+
+    corsaro_result_msg_t res;
+
+    res.type = CORSARO_TRACE_MSG_ROTATE;
+    res.source = tls->workerid;
+    res.interval_num = tls->current_interval.number;
+    res.interval_time = ts;
+    res.plugindata = NULL;
+
+    if (zmq_send(tls->zmq_pushsock, &res, sizeof(res), 0) < 0) {
+        corsaro_log(tls->glob->logger,
+                "error while pushing result from worker %d: %s",
+                tls->workerid, strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
+static int push_stop_merging(corsaro_trace_worker_t *tls) {
+
+    corsaro_result_msg_t res;
+
+    res.type = CORSARO_TRACE_MSG_STOP;
+    res.source = tls->workerid;
+    res.interval_num = tls->current_interval.number;
+    res.interval_time = 0;
+    res.plugindata = NULL;
+
+    if (zmq_send(tls->zmq_pushsock, &res, sizeof(res), 0) < 0) {
+        corsaro_log(tls->glob->logger,
+                "error while pushing stop from worker %d: %s",
+                tls->workerid, strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
 static int worker_per_packet(corsaro_trace_worker_t *tls,
         libtrace_packet_t *packet, corsaro_packet_tags_t *ptags,
         TaggedPacket *tp) {
 
+    void **interval_data;
 
     if (tls->current_interval.time == 0) {
 
-        /* Need a first ts to set our initial interval alignments, so skip
-         * any packets that we receive before then.
-         */
-        if (!tp->has_first_ts) {
+        if (tls->glob->first_pkt_ts == 0) {
             return 0;
         }
+
         /* First non-ignored packet */
         if (tls->glob->interval <= 0) {
             corsaro_log(tls->glob->logger,
@@ -664,8 +724,8 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
             return -1;
         }
 
-        tls->current_interval.time = tp->first_ts - (tp->first_ts %
-                tls->glob->interval);
+        tls->current_interval.time = tls->glob->first_pkt_ts -
+                (tls->glob->first_pkt_ts % tls->glob->interval);
         tls->lastrotateinterval.time = tls->current_interval.time -
                 (tls->current_interval.time %
                 (tls->glob->interval * tls->glob->rotatefreq));
@@ -681,15 +741,29 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     if (tp->ts_sec < tls->current_interval.time) {
         return 0;
     }
-
     /* check if we have passed the end of an interval */
     while (tls->next_report && tp->ts_sec >= tls->next_report) {
 
-        /* end interval TODO */
+        /* end interval */
+        interval_data = corsaro_push_end_plugins(tls->plugins,
+                tls->current_interval.number, tls->next_report);
+
+        if (push_interval_result(tls, interval_data) < 0) {
+            corsaro_log(tls->glob->logger,
+                    "error while publishing results for interval %u",
+                    tls->current_interval.number);
+            return -1;
+        }
 
         if (tls->glob->rotatefreq > 0 && tp->ts_sec >= tls->next_rotate) {
 
-            /* push rotate message TODO */
+            /* push rotate message */
+            if (push_rotate_output(tls, tls->next_report) < 0) {
+                corsaro_log(tls->glob->logger,
+                        "error while pushing rotate message after interval %u",
+                        tls->current_interval.number);
+                return -1;
+            }
             tls->next_rotate += (tls->glob->interval * tls->glob->rotatefreq);
         }
         tls->current_interval.number ++;
@@ -703,7 +777,7 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     tls->pkts_outstanding ++;
     tls->last_ts = tp->ts_sec;
     corsaro_push_packet_plugins(tls->plugins, packet, ptags);
-
+    return 1;
 }
 
 static inline void reconstruct_packet_tags(TaggedPacket *tp,
@@ -806,7 +880,7 @@ static inline void fast_construct_packet(libtrace_t *deadtrace,
     packet->l3_remaining = 0;
     packet->l4_remaining = 0;
     packet->refcount = 0;
-
+    packet->which_trace_start = 0;
 }
 
 static void *start_worker(void *tdata) {
@@ -819,6 +893,7 @@ static void *start_worker(void *tdata) {
     uint64_t packetsseen = 0;
     uint16_t pktalloc = 0;
     corsaro_packet_tags_t ptags;
+    void **final_result;
 
     deadtrace = trace_create_dead("pcapfile");
     packet = trace_create_packet();
@@ -833,6 +908,16 @@ static void *start_worker(void *tdata) {
                 tls->workerid, strerror(errno));
         goto endworker;
     }
+
+    tls->zmq_pushsock = zmq_socket(tls->glob->zmq_ctxt, ZMQ_PUSH);
+    if (zmq_connect(tls->zmq_pushsock, "inproc://pluginresults") < 0) {
+        corsaro_log(tls->glob->logger,
+                "error while connecting worker %d to result socket: %s",
+                tls->workerid, strerror(errno));
+        goto endworker;
+    }
+
+    /* TODO set HWM for push socket?? */
 
     tls->plugins = corsaro_start_plugins(tls->glob->logger,
             tls->glob->active_plugins, tls->glob->plugincount,
@@ -874,9 +959,22 @@ static void *start_worker(void *tdata) {
 
         if (tls->glob->boundendts && incoming.tp->ts_sec >=
                 tls->glob->boundendts) {
-            /* push end interval message for glob->boundendts TODO */
+            /* push end interval message for glob->boundendts */
+            final_result = corsaro_push_end_plugins(tls->plugins,
+                    tls->current_interval.number, tls->glob->boundendts);
 
-            /* push close file message for interval and boundendts TODO */
+            if (push_interval_result(tls, final_result) < 0) {
+                corsaro_log(tls->glob->logger,
+                        "error while publishing results for final interval %u",
+                        tls->current_interval.number);
+            }
+
+            /* push close file message for interval and boundendts */
+            if (push_rotate_output(tls, tls->glob->boundendts) < 0) {
+                corsaro_log(tls->glob->logger,
+                        "error while pushing rotate message after final interval %u",
+                        tls->current_interval.number);
+            }
             tagged_packet__free_unpacked(incoming.tp, NULL);
             break;
         }
@@ -899,6 +997,24 @@ static void *start_worker(void *tdata) {
     }
 
 endworker:
+    if (tls->pkts_outstanding > 0) {
+        final_result = corsaro_push_end_plugins(tls->plugins,
+                tls->current_interval.number, tls->last_ts);
+        if (push_interval_result(tls, final_result) < 0) {
+            corsaro_log(tls->glob->logger,
+                    "error while publishing results for final interval %u",
+                    tls->current_interval.number);
+        }
+
+        if (push_rotate_output(tls, tls->next_report) < 0) {
+            corsaro_log(tls->glob->logger,
+                    "error while pushing rotate message after final interval %u",
+                    tls->current_interval.number);
+        }
+    }
+
+    push_stop_merging(tls);
+
     if (tls->plugins && corsaro_stop_plugins(tls->plugins) == -1) {
         corsaro_log(tls->glob->logger, "error while stopping plugins.");
     }
@@ -906,13 +1022,146 @@ endworker:
     trace_destroy_packet(packet);
     trace_destroy_dead(deadtrace);
     zmq_close(tls->zmq_pullsock);
+    zmq_close(tls->zmq_pushsock);
     printf("worker thread %d saw %lu packets\n", tls->workerid, packetsseen);
     pthread_exit(NULL);
 }
 
+static void process_mergeable_result(corsaro_trace_global_t *glob,
+        corsaro_trace_merger_t *merge, corsaro_result_msg_t *msg) {
+
+    corsaro_fin_interval_t *fin = merge->finished_intervals;
+    corsaro_fin_interval_t *prev = NULL;
+
+    if (glob->threads == 1) {
+        corsaro_fin_interval_t quik;
+        quik.interval_id = msg->interval_num;
+        quik.timestamp = msg->interval_time;
+        quik.threads_ended = 1;
+        quik.next = NULL;
+        quik.rotate_after = 0;
+        quik.thread_plugin_data = (void ***)(calloc(glob->threads,
+                    sizeof(void **)));
+        quik.thread_plugin_data[0] = msg->plugindata;
+
+        corsaro_merge_plugin_outputs(glob->logger, merge->pluginset,
+                &quik);
+        free(msg->plugindata);
+        free(quik.thread_plugin_data);
+        return;
+    }
+
+    while (fin != NULL) {
+        if (fin->interval_id == msg->interval_num) {
+            break;
+        }
+        prev = fin;
+        fin = fin->next;
+    }
+
+    if (fin != NULL) {
+        int i;
+
+        fin->thread_plugin_data[fin->threads_ended] = msg->plugindata;
+        fin->threads_ended ++;
+        if (fin->threads_ended == glob->threads) {
+            assert(fin == merge->finished_intervals);
+            corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin);
+            if (fin->rotate_after) {
+                corsaro_rotate_plugin_output(glob->logger, merge->pluginset);
+                merge->next_rotate_interval = msg->interval_num + 1;
+            }
+            merge->finished_intervals = fin->next;
+            for (i = 0; i < glob->threads; i++) {
+                free(fin->thread_plugin_data[i]);
+            }
+            free(fin->thread_plugin_data);
+            free(fin);
+        }
+    } else {
+        fin = (corsaro_fin_interval_t *)malloc(sizeof(corsaro_fin_interval_t));
+        fin->interval_id = msg->interval_num;
+        fin->timestamp = msg->interval_time;
+        fin->threads_ended = 1;
+        fin->next = NULL;
+        fin->rotate_after = 0;
+        fin->thread_plugin_data = (void ***)(calloc(glob->threads,
+                sizeof(void **)));
+        fin->thread_plugin_data[0] = msg->plugindata;
+
+        if (prev) {
+            prev->next = fin;
+        } else {
+            merge->finished_intervals = fin;
+        }
+    }
+
+}
+
+static void *start_merger(void *tdata) {
+    corsaro_trace_merger_t *merge = (corsaro_trace_merger_t *)tdata;
+    corsaro_trace_global_t *glob = merge->glob;
+    corsaro_result_msg_t res;
+    corsaro_fin_interval_t *fin;
+
+    merge->pluginset = corsaro_start_merging_plugins(glob->logger,
+            glob->active_plugins, glob->plugincount, glob->threads);
+
+    while (1) {
+        if (zmq_recv(merge->zmq_pullsock, &res, sizeof(res), 0) < 0) {
+            corsaro_log(glob->logger,
+                    "error receiving message on merger pull socket: %s",
+                    strerror(errno));
+            break;
+        }
+
+        if (res.type == CORSARO_TRACE_MSG_STOP) {
+            merge->stops_seen ++;
+            if (merge->stops_seen == glob->threads) {
+                break;
+            }
+        }
+        else if (res.type == CORSARO_TRACE_MSG_ROTATE) {
+            fin = merge->finished_intervals;
+
+            if (fin == NULL && merge->next_rotate_interval <= res.interval_num) {
+                corsaro_rotate_plugin_output(glob->logger, merge->pluginset);
+                merge->next_rotate_interval = res.interval_num + 1;
+                continue;
+            }
+
+            while (fin != NULL) {
+                if (fin->interval_id == res.interval_num) {
+                    fin->rotate_after = 1;
+                    break;
+                }
+                fin = fin->next;
+            }
+        } else if (res.type == CORSARO_TRACE_MSG_MERGE) {
+            process_mergeable_result(glob, merge, &res);
+        }
+
+    }
+
+
+endmerger:
+    while (merge->finished_intervals) {
+        fin = merge->finished_intervals;
+
+        corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin);
+        merge->finished_intervals = fin->next;
+        free(fin);
+    }
+
+    corsaro_stop_plugins(merge->pluginset);
+
+    pthread_exit(NULL);
+}
+
+
 static int receive_tagged_packet(corsaro_trace_global_t *glob) {
 
-    /* TODO receive message, decode it, forward to an appropriate worker */
+    /* receive message, decode it, forward to an appropriate worker */
     zmq_msg_t zmsg;
     zmq_msg_init(&zmsg);
     uint16_t filttags = 1000;
@@ -953,6 +1202,10 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
         corsaro_log(glob->logger,
                 "error while unpacking message received from sub socket");
         return -1;
+    }
+
+    if (glob->first_pkt_ts == 0) {
+        glob->first_pkt_ts = tp->ts_sec;
     }
 
     jobmsg.type = CORSARO_TRACE_MSG_PACKET;
@@ -1113,12 +1366,19 @@ int main(int argc, char *argv[]) {
     int i;
     corsaro_worker_msg_t halt;
     corsaro_trace_worker_t *workers;
+    corsaro_trace_merger_t merger;
     zmq_pollitem_t pollitems[1];
+    libtrace_t *dummy;
 
     glob = configure_corsaro(argc, argv);
     if (glob == NULL) {
         return 1;
     }
+
+    /* We need this to ensure libtrace initialises itself in a thread
+     * safe way...
+     */
+    dummy = trace_create_dead("pcapfile");
 
     glob->zmq_workersocks = calloc(glob->threads, sizeof(void *));
     workers = calloc(glob->threads, sizeof(corsaro_trace_worker_t));
@@ -1146,6 +1406,20 @@ int main(int argc, char *argv[]) {
         workers[i].workerid = i;
     }
 
+    merger.glob = glob;
+    merger.stops_seen = 0;
+    merger.next_rotate_interval = 0;
+    merger.pluginset = NULL;
+    merger.finished_intervals = NULL;
+
+    merger.zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
+    if (zmq_bind(merger.zmq_pullsock, "inproc://pluginresults") != 0) {
+        corsaro_log(glob->logger,
+                "unable to bind pull socket for merger: %s",
+                strerror(errno));
+        return 1;
+    }
+
     sigemptyset(&sig_block_all);
     if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
         corsaro_log(glob->logger,
@@ -1158,6 +1432,8 @@ int main(int argc, char *argv[]) {
                 &(workers[i]));
     }
 
+    pthread_create(&(merger.threadid), NULL, start_merger, &merger);
+
     if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
         corsaro_log(glob->logger,
                 "unable to re-enable signals after starting worker threads.");
@@ -1168,6 +1444,14 @@ int main(int argc, char *argv[]) {
     if (zmq_bind(glob->zmq_subsock, glob->subqueuename) < 0) {
         corsaro_log(glob->logger,
                 "unable to bind to socket for receiving tagged packets: %s",
+                strerror(errno));
+        return 1;
+    }
+
+    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_LINGER, &linger, sizeof(linger))
+            < 0) {
+        corsaro_log(glob->logger,
+                "unable to set linger period for subscription socket: %s",
                 strerror(errno));
         return 1;
     }
@@ -1215,11 +1499,15 @@ int main(int argc, char *argv[]) {
         zmq_close(glob->zmq_workersocks[i]);
     }
 
+    pthread_join(merger.threadid, NULL);
+    zmq_close(merger.zmq_pullsock);
+
     zmq_close(glob->zmq_subsock);
     free(glob->zmq_workersocks);
     free(workers);
 
     corsaro_log(glob->logger, "all threads have joined, exiting.");
+    trace_destroy_dead(dummy);
     corsaro_trace_free_global(glob);
 
     return 0;

@@ -318,6 +318,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
     /* Initialise all globals */
     glob->active_plugins = NULL;
+    glob->first_pkt_ts = 0;
     glob->boundstartts = 0;
     glob->boundendts = 0;
     glob->interval = 60;

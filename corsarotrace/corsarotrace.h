@@ -51,14 +51,16 @@ typedef struct corsaro_worker_msg {
     TaggedPacket *tp;
 } corsaro_worker_msg_t;
 
-typedef struct corsaro_trace_msg {
+typedef struct corsaro_result_msg {
     uint8_t type;
+    uint8_t source;
     uint32_t interval_num;
     uint32_t interval_time;
     void **plugindata;
-} corsaro_trace_msg_t;
+} corsaro_result_msg_t;
 
 typedef struct corsaro_trace_worker corsaro_trace_worker_t;
+typedef struct corsaro_trace_merger corsaro_trace_merger_t;
 
 typedef struct corsaro_trace_glob {
     corsaro_plugin_t *active_plugins;
@@ -69,6 +71,7 @@ typedef struct corsaro_trace_glob {
     char *filterstring;
     char *monitorid;
 
+    uint32_t first_pkt_ts;
     uint32_t boundstartts;
     uint32_t boundendts;
     uint32_t interval;
@@ -106,6 +109,18 @@ struct corsaro_trace_worker {
     void *zmq_pullsock;
     void *zmq_pushsock;
 
+};
+
+struct corsaro_trace_merger {
+    corsaro_trace_global_t *glob;
+    pthread_t threadid;
+
+    int stops_seen;
+    uint32_t next_rotate_interval;
+    corsaro_plugin_set_t *pluginset;
+    corsaro_fin_interval_t *finished_intervals;
+
+    void *zmq_pullsock;
 };
 
 corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode);
