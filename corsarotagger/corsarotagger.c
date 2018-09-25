@@ -59,6 +59,7 @@ static void cleanup_signal(int sig) {
 static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
     int hwm = 100000;
+    int one = 1;
 
     tls->stopped = 0;
     tls->tagger = corsaro_create_packet_tagger(glob->logger, glob->ipmeta);
@@ -106,6 +107,14 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
     if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
         corsaro_log(glob->logger,
                 "error while setting HWM for zeromq publisher socket in thread %d:%s",
+                threadid, strerror(errno));
+        tls->stopped = 1;
+    }
+
+    /* Don't queue messages for incomplete connections */
+    if (zmq_setsockopt(tls->pubsock, ZMQ_IMMEDIATE, &one, sizeof(one)) != 0) {
+        corsaro_log(glob->logger,
+                "error while setting immediate for zeromq publisher socket in thread %d:%s",
                 threadid, strerror(errno));
         tls->stopped = 1;
     }
