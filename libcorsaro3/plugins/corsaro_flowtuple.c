@@ -163,69 +163,6 @@ corsaro_plugin_t *corsaro_flowtuple_alloc(void) {
       return &corsaro_flowtuple_plugin;
 }
 
-static int flowtuple_to_avro(corsaro_logger_t *logger, avro_value_t *av,
-        void *flowtuple) {
-    struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)flowtuple;
-    avro_value_t field;
-    char valspace[128];
-
-    CORSARO_AVRO_SET_FIELD(long, av, field, 0, "time", "flowtuple",
-            ft->interval_ts);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 1, "src_ip", "flowtuple",
-            ft->src_ip);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 2, "dst_ip", "flowtuple",
-            ft->dst_ip);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 3, "src_port", "flowtuple",
-            ft->src_port);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 4, "dst_port", "flowtuple",
-            ft->dst_port);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 5, "protocol", "flowtuple",
-            ft->protocol);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 6, "ttl", "flowtuple",
-            ft->ttl);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 7, "tcp_flags", "flowtuple",
-            ft->tcp_flags);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 8, "ip_len", "flowtuple",
-            ft->ip_len);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 9, "packet_cnt", "flowtuple",
-            ft->packet_cnt);
-
-    if (ft->tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
-        snprintf(valspace, 128, "%c%c", (int)(ft->maxmind_continent & 0xff),
-                (int)((ft->maxmind_continent >> 8) & 0xff));
-
-        CORSARO_AVRO_SET_FIELD(string, av, field, 10, "maxmind_continent",
-                "flowtuple", valspace);
-
-        snprintf(valspace, 128, "%c%c", (int)(ft->maxmind_country & 0xff),
-                (int)((ft->maxmind_country >> 8) & 0xff));
-
-        CORSARO_AVRO_SET_FIELD(string, av, field, 11, "maxmind_country",
-                "flowtuple", valspace);
-    }
-
-    if (ft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
-        snprintf(valspace, 128, "%c%c", (int)(ft->netacq_continent & 0xff),
-                (int)((ft->netacq_continent >> 8) & 0xff));
-
-        CORSARO_AVRO_SET_FIELD(string, av, field, 12, "netacq_continent",
-                "flowtuple", valspace);
-
-        snprintf(valspace, 128, "%c%c", (int)(ft->netacq_country & 0xff),
-                (int)((ft->netacq_country >> 8) & 0xff));
-
-        CORSARO_AVRO_SET_FIELD(string, av, field, 13, "netacq_country",
-                "flowtuple", valspace);
-    }
-
-    if (ft->tagproviders & (1 << IPMETA_PROVIDER_PFX2AS)) {
-        CORSARO_AVRO_SET_FIELD(long, av, field, 14, "prefix2asn", "flowtuple",
-                ft->prefixasn);
-    }
-
-    return 0;
-}
-
 static int ft_cmp_pri(void *next, void *curr) {
 
     struct corsaro_flowtuple *prevft, *nextft;
