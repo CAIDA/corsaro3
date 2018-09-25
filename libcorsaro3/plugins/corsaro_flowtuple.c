@@ -651,6 +651,7 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
         corsaro_avro_writer_t *writer, corsaro_logger_t *logger) {
 
     char valspace[128];
+    uint32_t zero = 0;
 
     if (corsaro_start_avro_encoding(writer) < 0) {
         return;
@@ -723,7 +724,17 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
             return;
         }
 
+    } else {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                "??", 2) < 0) {
+            return;
+        }
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                "??", 2) < 0) {
+            return;
+        }
     }
+
 
     if (nextft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
         snprintf(valspace, 128, "%c%c", (int)(nextft->netacq_continent & 0xff),
@@ -742,6 +753,15 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
             return;
         }
 
+    } else {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                "??", 2) < 0) {
+            return;
+        }
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                "??", 2) < 0) {
+            return;
+        }
     }
 
     if (nextft->tagproviders & (1 << IPMETA_PROVIDER_PFX2AS)) {
@@ -750,6 +770,11 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
             return;
         }
 
+    } else {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                    &(zero), sizeof(zero)) < 0) {
+            return;
+        }
     }
 
     if (corsaro_append_avro_writer(writer, NULL) < 0) {
