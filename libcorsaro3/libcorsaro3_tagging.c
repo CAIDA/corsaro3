@@ -359,6 +359,7 @@ int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
 
 void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger) {
 
+    libtrace_list_node_t *n = NULL;
     if (tagger) {
         if (tagger->providers) {
             libtrace_list_deinit(tagger->providers);
