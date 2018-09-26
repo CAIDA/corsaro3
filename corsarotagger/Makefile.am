@@ -34,7 +34,6 @@ corsarotagger_SOURCES = \
         corsarotagger.h
 
 corsarotagger_LDADD = -lcorsaro3
-
 corsarotagger_LDFLAGS = -L$(top_builddir)/libcorsaro3
 
 ACLOCAL_AMFLAGS = -I m4

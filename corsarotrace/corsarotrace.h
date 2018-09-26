@@ -37,7 +37,6 @@
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_filtering.h"
 #include "libcorsaro3_tagging.h"
-#include "taggedpacket.pb-c.h"
 
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
@@ -48,7 +47,8 @@ enum {
 
 typedef struct corsaro_worker_msg {
     uint8_t type;
-    TaggedPacket *tp;
+    corsaro_tagged_packet_header_t header;
+    uint8_t *packetcontent;
 } corsaro_worker_msg_t;
 
 typedef struct corsaro_result_msg {

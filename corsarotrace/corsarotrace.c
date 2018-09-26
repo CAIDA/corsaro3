@@ -43,7 +43,6 @@
 #include "corsarotrace.h"
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_filtering.h"
-#include "taggedpacket.pb-c.h"
 
 typedef struct pcaphdr_t {
     uint32_t ts_sec;        /* Seconds portion of the timestamp */
@@ -122,8 +121,7 @@ static int push_stop_merging(corsaro_trace_worker_t *tls) {
 }
 
 static int worker_per_packet(corsaro_trace_worker_t *tls,
-        libtrace_packet_t *packet, corsaro_packet_tags_t *ptags,
-        TaggedPacket *tp) {
+        libtrace_packet_t *packet, corsaro_worker_msg_t *incoming) {
 
     void **interval_data;
 
@@ -155,11 +153,11 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
                 (tls->glob->interval * tls->glob->rotatefreq);
     }
 
-    if (tp->ts_sec < tls->current_interval.time) {
+    if (incoming->header.ts_sec < tls->current_interval.time) {
         return 0;
     }
     /* check if we have passed the end of an interval */
-    while (tls->next_report && tp->ts_sec >= tls->next_report) {
+    while (tls->next_report && incoming->header.ts_sec >= tls->next_report) {
 
         /* end interval */
         interval_data = corsaro_push_end_plugins(tls->plugins,
@@ -172,7 +170,8 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
             return -1;
         }
 
-        if (tls->glob->rotatefreq > 0 && tp->ts_sec >= tls->next_rotate) {
+        if (tls->glob->rotatefreq > 0 &&
+                incoming->header.ts_sec >= tls->next_rotate) {
 
             /* push rotate message */
             if (push_rotate_output(tls, tls->next_report) < 0) {
@@ -192,72 +191,14 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     }
 
     tls->pkts_outstanding ++;
-    tls->last_ts = tp->ts_sec;
-    corsaro_push_packet_plugins(tls->plugins, packet, ptags);
+    tls->last_ts = incoming->header.ts_sec;
+    corsaro_push_packet_plugins(tls->plugins, packet, &(incoming->header.tags));
     return 1;
 }
 
-static inline void reconstruct_packet_tags(TaggedPacket *tp,
-        corsaro_packet_tags_t *ptags, corsaro_logger_t *logger) {
-
-    int i;
-
-    ptags->highlevelfilterbits = 0;
-    ptags->ft_hash = tp->flowhash;
-    ptags->providers_used = 0;
-
-    for (i = 0; i < tp->n_tags; i++) {
-        switch(tp->tags[i]->tagid) {
-            case CORSARO_TAGID_NETACQ_REGION:
-                ptags->netacq_region = tp->tags[i]->tagval;
-                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
-                break;
-            case CORSARO_TAGID_NETACQ_POLYGON:
-                ptags->netacq_polygon = tp->tags[i]->tagval;
-                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
-                break;
-            case CORSARO_TAGID_NETACQ_COUNTRY:
-                ptags->netacq_country = tp->tags[i]->tagval;
-                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
-                break;
-            case CORSARO_TAGID_NETACQ_CONTINENT:
-                ptags->netacq_continent = tp->tags[i]->tagval;
-                ptags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
-                break;
-            case CORSARO_TAGID_MAXMIND_COUNTRY:
-                ptags->maxmind_country = tp->tags[i]->tagval;
-                ptags->providers_used |= (1 << IPMETA_PROVIDER_MAXMIND);
-                break;
-            case CORSARO_TAGID_MAXMIND_CONTINENT:
-                ptags->maxmind_continent = tp->tags[i]->tagval;
-                ptags->providers_used |= (1 << IPMETA_PROVIDER_MAXMIND);
-                break;
-            case CORSARO_TAGID_PREFIXASN:
-                ptags->prefixasn = tp->tags[i]->tagval;
-                ptags->providers_used |= (1 << IPMETA_PROVIDER_PFX2AS);
-                break;
-            case CORSARO_TAGID_SOURCEPORT:
-                ptags->src_port = tp->tags[i]->tagval;
-                ptags->providers_used |= (1);
-                break;
-            case CORSARO_TAGID_DESTPORT:
-                ptags->dest_port = tp->tags[i]->tagval;
-                ptags->providers_used |= (1);
-                break;
-            case CORSARO_TAGID_PROTOCOL:
-                ptags->protocol = tp->tags[i]->tagval;
-                ptags->providers_used |= (1);
-                break;
-            default:
-                corsaro_log(logger,
-                        "unexpected tag ID %u -- ignoring", tp->tags[i]->tagid);
-                break;
-        }
-    }
-}
-
-static inline void fast_construct_packet(libtrace_t *deadtrace,
-        libtrace_packet_t *packet, TaggedPacket *tp, uint16_t *packetbufsize)
+static void fast_construct_packet(libtrace_t *deadtrace,
+        libtrace_packet_t *packet, corsaro_worker_msg_t *tp,
+        uint16_t *packetbufsize)
 {
 
     /* Clone of trace_construct_packet() but designed to minimise
@@ -265,22 +206,23 @@ static inline void fast_construct_packet(libtrace_t *deadtrace,
      */
     pcaphdr_t pcaphdr;
 
-    pcaphdr.ts_sec = tp->ts_sec;
-    pcaphdr.ts_usec = tp->ts_usec;
-    pcaphdr.caplen = tp->pktlen;
-    pcaphdr.wirelen = tp->pktlen;
+    pcaphdr.ts_sec = tp->header.ts_sec;
+    pcaphdr.ts_usec = tp->header.ts_usec;
+    pcaphdr.caplen = tp->header.pktlen;
+    pcaphdr.wirelen = tp->header.pktlen;
 
     packet->trace = deadtrace;
-    if (*packetbufsize < tp->pktlen + sizeof(pcaphdr)) {
-        packet->buffer = realloc(packet->buffer, tp->pktlen + sizeof(pcaphdr));
-        *packetbufsize = tp->pktlen + sizeof(pcaphdr);
+    if (*packetbufsize < tp->header.pktlen + sizeof(pcaphdr)) {
+        packet->buffer = realloc(packet->buffer,
+                tp->header.pktlen + sizeof(pcaphdr));
+        *packetbufsize = tp->header.pktlen + sizeof(pcaphdr);
     }
 
     packet->buf_control = TRACE_CTRL_PACKET;
     packet->header = packet->buffer;
     packet->payload = ((char *)(packet->buffer) + sizeof(pcaphdr));
 
-    memcpy(packet->payload, tp->pktcontent.data, tp->pktlen);
+    memcpy(packet->payload, tp->packetcontent, tp->header.pktlen);
     memcpy(packet->header, &pcaphdr, sizeof(pcaphdr));
     packet->type = TRACE_RT_DATA_DLT + TRACE_DLT_EN10MB;
 
@@ -290,10 +232,10 @@ static inline void fast_construct_packet(libtrace_t *deadtrace,
     packet->link_type = TRACE_TYPE_ETH;
     packet->l3_ethertype = 0;
     packet->transport_proto = 0;
-    packet->capture_length = tp->pktlen;
-    packet->wire_length = tp->pktlen;
+    packet->capture_length = tp->header.pktlen;
+    packet->wire_length = tp->header.pktlen;
     packet->payload_length = -1;
-    packet->l2_remaining = tp->pktlen;
+    packet->l2_remaining = tp->header.pktlen;
     packet->l3_remaining = 0;
     packet->l4_remaining = 0;
     packet->refcount = 0;
@@ -309,7 +251,6 @@ static void *start_worker(void *tdata) {
     libtrace_packet_t *packet = NULL;
     uint64_t packetsseen = 0;
     uint16_t pktalloc = 0;
-    corsaro_packet_tags_t ptags;
     void **final_result;
 
     deadtrace = trace_create_dead("pcapfile");
@@ -365,16 +306,15 @@ static void *start_worker(void *tdata) {
             break;
         }
         packetsseen ++;
-        fast_construct_packet(deadtrace, packet, incoming.tp, &pktalloc);
-        reconstruct_packet_tags(incoming.tp, &ptags, tls->glob->logger);
+        fast_construct_packet(deadtrace, packet, &incoming, &pktalloc);
 
-        if (tls->glob->boundstartts && incoming.tp->ts_sec <
+        if (tls->glob->boundstartts && incoming.header.ts_sec <
                     tls->glob->boundstartts) {
-            tagged_packet__free_unpacked(incoming.tp, NULL);
+            free(incoming.packetcontent);
             continue;
         }
 
-        if (tls->glob->boundendts && incoming.tp->ts_sec >=
+        if (tls->glob->boundendts && incoming.header.ts_sec >=
                 tls->glob->boundendts) {
             /* push end interval message for glob->boundendts */
             final_result = corsaro_push_end_plugins(tls->plugins,
@@ -392,18 +332,18 @@ static void *start_worker(void *tdata) {
                         "error while pushing rotate message after final interval %u",
                         tls->current_interval.number);
             }
-            tagged_packet__free_unpacked(incoming.tp, NULL);
+            free(incoming.packetcontent);
             break;
         }
 
-        if (worker_per_packet(tls, packet, &ptags, incoming.tp) < 0) {
+        if (worker_per_packet(tls, packet, &incoming) < 0) {
             corsaro_log(tls->glob->logger,
                     "error while processing received packet in worker %d",
                     tls->workerid);
-            tagged_packet__free_unpacked(incoming.tp, NULL);
+            free(incoming.packetcontent);
             break;
         }
-        tagged_packet__free_unpacked(incoming.tp, NULL);
+        free(incoming.packetcontent);
     }
 
 endworker:
@@ -576,8 +516,8 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
     uint16_t filttags = 1000;
     int rcvsize, i;
     char *rcvspace;
-    TaggedPacket *tp;
     corsaro_worker_msg_t jobmsg;
+    int targetworker;
 
     if (zmq_msg_recv(&zmsg, glob->zmq_subsock, 0) < 0) {
         corsaro_log(glob->logger,
@@ -606,25 +546,25 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
     rcvsize = zmq_msg_size(&zmsg);
     rcvspace = (char *)zmq_msg_data(&zmsg);
 
-    tp = tagged_packet__unpack(NULL, rcvsize, rcvspace);
-    if (tp == NULL) {
-        corsaro_log(glob->logger,
-                "error while unpacking message received from sub socket");
-        return -1;
-    }
+    jobmsg.type = CORSARO_TRACE_MSG_PACKET;
+    memcpy(&jobmsg.header, rcvspace, sizeof(corsaro_tagged_packet_header_t));
+    jobmsg.packetcontent = malloc(rcvsize -
+            sizeof(corsaro_tagged_packet_header_t));
+
+    memcpy(jobmsg.packetcontent,
+            rcvspace + sizeof(corsaro_tagged_packet_header_t),
+            rcvsize - sizeof(corsaro_tagged_packet_header_t));
 
     if (glob->first_pkt_ts == 0) {
-        glob->first_pkt_ts = tp->ts_sec;
+        glob->first_pkt_ts = jobmsg.header.ts_sec;
     }
 
-    jobmsg.type = CORSARO_TRACE_MSG_PACKET;
-    jobmsg.tp = tp;
-
-    if (zmq_send(glob->zmq_workersocks[tp->flowhash % glob->threads],
-            &jobmsg, sizeof(jobmsg), 0) < 0) {
+    targetworker = jobmsg.header.tags.ft_hash % glob->threads;
+    if (zmq_send(glob->zmq_workersocks[targetworker], &jobmsg,
+            sizeof(jobmsg), 0) < 0) {
         corsaro_log(glob->logger,
                 "error while pushing tagged packet to worker thread %d: %s",
-                tp->flowhash % glob->threads, strerror(errno));
+                targetworker, strerror(errno));
         return -1;
     }
 
@@ -892,7 +832,7 @@ int main(int argc, char *argv[]) {
     }
 
     halt.type = CORSARO_TRACE_MSG_STOP;
-    halt.tp = NULL;
+    halt.packetcontent = NULL;
 
     for (i = 0; i < glob->threads; i++) {
 

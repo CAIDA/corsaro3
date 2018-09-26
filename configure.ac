@@ -81,11 +81,6 @@ AH_VERBATIM([_GNU_SOURCE],
 
 AC_CHECK_PROG([corsaro_doxygen_avail], [doxygen], [yes], [no])
 
-# Checks for protobuf compiler and library
-PKG_CHECK_MODULES([PROTOBUF_C], [libprotobuf-c >= 1.0.0])
-AC_CHECK_PROG([PROTOC], [protoc-c],[protoc-c])
-AS_IF([test "x${PROTOC}" == "x"], [AC_MSG_ERROR([ProtoBuf C compiler not found.])])
-
 AC_MSG_CHECKING([whether to compile the docs])
 AC_ARG_WITH([doxygen],
 	[AS_HELP_STRING([--without-doxygen],

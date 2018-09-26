@@ -108,12 +108,22 @@ typedef struct corsaro_packet_tags {
      *  for the source IP, as determined using the netacq-edge data.
      *  Encoded as a uint16_t, one byte for each character. */
     uint16_t netacq_continent;
-    uint8_t protocol;
+
     /** Bitmask showing which high level filters this packet matches, i.e.
      * is it spoofed, is it erratic, is it non-routable */
     uint16_t highlevelfilterbits;
     uint32_t ft_hash;       // hashed flowtuple id
-} corsaro_packet_tags_t;
+
+    /** The post-IP protocol used by the packet */
+    uint8_t protocol;
+} PACKED corsaro_packet_tags_t;
+
+typedef struct corsaro_tagged_packet_header {
+    uint32_t ts_sec;
+    uint32_t ts_usec;
+    uint16_t pktlen;
+    corsaro_packet_tags_t tags;
+} PACKED corsaro_tagged_packet_header_t;
 
 /** Structure that maintains state required for tagging packets. */
 typedef struct corsaro_packet_tagger {

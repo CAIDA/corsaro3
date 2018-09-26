@@ -30,6 +30,7 @@
 
 #include <libtrace.h>
 #include <libtrace_parallel.h>
+#include <protobuf-c/protobuf-c.h>
 
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
@@ -85,7 +86,9 @@ struct corsaro_tagger_local {
 
     corsaro_memhandler_t *msg_source;
     corsaro_memhandler_t *ptag_source;
+
 };
+
 
 corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
         int logmode);

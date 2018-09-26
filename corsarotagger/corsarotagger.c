@@ -43,7 +43,6 @@
 #include "corsarotagger.h"
 #include "libcorsaro3_filtering.h"
 #include "libcorsaro3_memhandler.h"
-#include "taggedpacket.pb-c.h"
 
 libtrace_callback_set_t *processing = NULL;
 
@@ -94,13 +93,6 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
                 threadid);
         tls->stopped = 1;
     }
-
-    tls->msg_source = malloc(sizeof(corsaro_memhandler_t));
-    tls->ptag_source = malloc(sizeof(corsaro_memhandler_t));
-    init_corsaro_memhandler(glob->logger, tls->msg_source,
-            sizeof(TaggedPacket), 100);
-    init_corsaro_memhandler(glob->logger, tls->ptag_source,
-            sizeof(PacketTag), 1000);
 
     /* TODO create zmq socket for publishing */
     tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUB);
@@ -155,9 +147,6 @@ static void halt_trace_processing(corsaro_tagger_global_t *glob,
     }
     zmq_close(tls->pubsock);
 
-    destroy_corsaro_memhandler(tls->msg_source);
-    destroy_corsaro_memhandler(tls->ptag_source);
-
     corsaro_log(glob->logger, "halted packet tagging thread %d, errors=%lu",
             threadid, tls->errorcount);
 }
@@ -170,17 +159,16 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
         corsaro_tagger_local_t *tls, corsaro_packet_tags_t *tags,
         libtrace_packet_t *packet) {
 
-    TaggedPacket *tp = NULL;
     struct timeval tv;
-    uint32_t rem, packedlen;
-    void *pktcontents, *packbuf;
+    void *pktcontents;
+    uint32_t rem;
     libtrace_linktype_t linktype;
-    PacketTag *ptags[16];
-    int tagcount = 0, i, ret;
-    corsaro_memsource_t *tpsrc;
-    corsaro_memsource_t *ptagsrc[16];
-    uint16_t tosend;
     zmq_msg_t outgoing;
+    uint8_t *buf;
+    corsaro_tagged_packet_header_t *hdr;
+    int ret;
+    size_t bufsize;
+    uint16_t tosend;
 
     pktcontents = trace_get_layer2(packet, &linktype, &rem);
     if (rem == 0 || pktcontents == NULL) {
@@ -190,124 +178,18 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     if (linktype != TRACE_TYPE_ETH) {
         return 0;
     }
-
     tv = trace_get_timeval(packet);
 
-    tp = (TaggedPacket *)get_corsaro_memhandler_item_nolock(tls->msg_source,
-            &tpsrc);
+    bufsize = sizeof(corsaro_tagged_packet_header_t) + rem;
+    buf = malloc(bufsize);
+    hdr = (corsaro_tagged_packet_header_t *)buf;
 
-    tagged_packet__init(tp);
-    /* possible metadata future extensions: wire length, link type */
-    tp->ts_sec = tv.tv_sec;
-    tp->ts_usec = tv.tv_usec;
-    tp->pktlen = rem;
-    tp->pktcontent.data = pktcontents;
-    tp->pktcontent.len = rem;
-    tp->flowhash = tags->ft_hash;
+    hdr->ts_sec = tv.tv_sec;
+    hdr->ts_usec = tv.tv_usec;
+    hdr->pktlen = rem;
+    memcpy(&(hdr->tags), tags, sizeof(corsaro_packet_tags_t));
 
-    if (tags->providers_used & 1) {
-        tagcount += 3;      // protocol, src port and dest port
-    }
-
-    if (tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
-        tagcount += 2;      // country and continent
-    }
-
-    if (tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
-        tagcount += 1;      // prefixasn
-    }
-
-
-    if (tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
-        tagcount += 4;      // polygon, region, country and continent
-    }
-
-    i = 0;
-
-    if (tags->providers_used & 1) {
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_PROTOCOL;
-        ptags[i]->tagval = tags->protocol;
-        i++;
-
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_SOURCEPORT;
-        ptags[i]->tagval = tags->src_port;
-        i++;
-
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_DESTPORT;
-        ptags[i]->tagval = tags->dest_port;
-        i++;
-    }
-
-    if (tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_PREFIXASN;
-        ptags[i]->tagval = tags->prefixasn;
-        i++;
-    }
-
-    if (tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_MAXMIND_CONTINENT;
-        ptags[i]->tagval = tags->maxmind_continent;
-        i++;
-
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_MAXMIND_COUNTRY;
-        ptags[i]->tagval = tags->maxmind_country;
-        i++;
-    }
-
-    if (tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_NETACQ_CONTINENT;
-        ptags[i]->tagval = tags->netacq_continent;
-        i++;
-
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_NETACQ_COUNTRY;
-        ptags[i]->tagval = tags->netacq_country;
-        i++;
-
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_NETACQ_REGION;
-        ptags[i]->tagval = tags->netacq_region;
-        i++;
-
-        ptags[i] = (PacketTag *)get_corsaro_memhandler_item_nolock(
-                tls->ptag_source, &(ptagsrc[i]));
-        packet_tag__init(ptags[i]);
-        ptags[i]->tagid = CORSARO_TAGID_NETACQ_POLYGON;
-        ptags[i]->tagval = tags->netacq_polygon;
-        i++;
-    }
-
-    tp->tags = ptags;
-    tp->n_tags = tagcount;
-
-    packedlen = tagged_packet__get_packed_size(tp);
-    packbuf = malloc(packedlen);
-    tagged_packet__pack(tp, packbuf);
+    memcpy(buf + sizeof(corsaro_tagged_packet_header_t), pktcontents, rem);
 
     ret = 0;
     tosend = htons(tags->highlevelfilterbits);
@@ -316,27 +198,23 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
                 "error while publishing tagged packet: %s", strerror(errno));
         tls->errorcount ++;
         ret = -1;
-        free(packbuf);
+        free(buf);
         goto endpublish;
     }
 
-    zmq_msg_init_data(&outgoing, packbuf, packedlen, simple_free, NULL);
+    zmq_msg_init_data(&outgoing, buf, bufsize, simple_free, NULL);
     if (zmq_msg_send(&outgoing, tls->pubsock, 0) < 0) {
         corsaro_log(glob->logger,
                 "error while publishing tagged packet: %s", strerror(errno));
         tls->errorcount ++;
         ret = -1;
-        free(packbuf);
+        free(buf);
         goto endpublish;
     }
 
 endpublish:
-    for (i = 0; i < tagcount; i++) {
-        release_corsaro_memhandler_item_nolock(tls->ptag_source, ptagsrc[i]);
-    }
-    release_corsaro_memhandler_item_nolock(tls->msg_source, tpsrc);
-
     return ret;
+
 }
 
 static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
@@ -459,6 +337,7 @@ int main(int argc, char *argv[]) {
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
 
+    assert(0);
     while (1) {
         int optind;
         struct option long_options[] = {
