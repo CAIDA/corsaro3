@@ -119,6 +119,7 @@ typedef struct corsaro_packet_tags {
 } PACKED corsaro_packet_tags_t;
 
 typedef struct corsaro_tagged_packet_header {
+    uint16_t filterbits;
     uint32_t ts_sec;
     uint32_t ts_usec;
     uint16_t pktlen;

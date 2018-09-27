@@ -512,28 +512,10 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
 
     /* receive message, decode it, forward to an appropriate worker */
     zmq_msg_t zmsg;
-    zmq_msg_init(&zmsg);
-    uint16_t filttags = 1000;
     int rcvsize, i;
     char *rcvspace;
     corsaro_worker_msg_t jobmsg;
     int targetworker;
-
-    if (zmq_msg_recv(&zmsg, glob->zmq_subsock, 0) < 0) {
-        corsaro_log(glob->logger,
-                "error while receiving message from sub socket: %s",
-                strerror(errno));
-        return -1;
-    }
-
-    if (zmq_msg_size(&zmsg) != sizeof(filttags)) {
-        corsaro_log(glob->logger,
-                "unexpected item received on sub socket, was expecting filter tags");
-        return -1;
-    }
-
-    filttags = ntohs(*(uint16_t *)zmq_msg_data(&zmsg));
-    zmq_msg_close(&zmsg);
 
     zmq_msg_init(&zmsg);
     if (zmq_msg_recv(&zmsg, glob->zmq_subsock, 0) < 0) {

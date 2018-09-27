@@ -94,7 +94,7 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         tls->stopped = 1;
     }
 
-    /* TODO create zmq socket for publishing */
+    /* create zmq socket for publishing */
     tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUB);
     if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
         corsaro_log(glob->logger,
@@ -168,7 +168,6 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     corsaro_tagged_packet_header_t *hdr;
     int ret;
     size_t bufsize;
-    uint16_t tosend;
 
     pktcontents = trace_get_layer2(packet, &linktype, &rem);
     if (rem == 0 || pktcontents == NULL) {
@@ -184,6 +183,7 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     buf = malloc(bufsize);
     hdr = (corsaro_tagged_packet_header_t *)buf;
 
+    hdr->filterbits = htons(tags->highlevelfilterbits);
     hdr->ts_sec = tv.tv_sec;
     hdr->ts_usec = tv.tv_usec;
     hdr->pktlen = rem;
@@ -192,15 +192,6 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     memcpy(buf + sizeof(corsaro_tagged_packet_header_t), pktcontents, rem);
 
     ret = 0;
-    tosend = htons(tags->highlevelfilterbits);
-    if (zmq_send(tls->pubsock, &tosend, sizeof(tosend), ZMQ_SNDMORE) < 0) {
-        corsaro_log(glob->logger,
-                "error while publishing tagged packet: %s", strerror(errno));
-        tls->errorcount ++;
-        ret = -1;
-        free(buf);
-        goto endpublish;
-    }
 
     zmq_msg_init_data(&outgoing, buf, bufsize, simple_free, NULL);
     if (zmq_msg_send(&outgoing, tls->pubsock, 0) < 0) {
@@ -249,12 +240,6 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     stats = trace_create_statistics();
     trace_get_thread_statistics(trace, t, stats);
 
-/*
-    corsaro_log(glob->logger,
-            "thread %d stats: %lu seen, %lu missing, %lu dropped",
-            trace_get_perpkt_thread_id(t), stats->accepted,
-            stats->missing, stats->dropped);
-*/
     if (stats->missing > tls->lastmisscount) {
         corsaro_log(glob->logger,
                 "thread %d dropped %lu packets in last minute (accepted %lu)",
