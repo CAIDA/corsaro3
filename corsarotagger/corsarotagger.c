@@ -44,6 +44,7 @@
 #include "libcorsaro3_filtering.h"
 #include "libcorsaro3_memhandler.h"
 
+#define PROXY_RECV_SOCKNAME "inproc://taggerproxy"
 libtrace_callback_set_t *processing = NULL;
 
 volatile int corsaro_halted = 0;
@@ -111,7 +112,7 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         tls->stopped = 1;
     }
 
-    if (zmq_connect(tls->pubsock, glob->pubqueuename) != 0) {
+    if (zmq_connect(tls->pubsock, PROXY_RECV_SOCKNAME) != 0) {
         corsaro_log(glob->logger,
                 "error while connecting zeromq publisher socket in thread %d:%s",
                 threadid, strerror(errno));
@@ -253,6 +254,57 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     free(stats);
 }
 
+
+static void *start_zmq_proxy_thread(void *data) {
+    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)data;
+
+    void *proxy_recv = zmq_socket(glob->zmq_ctxt, ZMQ_XSUB);
+    void *proxy_fwd = zmq_socket(glob->zmq_ctxt, ZMQ_XPUB);
+    int zero = 0;
+
+    if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
+        corsaro_log(glob->logger,
+                "unable to configure tagger proxy recv socket: %s",
+                strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_bind(proxy_recv, PROXY_RECV_SOCKNAME) < 0) {
+        corsaro_log(glob->logger,
+                "unable to create tagger proxy recv socket: %s",
+                strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_setsockopt(proxy_fwd, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
+        corsaro_log(glob->logger,
+                "unable to configure tagger proxy forwarding socket: %s",
+                strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &zero, sizeof(zero)) != 0) {
+        corsaro_log(glob->logger,
+                "error while setting HWM for proxy forwarding socket: %s",
+                strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_bind(proxy_fwd, glob->pubqueuename) < 0) {
+        corsaro_log(glob->logger,
+                "unable to create tagger proxy forwarding socket: %s",
+                strerror(errno));
+        goto proxyexit;
+    }
+
+    zmq_proxy(proxy_recv, proxy_fwd, NULL);
+
+proxyexit:
+    zmq_close(proxy_recv);
+    zmq_close(proxy_fwd);
+    pthread_exit(NULL);
+}
+
 static int start_trace_input(corsaro_tagger_global_t *glob) {
 
     glob->trace = trace_create(glob->inputuris[glob->currenturi]);
@@ -321,6 +373,7 @@ int main(int argc, char *argv[]) {
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
+    pthread_t proxythread;
 
     assert(0);
     while (1) {
@@ -392,6 +445,8 @@ int main(int argc, char *argv[]) {
     if (glob == NULL) {
         return 1;
     }
+
+    pthread_create(&proxythread, NULL, start_zmq_proxy_thread, glob);
 
     glob->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
     if (glob->pfxtagopts.enabled) {
@@ -488,13 +543,13 @@ int main(int argc, char *argv[]) {
         glob->trace = NULL;
     }
 
-    /* Join on merging thread */
-    corsaro_log(glob->logger, "all threads have joined, exiting.");
-
     for (i = 0; i < glob->threads; i++) {
         halt_trace_processing(glob, &(glob->threaddata[i]), i);
     }
     corsaro_tagger_free_global(glob);
+
+    pthread_join(proxythread, NULL);
+    corsaro_log(glob->logger, "all threads have joined, exiting.");
 
     if (processing) {
         trace_destroy_callback_set(processing);

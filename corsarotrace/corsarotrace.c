@@ -772,7 +772,7 @@ int main(int argc, char *argv[]) {
     }
 
     glob->zmq_subsock = zmq_socket(glob->zmq_ctxt, ZMQ_SUB);
-    if (zmq_bind(glob->zmq_subsock, glob->subqueuename) < 0) {
+    if (zmq_connect(glob->zmq_subsock, glob->subqueuename) < 0) {
         corsaro_log(glob->logger,
                 "unable to bind to socket for receiving tagged packets: %s",
                 strerror(errno));
