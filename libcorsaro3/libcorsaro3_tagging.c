@@ -433,10 +433,10 @@ static int update_pfx2as_tags(corsaro_logger_t *logger,
 }
 
 static void update_basic_tags(corsaro_logger_t *logger,
-        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
+        libtrace_packet_t *packet, corsaro_packet_tags_t *tags,
+        libtrace_ip_t *ip) {
 
     void *transport;
-    libtrace_ip_t *ip;
     uint8_t proto;
     libtrace_icmp_t *icmp;
     libtrace_tcp_t *tcp;
@@ -455,11 +455,6 @@ static void update_basic_tags(corsaro_logger_t *logger,
 
     if (transport == NULL) {
         /* transport header is missing or this is an non-initial IP fragment */
-        return;
-    }
-
-    ip = trace_get_ip(packet);
-    if (!ip) {
         return;
     }
 
@@ -535,9 +530,21 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
     ipmeta_record_t *rec;
     tags->providers_used = 0;
     uint32_t numips = 0;
+    libtrace_ip_t *ip = NULL;
 
     memset(tags, 0, sizeof(corsaro_packet_tags_t));
-    update_basic_tags(tagger->logger, packet, tags);
+    tags->providers_used = 0;
+
+    if (packet == NULL) {
+        return 0;
+    }
+
+    ip = trace_get_ip(packet);
+    if (!ip) {
+        return 0;
+    }
+
+    update_basic_tags(tagger->logger, packet, tags, ip);
     update_filter_tags(tagger->logger, packet, tags);
 
     if (tagger->providers == NULL) {
@@ -550,20 +557,8 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
      * have to expand our tag structure and run the providers against the
      * dest address too.
      */
-    if (trace_get_source_address(packet, (struct sockaddr *)(&saddr)) == NULL)
-    {
-        return 0;
-    }
-
-    /* Skip IPv6 traffic for now, libipmeta probably won't like it anyway */
-    if (saddr.ss_family != AF_INET) {
-        return 0;
-    }
-
-    sin = (struct sockaddr_in *)(&saddr);
-
     ipmeta_record_set_clear(tagger->records);
-    if (ipmeta_lookup_single(tagger->ipmeta, sin->sin_addr.s_addr,
+    if (ipmeta_lookup_single(tagger->ipmeta, ip->ip_src.s_addr,
             0, tagger->records) < 0) {
         corsaro_log(tagger->logger, "error while performing ipmeta lookup");
         return -1;
