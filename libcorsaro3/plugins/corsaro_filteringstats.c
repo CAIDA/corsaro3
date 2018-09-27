@@ -310,29 +310,26 @@ void *corsaro_filteringstats_end_interval(corsaro_plugin_t *p, void *local,
 }
 
 static inline void update_counter(corsaro_filteringstats_counter_t *c,
-        libtrace_packet_t *packet) {
+        uint16_t iplen, uint32_t srcip, uint32_t destip) {
 
-    libtrace_ip_t *ip;
     int khret;
 
     c->packets ++;
-
-    ip = trace_get_ip(packet);
-    if (!ip) {
-        return;
-    }
-
-    c->bytes += ntohs(ip->ip_len);
-    kh_put(32xx, c->sourceips, ip->ip_src.s_addr, &khret);
-    kh_put(32xx, c->destips, ip->ip_dst.s_addr, &khret);
+    c->bytes += iplen;
+    kh_put(32xx, c->sourceips, srcip, &khret);
+    kh_put(32xx, c->destips, destip, &khret);
 }
 
 int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
         libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
 
     struct corsaro_filteringstats_state_t *state;
+    corsaro_filter_torun_t torun[CORSARO_FILTERID_MAX];
+    libtrace_ip_t *ip;
     int i;
     khiter_t k;
+    uint16_t iplen;
+    uint32_t srcip, destip;
 
     state = (struct corsaro_filteringstats_state_t *)local;
     if (state == NULL) {
@@ -341,11 +338,30 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
         return -1;
     }
 
+    ip = trace_get_ip(packet);
+    if (!ip) {
+        return 0;
+    }
+
+    iplen = ntohs(ip->ip_len);
+    srcip = ip->ip_src.s_addr;
+    destip = ip->ip_dst.s_addr;
+
     /* Check all built-in filters, including high-level filters */
+    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
+        torun[i].filterid = i;
+        torun[i].result = 0;
+    }
+
+    if (corsaro_apply_multiple_filters(p->logger, packet, torun,
+            CORSARO_FILTERID_MAX) < 0) {
+        return -1;
+    }
+
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
         corsaro_filteringstats_counter_t *c;
 
-        if (corsaro_apply_filter_by_id(p->logger, i, packet) <= 0) {
+        if (torun[i].result == 0) {
             continue;
         }
 
@@ -354,7 +370,7 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
             continue;
         }
         c = kh_val(state->stats, k);
-        update_counter(c, packet);
+        update_counter(c, iplen, srcip, destip);
     }
 
     /* Check all custom filters TODO */
