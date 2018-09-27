@@ -75,6 +75,15 @@ typedef struct corsaro_tagger_glob {
     corsaro_tagger_local_t *threaddata;
 } corsaro_tagger_global_t;
 
+typedef struct corsaro_tagger_buffer corsaro_tagger_buffer_t;
+
+struct corsaro_tagger_buffer {
+    uint8_t *bufspace;
+    uint16_t bufalloc;
+    corsaro_tagger_local_t *local;
+    corsaro_tagger_buffer_t *next;
+};
+
 struct corsaro_tagger_local {
     corsaro_packet_tagger_t *tagger;
     void *pubsock;
@@ -84,9 +93,9 @@ struct corsaro_tagger_local {
     uint64_t lastmisscount;
     uint64_t lastaccepted;
 
-    corsaro_memhandler_t *msg_source;
-    corsaro_memhandler_t *ptag_source;
-
+    pthread_mutex_t bufmutex;
+    corsaro_tagger_buffer_t *freebufs;
+    uint8_t fbclear;
 };
 
 

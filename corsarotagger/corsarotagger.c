@@ -66,6 +66,10 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
     tls->errorcount = 0;
     tls->lastmisscount = 0;
     tls->lastaccepted = 0;
+    tls->freebufs = NULL;
+    tls->fbclear = 0;
+
+    pthread_mutex_init(&(tls->bufmutex), NULL);
 
     if (tls->tagger == NULL) {
         corsaro_log(glob->logger,
@@ -148,12 +152,42 @@ static void halt_trace_processing(corsaro_tagger_global_t *glob,
     }
     zmq_close(tls->pubsock);
 
+    pthread_mutex_lock(&(tls->bufmutex));
+    while (tls->freebufs) {
+        corsaro_tagger_buffer_t *tmp;
+        tmp = tls->freebufs;
+        tls->freebufs = tls->freebufs->next;
+
+        free(tmp->bufspace);
+        free(tmp);
+    }
+    tls->fbclear = 1;
+    pthread_mutex_unlock(&(tls->bufmutex));
+
     corsaro_log(glob->logger, "halted packet tagging thread %d, errors=%lu",
             threadid, tls->errorcount);
 }
 
 static void simple_free(void *data, void *hint) {
     free(data);
+}
+
+static void tbuf_free(void *data, void *hint) {
+    corsaro_tagger_buffer_t *tbuf = (corsaro_tagger_buffer_t *)hint;
+
+    pthread_mutex_lock(&(tbuf->local->bufmutex));
+
+    if (tbuf->local->fbclear) {
+        free(tbuf->bufspace);
+        free(tbuf);
+    } else {
+        if (tbuf->local->freebufs) {
+            tbuf->next = tbuf->local->freebufs;
+        }
+        tbuf->local->freebufs = tbuf;
+    }
+
+    pthread_mutex_unlock(&(tbuf->local->bufmutex));
 }
 
 static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
@@ -165,10 +199,10 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     uint32_t rem;
     libtrace_linktype_t linktype;
     zmq_msg_t outgoing;
-    uint8_t *buf;
     corsaro_tagged_packet_header_t *hdr;
     int ret;
     size_t bufsize;
+    corsaro_tagger_buffer_t *tbuf = NULL;
 
     pktcontents = trace_get_layer2(packet, &linktype, &rem);
     if (rem == 0 || pktcontents == NULL) {
@@ -181,8 +215,35 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     tv = trace_get_timeval(packet);
 
     bufsize = sizeof(corsaro_tagged_packet_header_t) + rem;
-    buf = malloc(bufsize);
-    hdr = (corsaro_tagged_packet_header_t *)buf;
+
+    pthread_mutex_lock(&tls->bufmutex);
+    if (tls->freebufs) {
+        tbuf = tls->freebufs;
+        tls->freebufs = tls->freebufs->next;
+        pthread_mutex_unlock(&tls->bufmutex);
+        tbuf->next = NULL;
+    } else {
+        pthread_mutex_unlock(&tls->bufmutex);
+        tbuf = (corsaro_tagger_buffer_t *)calloc(1,
+                sizeof(corsaro_tagger_buffer_t));
+        tbuf->next = NULL;
+        tbuf->bufalloc = 0;
+        tbuf->bufspace = NULL;
+    }
+
+    if (bufsize > tbuf->bufalloc) {
+        int toalloc;
+        if (bufsize < 512) {
+            toalloc = 512;
+        } else {
+            toalloc = bufsize;
+        }
+        tbuf->bufspace = realloc(tbuf->bufspace, toalloc);
+        tbuf->bufalloc = toalloc;
+    }
+    tbuf->local = tls;
+
+    hdr = (corsaro_tagged_packet_header_t *)tbuf->bufspace;
 
     hdr->filterbits = htons(tags->highlevelfilterbits);
     hdr->ts_sec = tv.tv_sec;
@@ -190,17 +251,18 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     hdr->pktlen = rem;
     memcpy(&(hdr->tags), tags, sizeof(corsaro_packet_tags_t));
 
-    memcpy(buf + sizeof(corsaro_tagged_packet_header_t), pktcontents, rem);
+    memcpy(tbuf->bufspace + sizeof(corsaro_tagged_packet_header_t),
+            pktcontents, rem);
 
     ret = 0;
 
-    zmq_msg_init_data(&outgoing, buf, bufsize, simple_free, NULL);
+    zmq_msg_init_data(&outgoing, tbuf->bufspace, bufsize, tbuf_free, tbuf);
     if (zmq_msg_send(&outgoing, tls->pubsock, 0) < 0) {
         corsaro_log(glob->logger,
                 "error while publishing tagged packet: %s", strerror(errno));
         tls->errorcount ++;
         ret = -1;
-        free(buf);
+        tbuf_free(tbuf->bufspace, tbuf);
         goto endpublish;
     }
 
@@ -546,10 +608,9 @@ int main(int argc, char *argv[]) {
     for (i = 0; i < glob->threads; i++) {
         halt_trace_processing(glob, &(glob->threaddata[i]), i);
     }
-    corsaro_tagger_free_global(glob);
-
-    pthread_join(proxythread, NULL);
     corsaro_log(glob->logger, "all threads have joined, exiting.");
+    corsaro_tagger_free_global(glob);
+    pthread_join(proxythread, NULL);
 
     if (processing) {
         trace_destroy_callback_set(processing);
