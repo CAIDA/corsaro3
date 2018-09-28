@@ -277,8 +277,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         }
 
         tls->writer = corsaro_create_trace_writer(glob->logger,
-                tls->interimfilename, CORSARO_TRACE_COMPRESS_LEVEL,
-                CORSARO_TRACE_COMPRESS_METHOD);
+                tls->interimfilename, 1, TRACE_OPTION_COMPRESSTYPE_NONE);
         if (tls->writer == NULL) {
             corsaro_log(glob->logger,
                     "unable to open output file for wdcap");
