@@ -43,12 +43,21 @@
  */
 #define CORSARO_MAX_SUPPORTED_TAGS 16
 
+/** Each value in this enum represents a bit that can be set to indicate
+ *  whether a packet matched a filter condition or not.
+ */
 enum {
+    /** Packet matched the filter for recognising spoofed source addresses */
     CORSARO_FILTERBIT_SPOOFED = 1,
+    /** Packet matched the filter for erratic traffic types */
     CORSARO_FILTERBIT_ERRATIC = 2,
+    /** Packet match the filter for RFC 5735 addresses */
     CORSARO_FILTERBIT_NONROUTABLE = 4,
 };
 
+/** Identifiers for each of the supported built-in tags.
+ *  Each identifier should be fairly self-explanatory.
+ */
 enum {
     CORSARO_TAGID_NETACQ_REGION,
     CORSARO_TAGID_NETACQ_POLYGON,
@@ -112,17 +121,37 @@ typedef struct corsaro_packet_tags {
     /** Bitmask showing which high level filters this packet matches, i.e.
      * is it spoofed, is it erratic, is it non-routable */
     uint16_t highlevelfilterbits;
-    uint32_t ft_hash;       // hashed flowtuple id
+
+    /** The hash of the flowtuple ID for this packet -- note this is more
+     *  than just a standard 5-tuple and includes fields such as TTL,
+     *  IP length, TCP flags etc.
+     */
+    uint32_t ft_hash;
 
     /** The post-IP protocol used by the packet */
     uint8_t protocol;
 } PACKED corsaro_packet_tags_t;
 
+/** Meta-data that is sent in advance of any published packets, including
+ *  the tags that were applied to the packet.
+ */
 typedef struct corsaro_tagged_packet_header {
+    /** Bitmask showing which filters were matched by the packet.
+     *  MUST be the first field in this structure so that zeromq
+     *  subscription filtering can be applied properly.
+     */
     uint16_t filterbits;
+
+    /** The seconds portion of the packet timestamp */
     uint32_t ts_sec;
+
+    /** The microseconds portion of the packet timestamp */
     uint32_t ts_usec;
+
+    /** The length of the packet, starting from the Ethernet header */
     uint16_t pktlen;
+
+    /** The tags that were applied to this packet by the tagging module */
     corsaro_packet_tags_t tags;
 } PACKED corsaro_tagged_packet_header_t;
 
@@ -137,7 +166,8 @@ typedef struct corsaro_packet_tagger {
 
     /** List of active libipmeta providers */
     libtrace_list_t *providers;
-    libtrace_list_t *tagfreelist;
+
+    /** A record set that is used to store the results of a libipmeta lookup */
     ipmeta_record_set_t *records;
 } corsaro_packet_tagger_t;
 

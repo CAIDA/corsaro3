@@ -79,7 +79,6 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
     tagger->logger = logger;
     tagger->ipmeta = ipmeta;
     tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
-    tagger->tagfreelist = libtrace_list_init(sizeof(corsaro_packet_tags_t *));
     tagger->records = ipmeta_record_set_init();
 
     return tagger;
@@ -365,15 +364,6 @@ void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger) {
             libtrace_list_deinit(tagger->providers);
         }
 
-        if (tagger->tagfreelist) {
-            n = tagger->tagfreelist->head;
-            while (n) {
-                corsaro_packet_tags_t *tag = *(corsaro_packet_tags_t **)(n->data);
-                free(tag);
-                n = n->next;
-            }
-            libtrace_list_deinit(tagger->tagfreelist);
-        }
         if (tagger->records) {
             ipmeta_record_set_free(&tagger->records);
         }
