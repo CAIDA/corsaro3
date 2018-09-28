@@ -437,7 +437,6 @@ int main(int argc, char *argv[]) {
     libtrace_stat_t *stats;
     pthread_t proxythread;
 
-    assert(0);
     while (1) {
         int optind;
         struct option long_options[] = {
