@@ -32,7 +32,7 @@
 
 #include "libcorsaro3_log.h"
 
-#define CORSARO_TRACE_COMPRESS_LEVEL 6
+#define CORSARO_TRACE_COMPRESS_LEVEL 1
 #define CORSARO_TRACE_COMPRESS_METHOD  TRACE_OPTION_COMPRESSTYPE_ZLIB
 
 libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
