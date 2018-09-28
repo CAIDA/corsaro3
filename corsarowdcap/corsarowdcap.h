@@ -33,6 +33,16 @@
 #include "libcorsaro3_log.h"
 #include "libcorsaro3.h"
 
+enum {
+    CORSARO_WDCAP_MSG_INTERVAL_DONE,
+    CORSARO_WDCAP_MSG_STOP,
+};
+
+typedef struct corsaro_wdcap_message {
+    uint8_t type;
+    uint32_t timestamp;
+} corsaro_wdcap_message_t;
+
 typedef struct corsaro_wdcap_local corsaro_wdcap_local_t;
 
 typedef struct corsaro_wdcap_global {
@@ -49,10 +59,25 @@ typedef struct corsaro_wdcap_global {
     char *template;
     char *fileformat;
     uint8_t stripvlans;
+    void *zmq_ctxt;
+    void *zmq_pushsock;
 
     corsaro_wdcap_local_t *threaddata;
-
 } corsaro_wdcap_global_t;
+
+typedef struct corsaro_wdcap_interim_reader {
+    libtrace_t *source;
+    libtrace_packet_t *nextp;
+    uint64_t nextp_ts;
+    int status;
+} corsaro_wdcap_interim_reader_t;
+
+typedef struct corsaro_wdcap_merger {
+    libtrace_out_t *writer;
+    corsaro_wdcap_interim_reader_t *readers;
+
+    void *zmq_pullsock;
+} corsaro_wdcap_merger_t;
 
 struct corsaro_wdcap_local {
     libtrace_out_t *writer;
@@ -63,6 +88,8 @@ struct corsaro_wdcap_local {
     corsaro_interval_t current_interval;
     uint32_t next_report;
     uint32_t last_ts;
+
+    void *zmq_pushsock;
 
     uint64_t lastmisscount;
     uint64_t lastaccepted;

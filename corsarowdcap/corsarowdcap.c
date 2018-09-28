@@ -34,12 +34,15 @@
 #include <getopt.h>
 #include <errno.h>
 
+#include <zmq.h>
 #include <libtrace.h>
 #include <libtrace_parallel.h>
 
 #include "corsarowdcap.h"
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_trace.h"
+
+#define CORSARO_WDCAP_INTERNAL_QUEUE "inproc://wdcapinternal"
 
 libtrace_callback_set_t *processing = NULL;
 volatile int corsaro_halted = 0;
@@ -331,6 +334,51 @@ static int start_trace_input(corsaro_wdcap_global_t *glob) {
     return 0;
 }
 
+static void *start_merging_thread(void *data) {
+	corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)data;
+	corsaro_wdcap_merger_t mergestate;
+	corsaro_wdcap_message_t msg;
+	int zero = 0;
+
+    mergestate.writer = NULL;
+	mergestate.readers = calloc(glob->threads,
+			sizeof(corsaro_wdcap_interim_reader_t));
+
+	mergestate.zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
+	if (zmq_setsockopt(mergestate.zmq_pullsock, ZMQ_LINGER, &zero,
+			sizeof(zero)) < 0) {
+		corsaro_log(glob->logger,
+				"error configuring pull socket for wdcap merge thread: %s",
+				strerror(errno));
+		goto mergeover;
+	}
+
+	if (zmq_bind(mergestate.zmq_pullsock, CORSARO_WDCAP_INTERNAL_QUEUE) < 0) {
+		corsaro_log(glob->logger,
+				"error binding pull socket for wdcap merge thread: %s",
+				strerror(errno));
+		goto mergeover;
+	}
+
+	while (1) {
+		if (zmq_recv(mergestate.zmq_pullsock, &msg, sizeof(msg), 0) < 0) {
+			corsaro_log(glob->logger,
+				"error receiving message on wdcap merge socket: %s",
+				strerror(errno));
+			break;
+		}
+
+        if (msg.type == CORSARO_WDCAP_MSG_STOP) {
+            break;
+        } else if (msg.type == CORSARO_WDCAP_MSG_INTERVAL_DONE) {
+            /* TODO */
+        }
+    }
+
+mergeover:
+	zmq_close(mergestate.zmq_pullsock);
+	pthread_exit(NULL);
+}
 
 int main(int argc, char *argv[]) {
     char *configfile = NULL;
@@ -340,7 +388,9 @@ int main(int argc, char *argv[]) {
 	struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
-	int i;
+	int i, zero=0;
+	pthread_t mergetid;
+    corsaro_wdcap_message_t haltmsg;
 
 	while (1) {
         int optind;
@@ -411,6 +461,27 @@ int main(int argc, char *argv[]) {
 	if (glob == NULL) {
         return 1;
     }
+	glob->zmq_ctxt = zmq_ctx_new();
+
+	glob->zmq_pushsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
+	if (zmq_setsockopt(glob->zmq_pushsock, ZMQ_LINGER, &zero,
+			sizeof(zero)) < 0) {
+		corsaro_log(glob->logger,
+				"error configuring push socket for wdcap main thread: %s",
+				strerror(errno));
+        glob->zmq_pushsock = NULL;
+		goto endwdcap;
+	}
+
+	if (zmq_connect(glob->zmq_pushsock, CORSARO_WDCAP_INTERNAL_QUEUE) < 0) {
+		corsaro_log(glob->logger,
+				"error connecting push socket for wdcap main thread: %s",
+				strerror(errno));
+        glob->zmq_pushsock = NULL;
+		goto endwdcap;
+	}
+
+	pthread_create(&mergetid, NULL, start_merging_thread, glob);
 
 	glob->threaddata = calloc(glob->threads, sizeof(corsaro_wdcap_local_t));
 
@@ -448,13 +519,28 @@ int main(int argc, char *argv[]) {
 	glob->trace = NULL;
 
 endwdcap:
+    if (glob->zmq_pushsock) {
+        haltmsg.type = CORSARO_WDCAP_MSG_STOP;
+        if (zmq_send(glob->zmq_pushsock, &haltmsg, sizeof(haltmsg), 0) < 0) {
+            corsaro_log(glob->logger,
+                    "error sending halt message to merge thread: %s",
+                    strerror(errno));
+        }
+    }
+
 	for (i = 0; i < glob->threads; i++) {
 		clear_wdcap_thread_data(&(glob->threaddata[i]));
 	}
 
+    zmq_close(glob->zmq_pushsock);
+	zmq_ctx_destroy(glob->zmq_ctxt);
+
 	free(glob->threaddata);
+	pthread_join(mergetid, NULL);
 	corsaro_log(glob->logger, "all threads have joined, exiting.");
+
 	corsaro_wdcap_free_global(glob);
+
 
 	if (processing) {
 		trace_destroy_callback_set(processing);
