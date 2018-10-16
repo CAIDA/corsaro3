@@ -66,7 +66,7 @@ static char *stradd(const char *str, char *bufp, char *buflim) {
     return bufp;
 }
 
-static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_local_t *tls,
+static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
         uint32_t timestamp, int threadid) {
 
     /* Adapted from libwdcap but slightly modified to fit corsaro
@@ -80,8 +80,8 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_local_t *tls,
     char *ptr, *w, *end;
     struct timeval tv;
 
-    if (tls->glob->fileformat) {
-        format = tls->glob->fileformat;
+    if (glob->fileformat) {
+        format = glob->fileformat;
     } else {
         format = (char *)"pcapfile";
     }
@@ -93,7 +93,7 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_local_t *tls,
     }
 
     end = scratch + sizeof(scratch);
-    ptr = tls->glob->template;
+    ptr = glob->template;
 
     /* Pre-pend the format */
     w = stradd(format, scratch, end);
@@ -108,8 +108,8 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_local_t *tls,
                     break;
                 case CORSARO_IO_MONITOR_PATTERN:
                     /* monitor name */
-                    if (tls->glob->monitorid) {
-                        w = stradd(tls->glob->monitorid, w, end);
+                    if (glob->monitorid) {
+                        w = stradd(glob->monitorid, w, end);
                     }
                     continue;
                 case CORSARO_IO_PLUGIN_PATTERN:
@@ -132,14 +132,6 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_local_t *tls,
             break;
         *w++ = *ptr;
     }
-
-    if (w >= end) {
-        /* Not enough space for the full filename */
-        return NULL;
-    }
-
-    /* Attach a suitable file extension if the file is compressed */
-    w = stradd(".gz", w, end);
 
     if (w >= end) {
         /* Not enough space for the full filename */
@@ -178,6 +170,8 @@ static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 	tls->last_ts = 0;
 	tls->next_report = 0;
 	tls->current_interval.time = 0;
+    tls->zmq_pushsock = NULL;
+
 }
 
 static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
@@ -185,15 +179,41 @@ static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
 	if (tls->writer) {
 		trace_destroy_output(tls->writer);
 	}
+    if (tls->zmq_pushsock) {
+        zmq_close(tls->zmq_pushsock);
+    }
 }
 
 static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global) {
     corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)global;
     corsaro_wdcap_local_t *tls;
+    int zero = 0;
 
     tls = &(glob->threaddata[trace_get_perpkt_thread_id(t)]);
 
+    tls->zmq_pushsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
+	if (zmq_setsockopt(tls->zmq_pushsock, ZMQ_LINGER, &zero,
+			sizeof(zero)) < 0) {
+		corsaro_log(glob->logger,
+				"error configuring push socket for wdcap processing thread: %s",
+				strerror(errno));
+		goto initfail;
+	}
+
+	if (zmq_connect(tls->zmq_pushsock, CORSARO_WDCAP_INTERNAL_QUEUE) < 0) {
+		corsaro_log(glob->logger,
+				"error binding push socket for wdcap processing thread: %s",
+				strerror(errno));
+		goto initfail;
+	}
+
+    return tls;
+
+initfail:
+    zmq_close(tls->zmq_pushsock);
+    tls->zmq_pushsock = NULL;
+    corsaro_halted = 1;
     return tls;
 }
 
@@ -226,6 +246,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)global;
     corsaro_wdcap_local_t *tls = (corsaro_wdcap_local_t *)local;
     struct timeval ptv;
+    corsaro_wdcap_message_t mergemsg;
 
 	if (tls->current_interval.time == 0) {
 		const libtrace_packet_t *first;
@@ -261,7 +282,16 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         }
 
         /* tell merger that we've reached the end of the interval TODO */
+        mergemsg.type = CORSARO_WDCAP_MSG_INTERVAL_DONE;
+        mergemsg.timestamp = tls->current_interval.time;
 
+        if (zmq_send(tls->zmq_pushsock, &mergemsg, sizeof(mergemsg), 0) < 0) {
+            corsaro_log(glob->logger,
+                    "error sending interval over message to merging thread: %s",
+                    strerror(errno));
+            corsaro_halted = 1;
+            return packet;
+        }
 
 		tls->current_interval.number ++;
 		tls->current_interval.time = tls->next_report;
@@ -269,7 +299,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     if (tls->writer == NULL) {
-        tls->interimfilename = corsaro_wdcap_derive_output_name(tls,
+        tls->interimfilename = corsaro_wdcap_derive_output_name(tls->glob,
                 tls->current_interval.time,
                 trace_get_perpkt_thread_id(t));
         if (tls->interimfilename == NULL) {
@@ -334,6 +364,184 @@ static int start_trace_input(corsaro_wdcap_global_t *glob) {
     return 0;
 }
 
+static int choose_next_merge_packet(corsaro_wdcap_merger_t *mergestate,
+        int inpcount, corsaro_logger_t *logger) {
+
+    int i, candind = -1;
+
+    /* XXX naive method -- if performance is an issue, consider maintaining
+     * a sorted list/map of packet timestamps instead which will reduce
+     * the number of comparisons we do (on average)
+     */
+
+    for (i = 0; i < inpcount; i++) {
+        if (mergestate->readers[i].status == CORSARO_WDCAP_INTERIM_EOF) {
+            continue;
+        }
+
+        if (mergestate->readers[i].status == CORSARO_WDCAP_INTERIM_NOPACKET) {
+            int ret = corsaro_read_next_packet(logger,
+                    mergestate->readers[i].source,
+                    mergestate->readers[i].nextp);
+            if (ret <= 0) {
+                mergestate->readers[i].status = CORSARO_WDCAP_INTERIM_EOF;
+                continue;
+            }
+            mergestate->readers[i].nextp_ts = trace_get_erf_timestamp(
+                    mergestate->readers[i].nextp);
+            mergestate->readers[i].status = CORSARO_WDCAP_INTERIM_PACKET;
+        }
+
+        if (candind == -1) {
+            candind = i;
+            continue;
+        }
+
+        if (mergestate->readers[i].nextp_ts <
+                mergestate->readers[candind].nextp_ts) {
+            candind = i;
+        }
+
+    }
+
+    return candind;
+}
+
+
+static int write_merged_output(corsaro_wdcap_global_t *glob,
+        corsaro_wdcap_merger_t *mergestate, uint32_t timestamp) {
+
+    int candind, i, ret = 0;
+    char *outname = NULL;
+
+    corsaro_log(glob->logger, "corsarowdcap started merging for %u",
+            timestamp);
+
+    for (i = 0; i < glob->threads; i++) {
+        mergestate->readers[i].uri = corsaro_wdcap_derive_output_name(glob,
+                timestamp, i);
+        mergestate->readers[i].source = corsaro_create_trace_reader(
+                glob->logger, mergestate->readers[i].uri);
+        if (mergestate->readers[i].source == NULL) {
+            mergestate->readers[i].nextp = NULL;
+            mergestate->readers[i].nextp_ts = (uint64_t)-1;
+            mergestate->readers[i].status = CORSARO_WDCAP_INTERIM_EOF;
+        } else {
+            mergestate->readers[i].nextp = trace_create_packet();
+            mergestate->readers[i].nextp_ts = (uint64_t)-1;
+            mergestate->readers[i].status = CORSARO_WDCAP_INTERIM_NOPACKET;
+
+            if (mergestate->readers[i].nextp == NULL) {
+                ret = -1;
+                goto fail;
+            }
+        }
+    }
+
+    outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1);
+    mergestate->writer = corsaro_create_trace_writer(glob->logger,
+            outname, CORSARO_TRACE_COMPRESS_LEVEL,
+            TRACE_OPTION_COMPRESSTYPE_NONE);
+    free(outname);
+    if (mergestate->writer == NULL) {
+        ret = -1;
+        goto fail;
+    }
+
+    do {
+        candind = choose_next_merge_packet(mergestate, glob->threads,
+                glob->logger);
+        if (candind == -1) {
+            break;
+        }
+        if (corsaro_write_packet(glob->logger, mergestate->writer,
+                mergestate->readers[candind].nextp) < 0) {
+            ret = -1;
+            goto fail;
+        }
+        mergestate->readers[candind].status = CORSARO_WDCAP_INTERIM_NOPACKET;
+    } while (candind != -1);
+
+fail:
+    if (mergestate->writer) {
+        corsaro_destroy_trace_writer(mergestate->writer);
+        mergestate->writer = NULL;
+    }
+
+    for (i = 0; i < glob->threads; i++) {
+        if (mergestate->readers[i].nextp) {
+            trace_destroy_packet(mergestate->readers[i].nextp);
+        }
+        if (mergestate->readers[i].source) {
+            char *tok, *uri;
+            corsaro_destroy_trace_reader(mergestate->readers[i].source);
+            uri = mergestate->readers[i].uri;
+
+            tok = strchr(uri, ':');
+            if (tok == NULL) {
+                tok = uri;
+            } else {
+                tok ++;
+            }
+            remove(tok);
+        }
+        free(mergestate->readers[i].uri);
+    }
+
+    corsaro_log(glob->logger, "corsarowdcap completed merging for %u",
+            timestamp);
+    return ret;
+}
+
+static int merge_finished_interval(corsaro_wdcap_global_t *glob,
+        corsaro_wdcap_merger_t *mergestate, uint32_t timestamp) {
+
+    corsaro_wdcap_interval_t *fin = mergestate->waiting;
+    corsaro_wdcap_interval_t *prev = NULL;
+
+    if (glob->threads == 1) {
+        write_merged_output(glob, mergestate, timestamp);
+        return 0;
+    }
+
+    while (fin != NULL) {
+        if (fin->timestamp == timestamp) {
+            break;
+        }
+        prev = fin;
+        fin = fin->next;
+    }
+
+    if (fin == NULL) {
+        fin = (corsaro_wdcap_interval_t *)malloc(
+                sizeof(corsaro_wdcap_interval_t));
+        fin->timestamp = timestamp;
+        fin->threads_done = 1;
+        fin->next = NULL;
+
+        if (prev) {
+            prev->next = fin;
+        } else {
+            mergestate->waiting = fin;
+        }
+    } else {
+        fin->threads_done ++;
+
+        if (fin->threads_done == glob->threads) {
+            if (fin != mergestate->waiting) {
+                corsaro_log(glob->logger, "Warning: corsarowdcap has completed an interval out of order (missing %u, got %u)",
+                        mergestate->waiting->timestamp, timestamp);
+            }
+            write_merged_output(glob, mergestate, timestamp);
+            mergestate->waiting = fin->next;
+            free(fin);
+        }
+    }
+
+    return 0;
+
+}
+
 static void *start_merging_thread(void *data) {
 	corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)data;
 	corsaro_wdcap_merger_t mergestate;
@@ -344,22 +552,10 @@ static void *start_merging_thread(void *data) {
 	mergestate.readers = calloc(glob->threads,
 			sizeof(corsaro_wdcap_interim_reader_t));
 
-	mergestate.zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-	if (zmq_setsockopt(mergestate.zmq_pullsock, ZMQ_LINGER, &zero,
-			sizeof(zero)) < 0) {
-		corsaro_log(glob->logger,
-				"error configuring pull socket for wdcap merge thread: %s",
-				strerror(errno));
-		goto mergeover;
-	}
+    mergestate.waiting = NULL;
+	mergestate.zmq_pullsock = glob->zmq_pullsock;
 
-	if (zmq_bind(mergestate.zmq_pullsock, CORSARO_WDCAP_INTERNAL_QUEUE) < 0) {
-		corsaro_log(glob->logger,
-				"error binding pull socket for wdcap merge thread: %s",
-				strerror(errno));
-		goto mergeover;
-	}
-
+    corsaro_log(glob->logger, "wdcap merging thread is active");
 	while (1) {
 		if (zmq_recv(mergestate.zmq_pullsock, &msg, sizeof(msg), 0) < 0) {
 			corsaro_log(glob->logger,
@@ -371,12 +567,23 @@ static void *start_merging_thread(void *data) {
         if (msg.type == CORSARO_WDCAP_MSG_STOP) {
             break;
         } else if (msg.type == CORSARO_WDCAP_MSG_INTERVAL_DONE) {
-            /* TODO */
+            merge_finished_interval(glob, &mergestate, msg.timestamp);
+        } else {
+            printf("%d\n", msg.type);
+            exit(0);
         }
     }
 
 mergeover:
-	zmq_close(mergestate.zmq_pullsock);
+
+    while (mergestate.waiting) {
+        corsaro_wdcap_interval_t *fin = mergestate.waiting;
+
+        mergestate.waiting = fin->next;
+        free(fin);
+    }
+
+    free(mergestate.readers);
 	pthread_exit(NULL);
 }
 
@@ -463,12 +670,32 @@ int main(int argc, char *argv[]) {
     }
 	glob->zmq_ctxt = zmq_ctx_new();
 
+	glob->zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
+	if (zmq_setsockopt(glob->zmq_pullsock, ZMQ_LINGER, &zero,
+			sizeof(zero)) < 0) {
+		corsaro_log(glob->logger,
+				"error configuring pull socket for wdcap merge thread: %s",
+				strerror(errno));
+        zmq_close(glob->zmq_pullsock);
+        glob->zmq_pullsock = NULL;
+		goto endwdcap;
+	}
+
+	if (zmq_bind(glob->zmq_pullsock, CORSARO_WDCAP_INTERNAL_QUEUE) < 0) {
+		corsaro_log(glob->logger,
+				"error connecting pull socket for wdcap merge thread: %s",
+				strerror(errno));
+        glob->zmq_pullsock = NULL;
+		goto endwdcap;
+	}
+
 	glob->zmq_pushsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
 	if (zmq_setsockopt(glob->zmq_pushsock, ZMQ_LINGER, &zero,
 			sizeof(zero)) < 0) {
 		corsaro_log(glob->logger,
 				"error configuring push socket for wdcap main thread: %s",
 				strerror(errno));
+        zmq_close(glob->zmq_pushsock);
         glob->zmq_pushsock = NULL;
 		goto endwdcap;
 	}
@@ -477,6 +704,7 @@ int main(int argc, char *argv[]) {
 		corsaro_log(glob->logger,
 				"error connecting push socket for wdcap main thread: %s",
 				strerror(errno));
+        zmq_close(glob->zmq_pushsock);
         glob->zmq_pushsock = NULL;
 		goto endwdcap;
 	}
@@ -526,19 +754,23 @@ endwdcap:
                     "error sending halt message to merge thread: %s",
                     strerror(errno));
         }
+        zmq_close(glob->zmq_pushsock);
     }
 
 	for (i = 0; i < glob->threads; i++) {
 		clear_wdcap_thread_data(&(glob->threaddata[i]));
 	}
 
-    zmq_close(glob->zmq_pushsock);
-	zmq_ctx_destroy(glob->zmq_ctxt);
 
 	free(glob->threaddata);
 	pthread_join(mergetid, NULL);
 	corsaro_log(glob->logger, "all threads have joined, exiting.");
 
+    if (glob->zmq_pullsock) {
+        zmq_close(glob->zmq_pullsock);
+    }
+
+	zmq_ctx_destroy(glob->zmq_ctxt);
 	corsaro_wdcap_free_global(glob);
 
 

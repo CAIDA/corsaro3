@@ -38,10 +38,25 @@ enum {
     CORSARO_WDCAP_MSG_STOP,
 };
 
+enum {
+    CORSARO_WDCAP_INTERIM_NOPACKET = 0,
+    CORSARO_WDCAP_INTERIM_PACKET = 1,
+    CORSARO_WDCAP_INTERIM_EOF = 2
+};
+
+
 typedef struct corsaro_wdcap_message {
     uint8_t type;
     uint32_t timestamp;
 } corsaro_wdcap_message_t;
+
+typedef struct corsaro_wdcap_interval corsaro_wdcap_interval_t;
+
+struct corsaro_wdcap_interval {
+    uint32_t timestamp;
+    uint8_t threads_done;
+    corsaro_wdcap_interval_t *next;
+};
 
 typedef struct corsaro_wdcap_local corsaro_wdcap_local_t;
 
@@ -54,18 +69,19 @@ typedef struct corsaro_wdcap_global {
     uint8_t logmode;
     uint8_t threads;
     uint32_t interval;
-    uint32_t rotatefreq;
     char *monitorid;
     char *template;
     char *fileformat;
     uint8_t stripvlans;
     void *zmq_ctxt;
     void *zmq_pushsock;
+    void *zmq_pullsock;
 
     corsaro_wdcap_local_t *threaddata;
 } corsaro_wdcap_global_t;
 
 typedef struct corsaro_wdcap_interim_reader {
+    char *uri;
     libtrace_t *source;
     libtrace_packet_t *nextp;
     uint64_t nextp_ts;
@@ -76,6 +92,7 @@ typedef struct corsaro_wdcap_merger {
     libtrace_out_t *writer;
     corsaro_wdcap_interim_reader_t *readers;
 
+    corsaro_wdcap_interval_t *waiting;
     void *zmq_pullsock;
 } corsaro_wdcap_merger_t;
 
