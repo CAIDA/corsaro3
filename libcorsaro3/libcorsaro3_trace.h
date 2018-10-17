@@ -29,23 +29,33 @@
 #define LIBCORSARO_TRACE_H_
 
 #include <libtrace.h>
+#include <wandio.h>
 
 #include "libcorsaro3_log.h"
 
 #define CORSARO_TRACE_COMPRESS_LEVEL 1
 #define CORSARO_TRACE_COMPRESS_METHOD  TRACE_OPTION_COMPRESSTYPE_ZLIB
 
+typedef struct corsaro_fast_trace_writer {
+    iow_t *io;
+} corsaro_fast_trace_writer_t;
+
 libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
         char *tracename);
 libtrace_out_t *corsaro_create_trace_writer(corsaro_logger_t *logger,
         char *tracename, int level, trace_option_compresstype_t method);
+corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer(
+        corsaro_logger_t *logger, char *filename);
 void corsaro_destroy_trace_reader(libtrace_t *trace);
 void corsaro_destroy_trace_writer(libtrace_out_t *trace);
+void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer);
 int corsaro_read_next_packet(corsaro_logger_t *logger,
         libtrace_t *trace, libtrace_packet_t *packet);
 int corsaro_write_packet(corsaro_logger_t *logger,
         libtrace_out_t *trace, libtrace_packet_t *packet);
 
+int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
+        corsaro_fast_trace_writer_t *writer, libtrace_packet_t *packet);
 #endif
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -67,7 +67,7 @@ static char *stradd(const char *str, char *bufp, char *buflim) {
 }
 
 static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
-        uint32_t timestamp, int threadid) {
+        uint32_t timestamp, int threadid, int needformat) {
 
     /* Adapted from libwdcap but slightly modified to fit corsaro
      * environment and templating format.
@@ -95,9 +95,13 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
     end = scratch + sizeof(scratch);
     ptr = glob->template;
 
-    /* Pre-pend the format */
-    w = stradd(format, scratch, end);
-    *w++ = ':';
+    if (needformat) {
+        /* Pre-pend the format */
+        w = stradd(format, scratch, end);
+        *w++ = ':';
+    } else {
+        w = scratch;
+    }
 
     for (; *ptr; ++ptr) {
         if (*ptr == '%') {
@@ -177,7 +181,7 @@ static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
 
 	if (tls->writer) {
-		trace_destroy_output(tls->writer);
+		corsaro_destroy_fast_trace_writer(tls->writer);
 	}
     if (tls->zmq_pushsock) {
         zmq_close(tls->zmq_pushsock);
@@ -248,6 +252,8 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     struct timeval ptv;
     corsaro_wdcap_message_t mergemsg;
 
+    int testflag = 0;
+
 	if (tls->current_interval.time == 0) {
 		const libtrace_packet_t *first;
 		const struct timeval *firsttv;
@@ -277,7 +283,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     while (tls->next_report && ptv.tv_sec >= tls->next_report) {
         if (tls->writer) {
-            corsaro_destroy_trace_writer(tls->writer);
+            corsaro_destroy_fast_trace_writer(tls->writer);
             tls->writer = NULL;
         }
 
@@ -301,7 +307,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     if (tls->writer == NULL) {
         tls->interimfilename = corsaro_wdcap_derive_output_name(tls->glob,
                 tls->current_interval.time,
-                trace_get_perpkt_thread_id(t));
+                trace_get_perpkt_thread_id(t), 0);
         if (tls->interimfilename == NULL) {
             corsaro_log(glob->logger,
                     "unable to create suitable output file name for wdcap");
@@ -309,14 +315,15 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
             return packet;
         }
 
-        tls->writer = corsaro_create_trace_writer(glob->logger,
-                tls->interimfilename, 1, TRACE_OPTION_COMPRESSTYPE_NONE);
+        tls->writer = corsaro_create_fast_trace_writer(glob->logger,
+                tls->interimfilename);
         if (tls->writer == NULL) {
             corsaro_log(glob->logger,
                     "unable to open output file for wdcap");
             corsaro_halted = 1;
             return packet;
         }
+        testflag = 1;
     }
 
 	if (glob->stripvlans == CORSARO_WDCAP_STRIP_VLANS_ON) {
@@ -324,7 +331,8 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 	}
 
 	tls->last_ts = ptv.tv_sec;
-	if (corsaro_write_packet(glob->logger, tls->writer, packet) < 0) {
+	if (corsaro_fast_write_erf_packet(glob->logger, tls->writer,
+            packet) < 0) {
 		corsaro_halted = 1;
 	}
 
@@ -414,12 +422,9 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
     int candind, i, ret = 0;
     char *outname = NULL;
 
-    corsaro_log(glob->logger, "corsarowdcap started merging for %u",
-            timestamp);
-
     for (i = 0; i < glob->threads; i++) {
         mergestate->readers[i].uri = corsaro_wdcap_derive_output_name(glob,
-                timestamp, i);
+                timestamp, i, 1);
         mergestate->readers[i].source = corsaro_create_trace_reader(
                 glob->logger, mergestate->readers[i].uri);
         if (mergestate->readers[i].source == NULL) {
@@ -438,7 +443,7 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
         }
     }
 
-    outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1);
+    outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 1);
     mergestate->writer = corsaro_create_trace_writer(glob->logger,
             outname, CORSARO_TRACE_COMPRESS_LEVEL,
             TRACE_OPTION_COMPRESSTYPE_NONE);
@@ -488,8 +493,6 @@ fail:
         free(mergestate->readers[i].uri);
     }
 
-    corsaro_log(glob->logger, "corsarowdcap completed merging for %u",
-            timestamp);
     return ret;
 }
 
@@ -598,6 +601,11 @@ int main(int argc, char *argv[]) {
 	int i, zero=0;
 	pthread_t mergetid;
     corsaro_wdcap_message_t haltmsg;
+
+    if (setenv("LIBTRACEIO", "nothreads", 1) != 0) {
+        fprintf(stderr, "corsarowdcap: unable to set libwandio environment");
+        return -1;
+    }
 
 	while (1) {
         int optind;

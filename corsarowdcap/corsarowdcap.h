@@ -97,7 +97,7 @@ typedef struct corsaro_wdcap_merger {
 } corsaro_wdcap_merger_t;
 
 struct corsaro_wdcap_local {
-    libtrace_out_t *writer;
+    corsaro_fast_trace_writer_t *writer;
     pthread_t tid;
     uint32_t interval_start_ts;
     char *interimfilename;
