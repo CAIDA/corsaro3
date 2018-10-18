@@ -42,7 +42,7 @@
 #include "libcorsaro3_trace.h"
 
 #define FAST_WRITER_BUFFER_SIZE (50 * 1024 * 1024)
-#define MIN_WRITE_TRIGGER (1 * 1024 * 1024)
+#define MIN_WRITE_TRIGGER (10 * 1024 * 1024)
 
 #define THISBUF(w) (w->whichbuf)
 #define OTHERBUF(w) (w->whichbuf == 0 ? 1 : 0)
@@ -175,14 +175,15 @@ corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer(
 
     corsaro_fast_trace_writer_t *writer;
     struct pcapfile_header_t filehdr;
-    uid_t userid;
-    gid_t groupid;
+    uid_t userid = 0;
+    gid_t groupid = 0;
     char *sudoenv = NULL;
 
     writer = (corsaro_fast_trace_writer_t *)calloc(1,
             sizeof(corsaro_fast_trace_writer_t));
 
-    writer->io_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    writer->io_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND,
+            0666);
 
     sudoenv = getenv("SUDO_UID");
     if (sudoenv != NULL) {
@@ -391,6 +392,7 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
     memcpy(writer->localbuf[THISBUF(writer)] + writer->offset[THISBUF(writer)],
             packet->payload, pcaphdr->caplen);
 
+    writer->offset[THISBUF(writer)] += pcaphdr->caplen;
     if (writer->waiting || writer->offset[THISBUF(writer)] < MIN_WRITE_TRIGGER) {
         return 1;
     }
