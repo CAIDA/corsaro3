@@ -283,6 +283,12 @@ void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
         schedule_aiowrite(writer, logger);
     }
 
+    while (writer->waiting) {
+        if (check_aiowrite_status(writer, logger) == 0) {
+            usleep(100);
+        }
+    }
+
     close(writer->io_fd);
     if (writer->localbuf[0]) {
         free(writer->localbuf[0]);
