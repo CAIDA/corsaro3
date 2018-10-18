@@ -28,6 +28,8 @@
 #ifndef LIBCORSARO_TRACE_H_
 #define LIBCORSARO_TRACE_H_
 
+#include <aio.h>
+
 #include <libtrace.h>
 #include <wandio.h>
 
@@ -36,8 +38,39 @@
 #define CORSARO_TRACE_COMPRESS_LEVEL 1
 #define CORSARO_TRACE_COMPRESS_METHOD  TRACE_OPTION_COMPRESSTYPE_ZLIB
 
+/* IO Priority API -- allows us to tweak IO priority for threads */
+#define IOPRIO_BITS (16)
+#define IOPRIO_CLASS_SHIFT (13)
+#define IOPRIO_PRIO_MASK ((1UL << IOPRIO_CLASS_SHIFT) - 1)
+
+#define IOPRIO_PRIO_CLASS(mask) ((mask) >> IOPRIO_CLASS_SHIFT)
+#define IOPRIO_PRIO_DATA(mask) ((mask) & IOPRIO_PRIO_MASK)
+#define IOPRIO_PRIO_VALUE(class, data) (((class) << IOPRIO_CLASS_SHIFT) | data)
+
+enum {
+    IOPRIO_CLASS_NONE,
+    IOPRIO_CLASS_RT,
+    IOPRIO_CLASS_BE,
+    IOPRIO_CLASS_IDLE
+};
+
+enum {
+    IOPRIO_WHO_PROCESS = 1,
+    IOPRIO_WHO_PGRP,
+    IOPRIO_WHO_USER
+};
+
+
 typedef struct corsaro_fast_trace_writer {
-    iow_t *io;
+    int io_fd;
+    int whichbuf;
+    int waiting;
+
+    struct aiocb aio[2];
+    char *localbuf[2];
+    int offset[2];
+    int bufsize[2];
+
 } corsaro_fast_trace_writer_t;
 
 libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
@@ -48,7 +81,8 @@ corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer(
         corsaro_logger_t *logger, char *filename);
 void corsaro_destroy_trace_reader(libtrace_t *trace);
 void corsaro_destroy_trace_writer(libtrace_out_t *trace);
-void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer);
+void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
+        corsaro_logger_t *logger);
 int corsaro_read_next_packet(corsaro_logger_t *logger,
         libtrace_t *trace, libtrace_packet_t *packet);
 int corsaro_write_packet(corsaro_logger_t *logger,
@@ -56,6 +90,9 @@ int corsaro_write_packet(corsaro_logger_t *logger,
 
 int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
         corsaro_fast_trace_writer_t *writer, libtrace_packet_t *packet);
+
+int corsaro_set_lowest_io_priority(void);
+int corsaro_set_highest_io_priority(void);
 #endif
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -181,7 +181,7 @@ static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
 
 	if (tls->writer) {
-		corsaro_destroy_fast_trace_writer(tls->writer);
+		corsaro_destroy_fast_trace_writer(tls->writer, tls->glob->logger);
 	}
     if (tls->zmq_pushsock) {
         zmq_close(tls->zmq_pushsock);
@@ -212,6 +212,8 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
 		goto initfail;
 	}
 
+    //corsaro_set_highest_io_priority();
+
     return tls;
 
 initfail:
@@ -233,7 +235,7 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
 
     if (stats->missing > tls->lastmisscount) {
         corsaro_log(glob->logger,
-                "thread %d dropped %lu packets in last minute (accepted %lu)",
+                "thread %d dropped %lu packets in last second (accepted %lu)",
                 trace_get_perpkt_thread_id(t),
                 stats->missing - tls->lastmisscount,
                 stats->accepted - tls->lastaccepted);
@@ -283,7 +285,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     while (tls->next_report && ptv.tv_sec >= tls->next_report) {
         if (tls->writer) {
-            corsaro_destroy_fast_trace_writer(tls->writer);
+            corsaro_destroy_fast_trace_writer(tls->writer, glob->logger);
             tls->writer = NULL;
         }
 
@@ -350,7 +352,7 @@ static int start_trace_input(corsaro_wdcap_global_t *glob) {
     }
 
     trace_set_perpkt_threads(glob->trace, glob->threads);
-    trace_set_tick_interval(glob->trace, 60 * 1000);
+    trace_set_tick_interval(glob->trace, 1000);
 
     if (!processing) {
         processing = trace_create_callback_set();
@@ -442,6 +444,8 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
             }
         }
     }
+
+    goto fail;
 
     outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 1);
     mergestate->writer = corsaro_create_trace_writer(glob->logger,
@@ -558,6 +562,7 @@ static void *start_merging_thread(void *data) {
     mergestate.waiting = NULL;
 	mergestate.zmq_pullsock = glob->zmq_pullsock;
 
+    //corsaro_set_lowest_io_priority();
     corsaro_log(glob->logger, "wdcap merging thread is active");
 	while (1) {
 		if (zmq_recv(mergestate.zmq_pullsock, &msg, sizeof(msg), 0) < 0) {
