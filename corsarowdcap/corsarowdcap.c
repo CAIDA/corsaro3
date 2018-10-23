@@ -445,8 +445,6 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
         }
     }
 
-    goto fail;
-
     outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 1);
     mergestate->writer = corsaro_create_trace_writer(glob->logger,
             outname, CORSARO_TRACE_COMPRESS_LEVEL,

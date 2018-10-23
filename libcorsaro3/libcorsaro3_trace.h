@@ -29,6 +29,7 @@
 #define LIBCORSARO_TRACE_H_
 
 #include <aio.h>
+#include <libaio.h>
 
 #include <libtrace.h>
 #include <wandio.h>
@@ -65,8 +66,11 @@ typedef struct corsaro_fast_trace_writer {
     int io_fd;
     int whichbuf;
     int waiting;
+    uint64_t written;
 
-    struct aiocb aio[2];
+//    struct aiocb aio[2];
+    io_context_t ctx;
+    struct iocb aio[2];
     char *localbuf[2];
     int offset[2];
     int bufsize[2];
