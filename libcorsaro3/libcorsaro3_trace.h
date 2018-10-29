@@ -68,9 +68,8 @@ typedef struct corsaro_fast_trace_writer {
     int waiting;
     uint64_t written;
 
-//    struct aiocb aio[2];
+    struct aiocb aio[2];
     io_context_t ctx;
-    struct iocb aio[2];
     char *localbuf[2];
     int offset[2];
     int bufsize[2];
@@ -81,8 +80,7 @@ libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
         char *tracename);
 libtrace_out_t *corsaro_create_trace_writer(corsaro_logger_t *logger,
         char *tracename, int level, trace_option_compresstype_t method);
-corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer(
-        corsaro_logger_t *logger, char *filename);
+corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer();
 void corsaro_destroy_trace_reader(libtrace_t *trace);
 void corsaro_destroy_trace_writer(libtrace_out_t *trace);
 void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
@@ -92,6 +90,10 @@ int corsaro_read_next_packet(corsaro_logger_t *logger,
 int corsaro_write_packet(corsaro_logger_t *logger,
         libtrace_out_t *trace, libtrace_packet_t *packet);
 
+int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
+        corsaro_fast_trace_writer_t *writer, char *filename);
+void corsaro_reset_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
+        corsaro_logger_t *logger);
 int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
         corsaro_fast_trace_writer_t *writer, libtrace_packet_t *packet);
 

@@ -163,7 +163,7 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
 static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 		int threadid, corsaro_wdcap_global_t *glob) {
 
-	tls->writer = NULL;
+	tls->writer = corsaro_create_fast_trace_writer();
 	tls->interval_start_ts = 0;
 	tls->interimfilename = NULL;
 	tls->glob = glob;
@@ -183,6 +183,11 @@ static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
 	if (tls->writer) {
 		corsaro_destroy_fast_trace_writer(tls->writer, tls->glob->logger);
 	}
+
+    if (tls->interimfilename) {
+        free(tls->interimfilename);
+    }
+
     if (tls->zmq_pushsock) {
         zmq_close(tls->zmq_pushsock);
     }
@@ -253,6 +258,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_wdcap_local_t *tls = (corsaro_wdcap_local_t *)local;
     struct timeval ptv;
     corsaro_wdcap_message_t mergemsg;
+    int ret;
 
     int testflag = 0;
 
@@ -284,14 +290,16 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     ptv = trace_get_timeval(packet);
 
     while (tls->next_report && ptv.tv_sec >= tls->next_report) {
-        if (tls->writer) {
-            corsaro_destroy_fast_trace_writer(tls->writer, glob->logger);
-            tls->writer = NULL;
-        }
-
         /* tell merger that we've reached the end of the interval TODO */
         mergemsg.type = CORSARO_WDCAP_MSG_INTERVAL_DONE;
         mergemsg.timestamp = tls->current_interval.time;
+        mergemsg.src_fd = tls->writer->io_fd;
+
+        if (tls->writer) {
+            corsaro_reset_fast_trace_writer(tls->writer, glob->logger);
+            free(tls->interimfilename);
+            tls->interimfilename = NULL;
+        }
 
         if (zmq_send(tls->zmq_pushsock, &mergemsg, sizeof(mergemsg), 0) < 0) {
             corsaro_log(glob->logger,
@@ -300,13 +308,12 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
             corsaro_halted = 1;
             return packet;
         }
-
 		tls->current_interval.number ++;
 		tls->current_interval.time = tls->next_report;
 		tls->next_report += glob->interval;
     }
 
-    if (tls->writer == NULL) {
+    if (tls->interimfilename == NULL) {
         tls->interimfilename = corsaro_wdcap_derive_output_name(tls->glob,
                 tls->current_interval.time,
                 trace_get_perpkt_thread_id(t), 0);
@@ -317,15 +324,16 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
             return packet;
         }
 
-        tls->writer = corsaro_create_fast_trace_writer(glob->logger,
+        ret = corsaro_start_fast_trace_writer(glob->logger, tls->writer,
                 tls->interimfilename);
-        if (tls->writer == NULL) {
+        if (ret == -1) {
             corsaro_log(glob->logger,
                     "unable to open output file for wdcap");
             corsaro_halted = 1;
             return packet;
         }
         testflag = 1;
+
     }
 
 	if (glob->stripvlans == CORSARO_WDCAP_STRIP_VLANS_ON) {
@@ -337,7 +345,6 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
             packet) < 0) {
 		corsaro_halted = 1;
 	}
-
 	return packet;
 }
 
@@ -560,7 +567,6 @@ static void *start_merging_thread(void *data) {
     mergestate.waiting = NULL;
 	mergestate.zmq_pullsock = glob->zmq_pullsock;
 
-    //corsaro_set_lowest_io_priority();
     corsaro_log(glob->logger, "wdcap merging thread is active");
 	while (1) {
 		if (zmq_recv(mergestate.zmq_pullsock, &msg, sizeof(msg), 0) < 0) {
@@ -573,6 +579,7 @@ static void *start_merging_thread(void *data) {
         if (msg.type == CORSARO_WDCAP_MSG_STOP) {
             break;
         } else if (msg.type == CORSARO_WDCAP_MSG_INTERVAL_DONE) {
+            close(msg.src_fd);
             merge_finished_interval(glob, &mergestate, msg.timestamp);
         } else {
             printf("%d\n", msg.type);

@@ -48,6 +48,7 @@ enum {
 typedef struct corsaro_wdcap_message {
     uint8_t type;
     uint32_t timestamp;
+    int src_fd;
 } corsaro_wdcap_message_t;
 
 typedef struct corsaro_wdcap_interval corsaro_wdcap_interval_t;

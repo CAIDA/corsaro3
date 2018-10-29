@@ -170,33 +170,38 @@ void corsaro_destroy_trace_writer(libtrace_out_t *trace) {
     trace_destroy_output(trace);
 }
 
-corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer(
-        corsaro_logger_t *logger, char *filename) {
+corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer() {
 
     corsaro_fast_trace_writer_t *writer;
+    writer = (corsaro_fast_trace_writer_t *)calloc(1,
+            sizeof(corsaro_fast_trace_writer_t));
+
+    writer->localbuf[0] = malloc(FAST_WRITER_BUFFER_SIZE);
+    writer->localbuf[1] = malloc(FAST_WRITER_BUFFER_SIZE);
+    writer->bufsize[0] = FAST_WRITER_BUFFER_SIZE;
+    writer->bufsize[1] = FAST_WRITER_BUFFER_SIZE;
+
+    writer->io_fd = -1;
+
+    return writer;
+}
+
+int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
+        corsaro_fast_trace_writer_t *writer, char *filename) {
+
     struct pcapfile_header_t filehdr;
     uid_t userid = 0;
     gid_t groupid = 0;
     char *sudoenv = NULL;
 
-    writer = (corsaro_fast_trace_writer_t *)calloc(1,
-            sizeof(corsaro_fast_trace_writer_t));
-
-    io_setup(10, &(writer->ctx));
-
-    writer->io_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT,
+    writer->io_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND,
             0666);
     if (writer->io_fd < 0) {
         corsaro_log(logger,
                 "unable to open wdcap output file %s: %s", filename,
                 strerror(errno));
-        free(writer);
-        return NULL;
+        return -1;
     }
-/*
-    writer->io_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND,
-            0666);
-*/
     sudoenv = getenv("SUDO_UID");
     if (sudoenv != NULL) {
         userid = strtol(sudoenv, NULL, 10);
@@ -211,23 +216,14 @@ corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer(
                 "unable to set ownership on fast output file %s: %s",
                 filename, strerror(errno));
         close(writer->io_fd);
-        free(writer);
-        return NULL;
+        return -1;
     }
 
     writer->waiting = 0;
     writer->whichbuf = 0;
     writer->written = 0;
-    /*
-    writer->localbuf[0] = malloc(FAST_WRITER_BUFFER_SIZE);
-    writer->localbuf[1] = malloc(FAST_WRITER_BUFFER_SIZE);
-    */
-    posix_memalign((void **)&(writer->localbuf[0]), 4096, FAST_WRITER_BUFFER_SIZE);
-    posix_memalign((void **)&(writer->localbuf[1]), 4096, FAST_WRITER_BUFFER_SIZE);
     writer->offset[0] = 0;
     writer->offset[1] = 0;
-    writer->bufsize[0] = FAST_WRITER_BUFFER_SIZE;
-    writer->bufsize[1] = FAST_WRITER_BUFFER_SIZE;
 
     filehdr.magic_number = 0xa1b2c3d4;
     filehdr.version_major = 2;
@@ -239,7 +235,6 @@ corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer(
 
     memcpy(writer->localbuf[0], &filehdr, sizeof(filehdr));
     writer->offset[0] = sizeof(filehdr);
-    return writer;
 }
 
 static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
@@ -247,7 +242,7 @@ static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
 
     struct iocb *iocbs[1];
     size_t towrite, rem;
-/*
+
     memset(&(writer->aio[THISBUF(writer)]), 0, sizeof(struct aiocb));
     writer->aio[THISBUF(writer)].aio_buf = writer->localbuf[THISBUF(writer)];
     writer->aio[THISBUF(writer)].aio_nbytes = writer->offset[THISBUF(writer)];
@@ -261,40 +256,7 @@ static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
                 strerror(errno));
         return -1;
     }
-*/
 
-    towrite = writer->offset[THISBUF(writer)] -
-            (writer->offset[THISBUF(writer)] % 4096);
-    rem = writer->offset[THISBUF(writer)] - towrite;
-
-    io_prep_pwrite(&(writer->aio[THISBUF(writer)]), writer->io_fd,
-            writer->localbuf[THISBUF(writer)], towrite, writer->written);
-    writer->aio[THISBUF(writer)].data = writer->localbuf[THISBUF(writer)];
-/*
-    writer->aio[THISBUF(writer)].c.buf = (uint64_t)(writer->localbuf[THISBUF(writer)]);
-    writer->aio[THISBUF(writer)].c.offset = writer->written;
-    writer->aio[THISBUF(writer)].c.nbytes = towrite;
-    writer->aio[THISBUF(writer)].aio_fildes = writer->io_fd;
-    writer->aio[THISBUF(writer)].aio_lio_opcode = IOCB_CMD_PWRITE;;
-*/
-
-    iocbs[0] = &(writer->aio[THISBUF(writer)]);
-    if (io_submit(writer->ctx, 1, iocbs) < 0) {
-        corsaro_log(logger,
-                "error calling io_submit() in fast writer: %s",
-                strerror(errno));
-        return -1;
-    }
-
-    if (rem > 0) {
-        assert(writer->offset[OTHERBUF(writer)] == 0);
-        memcpy(writer->localbuf[OTHERBUF(writer)],
-                writer->localbuf[THISBUF(writer)] + towrite,
-                rem);
-        writer->offset[OTHERBUF(writer)] = rem;
-    }
-
-    writer->written += towrite;
     writer->waiting = 1;
     writer->whichbuf = OTHERBUF(writer);
     return 1;
@@ -302,7 +264,6 @@ static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
 
 static inline int check_aiowrite_status(corsaro_fast_trace_writer_t *writer,
         corsaro_logger_t *logger) {
-#if 0
     int err = aio_error(&(writer->aio[OTHERBUF(writer)]));
 
     if (err == 0) {
@@ -320,29 +281,12 @@ static inline int check_aiowrite_status(corsaro_fast_trace_writer_t *writer,
         writer->waiting = 0;
         return -1;
     }
-#endif
 
-    struct io_event events[1];
-    struct timespec timeout;
-
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 0;
-
-    if (io_getevents(writer->ctx, 0, 1, events, &timeout) == 1) {
-        /* assuming this means the write completed fully */
-        //printf("%u\n", events[0].res);
-        writer->waiting = 0;
-        writer->offset[OTHERBUF(writer)] = 0;
-        return 1;
-    }
     return 0;
 }
 
-
-void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
+void corsaro_reset_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
         corsaro_logger_t *logger) {
-
-    int flags;
 
     while (writer->waiting) {
         if (check_aiowrite_status(writer, logger) == 0) {
@@ -350,7 +294,6 @@ void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
         }
     }
 
-/*
     if (writer->offset[THISBUF(writer)] > 0) {
         schedule_aiowrite(writer, logger);
     }
@@ -360,25 +303,19 @@ void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
             usleep(100);
         }
     }
-*/
 
-    /* last write may not be page-aligned so disable O_DIRECT and write
-     * normally */
+    writer->io_fd = -1;
+}
 
-    flags = fcntl(writer->io_fd, F_GETFL);
-    if (flags != -1) {
-        fcntl(writer->io_fd, F_SETFL, flags & ~O_DIRECT);
+void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
+        corsaro_logger_t *logger) {
+
+    int flags;
+
+    if (writer->io_fd != -1) {
+        corsaro_reset_fast_trace_writer(writer, logger);
     }
-
-    if (pwrite(writer->io_fd, writer->localbuf[THISBUF(writer)],
-            writer->offset[THISBUF(writer)], writer->written) < 0) {
-
-        /* probably not a lot we can do right now */
-
-    }
-
     close(writer->io_fd);
-    io_destroy(writer->ctx);
     if (writer->localbuf[0]) {
         free(writer->localbuf[0]);
     }
@@ -456,8 +393,11 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
                 writer->localbuf[THISBUF(writer)],
                 writer->bufsize[THISBUF(writer)] + FAST_WRITER_BUFFER_SIZE);
         writer->bufsize[THISBUF(writer)] += FAST_WRITER_BUFFER_SIZE;
-        /* TODO error check, not assert! */
-        assert(writer->localbuf[THISBUF(writer)]);
+        if (writer->localbuf[THISBUF(writer)] == NULL) {
+            corsaro_log(logger,
+                    "out of memory when extending fast write buffer");
+            return -1;
+        }
     }
 
     pcaphdr = (pcap_header_t *)(writer->localbuf[THISBUF(writer)] +
