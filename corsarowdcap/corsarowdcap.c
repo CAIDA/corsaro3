@@ -164,7 +164,6 @@ static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 		int threadid, corsaro_wdcap_global_t *glob) {
 
 	tls->writer = corsaro_create_fast_trace_writer();
-	tls->interval_start_ts = 0;
 	tls->interimfilename = NULL;
 	tls->glob = glob;
 
