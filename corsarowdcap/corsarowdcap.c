@@ -42,16 +42,101 @@
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_trace.h"
 
+/** corsarowdcap
+ *
+ *  Uses parallel libtrace to capture network traffic in parallel,
+ *  then writes those packets (in chronological order) to a file
+ *  on disk. The file is regularly rotated on interval boundaries
+ *  to maintain sensible file sizes.
+ *
+ *  This program is specifically optimised for dealing with high
+ *  traffic rates, such as those observed by the CAIDA UCSD network
+ *  telescope. To meet the requirements of such environments, we've
+ *  had to make some compromises in terms of flexibility that may
+ *  not be suitable for general purpose capture.
+ *
+ */
+
+/** Program design -- (warning, long!)
+ *
+ *  Most of the complexity in corsarowdcap comes from its heavy
+ *  parallelism. Once you get that, everything else should seem
+ *  pretty straightforward.
+ *
+ *  Conceptually, we can consider corsarowdcap to be a program of
+ *  two halves: reading packets from the input source, and writing
+ *  packets to an output trace file.
+ *
+ *  Parallel libtrace handles most of the heavy lifting for the
+ *  reading side. We create a parallel libtrace input, tell it how
+ *  many threads to dedicate to reading and processing packets and
+ *  provide callback functions that are triggered whenever a
+ *  processing thread receives a packet.
+ *
+ *  Things get more complex when we have to consider how we are going
+ *  to write those packets to our output file. Ideally, the file
+ *  needs to contain packets in chronological order and all packets
+ *  for a particular interval must be written to the correct file;
+ *  that is, we cannot close an output file until we are sure that
+ *  all of the packets for that interval have been written into it.
+ *
+ *  If you have, say, 8 libtrace processing threads all reading packets
+ *  in parallel, how can you ensure that these requirements are met
+ *  while also ensuring that corsarowdcap "holds onto" each packet
+ *  for the minimum time possible to avoid internal buffer overflows
+ *  and therefore packets being dropped by input source. Therefore,
+ *  we need to minimise any blocking operations in the processing
+ *  threads -- this includes blocking I/O as well as attempts to
+ *  lock mutexes.
+ *
+ *  The first step is to accept that this is going to be a two-phase
+ *  job. The first phase simply focuses on getting copies of the
+ *  observed packets onto disk, without worrying about the ordering
+ *  requirements. This is time-critical, so has to be as fast as
+ *  possible. We do this by having each processing thread write its
+ *  packets to an "interim" output file, which we rotate with the
+ *  same frequency as the intended final output. Each individual thread
+ *  receives its packets in chronological order, so each interim file
+ *  is already sorted and we can be sure that whenever a thread sees
+ *  a packet for the next interval, there are no more packets coming
+ *  for the previous interval.
+ *
+ *  The second phase is to use a separate thread to periodically
+ *  merge the interim output files from the processing threads to
+ *  create a single correctly-ordered trace file for each interval.
+ *  Each processing thread will signal to the merging thread when they
+ *  have completed an interval. Only once all processing threads are
+ *  done with a particular interval, can the merging thread can combine
+ *  the interim files (after all, individual threads may fall behind
+ *  for some reason). When the combined output is complete, the
+ *  relevant interim files can be deleted. Merging is much less time
+ *  critical than the raw packet processing, but still needs to
+ *  complete before the next interval is ready to avoid an
+ *  ever-increasing backlog of merge jobs.
+ */
+
+
 #define CORSARO_WDCAP_INTERNAL_QUEUE "inproc://wdcapinternal"
 
 libtrace_callback_set_t *processing = NULL;
 volatile int corsaro_halted = 0;
 
+/** Signal handler for SIGTERM and SIGINT
+ *
+ *  @param sig      The signal received (unused)
+ *
+ *  Sets 'corsaro_halted' to 1, which will cause the program to begin
+ *  a clean exit.
+ */
 static void cleanup_signal(int sig) {
     (void)sig;
     corsaro_halted = 1;
 }
 
+/** Provides usage guidance for this program.
+ *
+ *  @param prog     The program name
+ */
 void usage(char *prog) {
     printf("Usage: %s [ -l logmode ] -c configfile \n\n", prog);
     printf("Accepted logmodes:\n");
@@ -59,6 +144,21 @@ void usage(char *prog) {
 
 }
 
+/** Concatenates a string onto an existing string buffer, starting
+ *  from a given pointer. Basically a strcat() where you supply the
+ *  end of the string that you are appending to, rather than having
+ *  the function have to find it beforehand.
+ *
+ *  @param str      The string to add to the existing buffer.
+ *  @param bufp     The location in the buffer to start writing the
+ *                  new string into.
+ *  @param buflim   A pointer to the end of the destination buffer. All
+ *                  concatenation will cease when this pointer is
+ *                  reached, i.e. the resulting string may be truncated.
+ *
+ *  @return the pointer to the character *after* the last character
+ *          written, which can be used for subsequent calls to stradd.
+ */
 static char *stradd(const char *str, char *bufp, char *buflim) {
     while(bufp < buflim && (*bufp = *str++) != '\0') {
         ++bufp;
@@ -66,6 +166,32 @@ static char *stradd(const char *str, char *bufp, char *buflim) {
     return bufp;
 }
 
+/** Uses the output filename template to create a suitable output file
+ *  name for either an interim output file or the final merged output file.
+ *  Also replaces all special formatting options in the template with
+ *  the appropriate value.
+ *
+ *  Can be used both to generate a file name for writing, as well as by
+ *  the merging thread to figure out the names of the interim files that
+ *  it should read.
+ *
+ *  Supports a variety of format modifiers, including everything
+ *  recognised by strftime() (for naming files based on the interval
+ *  timestamp) plus a few custom ones specific to corsarowdcap (which
+ *  are described in the README).
+ *
+ *  @param glob         The global state for this corsarowdcap instance.
+ *  @param timestamp    The timestamp at the start of the current interval.
+ *  @param threadid     The cardinal ID for the thread that is the writer of
+ *                      this output file. Set to -1 if the writer is the
+ *                      merging thread.
+ *  @param needformat   If 1, prepend the trace file format followed by a
+ *                      colon to the output filename to create a valid
+ *                      libtrace URI.
+ *  @return A pointer to a string allocated via strdup() that contains the
+ *  output file name derived from the given parameters. This name must be
+ *  later freed by the caller to avoid leaking the memory holding the string.
+ */
 static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
         uint32_t timestamp, int threadid, int needformat) {
 
@@ -96,7 +222,8 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
     ptr = glob->template;
 
     if (needformat) {
-        /* Pre-pend the format */
+        /* Prepend the format -- libtrace output URIs must contain the format
+         * but input URIs do not necessarily need it. */
         w = stradd(format, scratch, end);
         *w++ = ':';
     } else {
@@ -117,9 +244,15 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
                     }
                     continue;
                 case CORSARO_IO_PLUGIN_PATTERN:
+                    /* kinda redundant now, but I've kept this for backwards
+                     * compatibility.
+                     */
                     w = stradd("wdcap", w, end);
                     continue;
                 case CORSARO_IO_TRACE_FORMAT_PATTERN:
+                    /* Adds the trace file format to the file name, usually
+                     * used as an extension (e.g. foo.pcap).
+                     */
                     w = stradd(ext, w, end);
                     continue;
                 case 's':
@@ -142,6 +275,9 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
         return NULL;
     }
 
+    /* Interim output files need an extra bit on the end to distinguish
+     * the output files for each processing thread.
+     */
     if (threadid >= 0) {
         char thspace[1024];
         snprintf(thspace, 1024, "--%d", threadid);
@@ -152,14 +288,25 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
         /* Not enough space for the full filename */
         return NULL;
     }
+
+    /* Make sure we terminate our string */
     *w = '\0';
 
+    /* Use strftime() to resolve any remaining format modifiers. Note
+     * that we use UTC for any date-time conversions.
+     */
     tv.tv_sec = timestamp;
     strftime(outname, sizeof(outname), scratch, gmtime(&tv.tv_sec));
     return strdup(outname);
 }
 
 
+/** Initialises local thread state data for a processing thread.
+ *
+ *  @param tls          The thread local data to be initialised.
+ *  @param threadid     The cardinal ID for this thread.
+ *  @param glob         The global state for this corsarowdcap instance.
+ */
 static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 		int threadid, corsaro_wdcap_global_t *glob) {
 
@@ -177,6 +324,10 @@ static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 
 }
 
+/** Destroys the internal members of a processing thread's local state.
+ *
+ *  @param tls      The thread local state to be destroyed
+ */
 static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
 
 	if (tls->writer) {
@@ -192,15 +343,30 @@ static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
     }
 }
 
+/** Thread-start callback for the processing threads. Invoked when the
+ *  input trace is started but before any packets are read.
+ *
+ *  @param trace        The input trace that has just started.
+ *  @param t            The libtrace processing thread that this callback
+ *                      applies to.
+ *  @param global       The global state for this corsarowdcap instance.
+ *
+ *  @return The thread local state for the newly-started thread.
+ */
 static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global) {
     corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)global;
     corsaro_wdcap_local_t *tls;
     int zero = 0;
 
+    /* Our thread local state is allocated and stored in the global
+     * state -- this is because we want to be able to delay closing
+     * our zeromq socket until after the merging thread has finished.
+     */
     tls = &(glob->threaddata[trace_get_perpkt_thread_id(t)]);
 
     tls->zmq_pushsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
+    /* This option ensures that sockets don't linger after we close them */
 	if (zmq_setsockopt(tls->zmq_pushsock, ZMQ_LINGER, &zero,
 			sizeof(zero)) < 0) {
 		corsaro_log(glob->logger,
@@ -216,17 +382,30 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
 		goto initfail;
 	}
 
-    //corsaro_set_highest_io_priority();
-
     return tls;
 
 initfail:
+    /* If we get here, something went wrong with initialising our zeromq
+     * socket so let's bring things to a halt.
+     */
     zmq_close(tls->zmq_pushsock);
     tls->zmq_pushsock = NULL;
     corsaro_halted = 1;
     return tls;
 }
 
+/** Processing thread callback for a libtrace 'tick', i.e. a regular timed
+ *  event that occurs independent of incoming packets.
+ *
+ *  In corsarowdcap, we use the tick callback to do periodic monitoring
+ *  to make sure we aren't dropping packets due to being too slow.
+ *
+ *  @param trace        The libtrace input that this thread is using.
+ *  @param t            The processing thread.
+ *  @param global       The global state for this corsarowdcap instance.
+ *  @param local        The thread local state for this thread.
+ *  @param tick         The timestamp of the tick (an ERF timestamp).
+ */
 static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local, uint64_t tick) {
 
@@ -237,6 +416,9 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     stats = trace_create_statistics();
     trace_get_thread_statistics(trace, t, stats);
 
+    /* Libtrace stats are cumulative so we need to compare against
+     * the previous stat counter.
+     */
     if (stats->missing > tls->lastmisscount) {
         corsaro_log(glob->logger,
                 "thread %d dropped %lu packets in last second (accepted %lu)",
@@ -250,6 +432,23 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     free(stats);
 }
 
+/** Per-packet callback for a processing thread.
+ *
+ *  Writes the received packet to the interim output file. If the packet
+ *  has a timestamp after the current interval, we first send an interval
+ *  over message to the merging thread and move on to a new interim
+ *  output file.
+ *
+ *  @param trace        The libtrace input that this thread is using.
+ *  @param t            The processing thread.
+ *  @param global       The global state for this corsarowdcap instance.
+ *  @param local        The thread local state for this thread.
+ *  @param packet       The packet received from the libtrace input.
+ *
+ *  @return the packet to signify to libtrace that we are finished with
+ *          the packet and it can be released back to the capture device.
+ */
+
 static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local, libtrace_packet_t *packet) {
 
@@ -259,12 +458,20 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_wdcap_message_t mergemsg;
     int ret;
 
-    int testflag = 0;
-
 	if (tls->current_interval.time == 0) {
+        /* This is the first packet we've seen, so we need to initialise
+         * our first interval.
+         */
 		const libtrace_packet_t *first;
 		const struct timeval *firsttv;
 
+        /* This is slightly tricky, in that we need to make sure all
+         * threads start from the same interval (even if the thread's
+         * first packet is from the next interval). This ensures that
+         * the merging thread can recognise the first interval as
+         * complete even in situations where we start our capture very
+         * close to an interval boundary.
+         */
 		if (trace_get_first_packet(trace, t, &first, &firsttv) == -1) {
 			corsaro_log(glob->logger,
 					"unable to get first packet for input %s?",
@@ -289,11 +496,22 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     ptv = trace_get_timeval(packet);
 
     while (tls->next_report && ptv.tv_sec >= tls->next_report) {
-        /* tell merger that we've reached the end of the interval TODO */
+        /* Tell merger that we've reached the end of the interval */
         mergemsg.type = CORSARO_WDCAP_MSG_INTERVAL_DONE;
         mergemsg.timestamp = tls->current_interval.time;
+
+        /* VERY IMPORTANT: do not close the fd for the interim file
+         * here. close() is a blocking operation, even if the rest
+         * of the I/O is asynchronous, so we run the risk of dropping
+         * packets while we're waiting for those to complete.
+         *
+         * Instead, we're going to get the merging thread to do the
+         * close for us, since it is a lot less time-sensitive than
+         * the processing threads.
+         */
         mergemsg.src_fd = tls->writer->io_fd;
 
+        /* Prepare to rotate our interim output file */
         if (tls->writer) {
             corsaro_reset_fast_trace_writer(tls->writer, glob->logger);
             free(tls->interimfilename);
@@ -313,6 +531,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     if (tls->interimfilename == NULL) {
+        /* Need to open up a new interim file */
         tls->interimfilename = corsaro_wdcap_derive_output_name(tls->glob,
                 tls->current_interval.time,
                 trace_get_perpkt_thread_id(t), 0);
@@ -331,14 +550,18 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
             corsaro_halted = 1;
             return packet;
         }
-        testflag = 1;
-
     }
 
+    /* WARNING: only enable VLAN stripping if you definitely have VLAN
+     * tags that need to be stripped. Even if your packets have no VLAN
+     * tags, this is a relatively expensive operation so you're much
+     * better off just disabling stripping instead.
+     */
 	if (glob->stripvlans == CORSARO_WDCAP_STRIP_VLANS_ON) {
 		packet = trace_strip_packet(packet);
 	}
 
+    /* Write the packet to the interim file using asynchronous I/O */
 	tls->last_ts = ptv.tv_sec;
 	if (corsaro_fast_write_erf_packet(glob->logger, tls->writer,
             packet) < 0) {
@@ -347,7 +570,15 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 	return packet;
 }
 
+/** Creates and starts a parallel libtrace input.
+ *
+ *  @param glob     The global state for this corsarowdcap instance.
+ *
+ *  @return -1 if a problem occured, 0 if successful.
+ */
 static int start_trace_input(corsaro_wdcap_global_t *glob) {
+
+    /* This function is basically boiler-plate parallel libtrace code */
 
     glob->trace = trace_create(glob->inputuri);
     if (trace_is_err(glob->trace)) {
@@ -358,6 +589,8 @@ static int start_trace_input(corsaro_wdcap_global_t *glob) {
     }
 
     trace_set_perpkt_threads(glob->trace, glob->threads);
+
+    /* Will trigger a tick every second */
     trace_set_tick_interval(glob->trace, 1000);
 
     if (!processing) {
@@ -380,6 +613,20 @@ static int start_trace_input(corsaro_wdcap_global_t *glob) {
     return 0;
 }
 
+/** Determines which of the available packets in the interim files should
+ *  be added to the merged output file next.
+ *
+ *  Merged output file order is chronological, so the packet with the
+ *  lowest timestamp will always be chosen.
+ *
+ *  @param mergestate       The state for the merging thread.
+ *  @param inpcount         The number of interim files that are being
+ *                          combined to create the merged output.
+ *  @param logger           A corsaro logger instance for writing error logs.
+ *
+ *  @return the index of the interim file reader that the next packet should
+ *          be drawn from, or -1 if all readers have run out of packets.
+ */
 static int choose_next_merge_packet(corsaro_wdcap_merger_t *mergestate,
         int inpcount, corsaro_logger_t *logger) {
 
@@ -396,10 +643,14 @@ static int choose_next_merge_packet(corsaro_wdcap_merger_t *mergestate,
         }
 
         if (mergestate->readers[i].status == CORSARO_WDCAP_INTERIM_NOPACKET) {
+            /* We've used the most recent packet for this reader, so read
+             * the next one.
+             */
             int ret = corsaro_read_next_packet(logger,
                     mergestate->readers[i].source,
                     mergestate->readers[i].nextp);
             if (ret <= 0) {
+                /* No more packets in this interim file, flag it as done. */
                 mergestate->readers[i].status = CORSARO_WDCAP_INTERIM_EOF;
                 continue;
             }
@@ -409,15 +660,20 @@ static int choose_next_merge_packet(corsaro_wdcap_merger_t *mergestate,
         }
 
         if (candind == -1) {
+            /* This is the first valid packet seen this round, so start
+             * with this reader as having the "earliest" packet.
+             */
             candind = i;
             continue;
         }
 
         if (mergestate->readers[i].nextp_ts <
                 mergestate->readers[candind].nextp_ts) {
+            /* This reader's next packet is earlier than our current
+             * earliest packet.
+             */
             candind = i;
         }
-
     }
 
     return candind;
