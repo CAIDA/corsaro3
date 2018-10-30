@@ -188,12 +188,16 @@ static char *stradd(const char *str, char *bufp, char *buflim) {
  *  @param needformat   If 1, prepend the trace file format followed by a
  *                      colon to the output filename to create a valid
  *                      libtrace URI.
+ *  @param needdone     If 1, append the '.done' extension to the filename.
+ *                      This is used to create special empty files which
+ *                      indicate to archival scripts that an output file is
+ *                      complete and ready to be archived.
  *  @return A pointer to a string allocated via strdup() that contains the
  *  output file name derived from the given parameters. This name must be
  *  later freed by the caller to avoid leaking the memory holding the string.
  */
 static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
-        uint32_t timestamp, int threadid, int needformat) {
+        uint32_t timestamp, int threadid, int needformat, int needdone) {
 
     /* Adapted from libwdcap but slightly modified to fit corsaro
      * environment and templating format.
@@ -282,6 +286,10 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
         char thspace[1024];
         snprintf(thspace, 1024, "--%d", threadid);
         w = stradd(thspace, w, end);
+    } else if (needdone) {
+        /* needdone only applies to merged output files, not interim ones. */
+        char *dotdone = ".done";
+        w = stradd(dotdone, w, end);
     }
 
     if (w >= end) {
@@ -534,7 +542,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         /* Need to open up a new interim file */
         tls->interimfilename = corsaro_wdcap_derive_output_name(tls->glob,
                 tls->current_interval.time,
-                trace_get_perpkt_thread_id(t), 0);
+                trace_get_perpkt_thread_id(t), 0, 0);
         if (tls->interimfilename == NULL) {
             corsaro_log(glob->logger,
                     "unable to create suitable output file name for wdcap");
@@ -685,10 +693,11 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
 
     int candind, i, ret = 0;
     char *outname = NULL;
+    int success = 0;
 
     for (i = 0; i < glob->threads; i++) {
         mergestate->readers[i].uri = corsaro_wdcap_derive_output_name(glob,
-                timestamp, i, 1);
+                timestamp, i, 1, 0);
         mergestate->readers[i].source = corsaro_create_trace_reader(
                 glob->logger, mergestate->readers[i].uri);
         if (mergestate->readers[i].source == NULL) {
@@ -707,11 +716,10 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
         }
     }
 
-    outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 1);
+    outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 1, 0);
     mergestate->writer = corsaro_create_trace_writer(glob->logger,
             outname, CORSARO_TRACE_COMPRESS_LEVEL,
             TRACE_OPTION_COMPRESSTYPE_NONE);
-    free(outname);
     if (mergestate->writer == NULL) {
         ret = -1;
         goto fail;
@@ -731,10 +739,25 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
         mergestate->readers[candind].status = CORSARO_WDCAP_INTERIM_NOPACKET;
     } while (candind != -1);
 
+    success = 1;
+
 fail:
     if (mergestate->writer) {
         corsaro_destroy_trace_writer(mergestate->writer);
         mergestate->writer = NULL;
+    }
+
+    if (success) {
+        /* All packets have been written to the merged file, now create a special
+         * ".done" file so that our archiving scripts can tell that the file is
+         * complete. */
+        char *donefilename;
+        FILE *f;
+
+        donefilename = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 0, 1);
+        f = fopen(donefilename, "w");
+        /* File can be empty, just has to exist */
+        fclose(f);
     }
 
     for (i = 0; i < glob->threads; i++) {
@@ -755,6 +778,10 @@ fail:
             remove(tok);
         }
         free(mergestate->readers[i].uri);
+    }
+
+    if (outname) {
+        free(outname);
     }
 
     return ret;
