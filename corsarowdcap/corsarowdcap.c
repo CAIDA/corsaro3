@@ -841,6 +841,7 @@ static void *start_merging_thread(void *data) {
 	corsaro_wdcap_merger_t mergestate;
 	corsaro_wdcap_message_t msg;
 	int zero = 0;
+    int badmessages = 0;
 
     mergestate.writer = NULL;
 	mergestate.readers = calloc(glob->threads,
@@ -864,8 +865,15 @@ static void *start_merging_thread(void *data) {
             close(msg.src_fd);
             merge_finished_interval(glob, &mergestate, msg.timestamp);
         } else {
-            printf("%d\n", msg.type);
-            exit(0);
+            corsaro_log(glob->logger,
+                    "received unexpected message (type %u) in merging thread.",
+                    msg.type);
+            badmessages ++;
+            if (badmessages >= 100) {
+                corsaro_log(glob->logger,
+                        "too many bad messages in merging thread -- exiting.");
+                exit(-1);
+            }
         }
     }
 
@@ -890,7 +898,7 @@ int main(int argc, char *argv[]) {
 	struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
-	int i, zero=0;
+	int i, zero=0, mergestarted = 0;
 	pthread_t mergetid;
     corsaro_wdcap_message_t haltmsg;
 
@@ -1023,6 +1031,13 @@ int main(int argc, char *argv[]) {
 		goto endwdcap;
 	}
 
+    /* Start the merging thread */
+	pthread_create(&mergetid, NULL, start_merging_thread, glob);
+    mergestarted = 1;
+
+    /* Start reading packets from the trace, which will also start the
+     * processing threads.
+     */
 	if (start_trace_input(glob) < 0) {
 		corsaro_log(glob->logger, "failed to start packet source %s.",
 				glob->inputuri);
@@ -1047,14 +1062,19 @@ int main(int argc, char *argv[]) {
 	glob->trace = NULL;
 
 endwdcap:
-    if (glob->zmq_pushsock) {
-        haltmsg.type = CORSARO_WDCAP_MSG_STOP;
-        if (zmq_send(glob->zmq_pushsock, &haltmsg, sizeof(haltmsg), 0) < 0) {
-            corsaro_log(glob->logger,
-                    "error sending halt message to merge thread: %s",
-                    strerror(errno));
+    if (mergestarted) {
+        /* Push a halt message to the merging thread and wait for it to end */
+        if (glob->zmq_pushsock) {
+            haltmsg.type = CORSARO_WDCAP_MSG_STOP;
+            if (zmq_send(glob->zmq_pushsock, &haltmsg, sizeof(haltmsg), 0) < 0) {
+                corsaro_log(glob->logger,
+                        "error sending halt message to merge thread: %s",
+                        strerror(errno));
+            }
+            zmq_close(glob->zmq_pushsock);
         }
-        zmq_close(glob->zmq_pushsock);
+        pthread_join(mergetid, NULL);
+        corsaro_log(glob->logger, "all threads have joined, exiting.");
     }
 
 	for (i = 0; i < glob->threads; i++) {
@@ -1063,8 +1083,6 @@ endwdcap:
 
 
 	free(glob->threaddata);
-	pthread_join(mergetid, NULL);
-	corsaro_log(glob->logger, "all threads have joined, exiting.");
 
     if (glob->zmq_pullsock) {
         zmq_close(glob->zmq_pullsock);
