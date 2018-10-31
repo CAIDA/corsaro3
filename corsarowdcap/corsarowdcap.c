@@ -688,6 +688,15 @@ static int choose_next_merge_packet(corsaro_wdcap_merger_t *mergestate,
 }
 
 
+/** Merges all interim files for a given interval into a single output file.
+ *
+ *  @param glob         The global state for this instance of corsarowdcap.
+ *  @param mergestate   The state for the merging thread.
+ *  @param timestamp    The timestamp of the start of the interval that
+ *                      is being merged.
+ *
+ *  @return -1 if an error occurs, 0 if merging is successful.
+ */
 static int write_merged_output(corsaro_wdcap_global_t *glob,
         corsaro_wdcap_merger_t *mergestate, uint32_t timestamp) {
 
@@ -695,6 +704,7 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
     char *outname = NULL;
     int success = 0;
 
+    /* Create read handlers for each of the interim files */
     for (i = 0; i < glob->threads; i++) {
         mergestate->readers[i].uri = corsaro_wdcap_derive_output_name(glob,
                 timestamp, i, 1, 0);
@@ -716,6 +726,7 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
         }
     }
 
+    /* Create the output file handle for the merged result */
     outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 1, 0);
     mergestate->writer = corsaro_create_trace_writer(glob->logger,
             outname, CORSARO_TRACE_COMPRESS_LEVEL,
@@ -725,10 +736,15 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
         goto fail;
     }
 
+    /* Look at the next available packet from each reader, choose the
+     * one with the earliest timestamp, write it to the output file.
+     */
     do {
         candind = choose_next_merge_packet(mergestate, glob->threads,
                 glob->logger);
         if (candind == -1) {
+            /* No more packets available for merging in any of the
+             * interim files. */
             break;
         }
         if (corsaro_write_packet(glob->logger, mergestate->writer,
@@ -736,6 +752,8 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
             ret = -1;
             goto fail;
         }
+        /* Setting this will tell the reader that it needs to read the next
+         * packet from the interim trace file. */
         mergestate->readers[candind].status = CORSARO_WDCAP_INTERIM_NOPACKET;
     } while (candind != -1);
 
@@ -760,6 +778,7 @@ fail:
         fclose(f);
     }
 
+    /* Clean up all of the reader handlers */
     for (i = 0; i < glob->threads; i++) {
         if (mergestate->readers[i].nextp) {
             trace_destroy_packet(mergestate->readers[i].nextp);
@@ -767,6 +786,8 @@ fail:
         if (mergestate->readers[i].source) {
             char *tok, *uri;
             corsaro_destroy_trace_reader(mergestate->readers[i].source);
+
+            /* Delete the interim file */
             uri = mergestate->readers[i].uri;
 
             tok = strchr(uri, ':');
@@ -787,17 +808,37 @@ fail:
     return ret;
 }
 
+/** Processes an "interval over" message from a processing thread.
+ *
+ *  If this is the last outstanding thread to report the end of an
+ *  interval, then commence the merging process for that interval.
+ *
+ *  @param glob         The global state for this instance of corsarowdcap.
+ *  @param mergestate   The state for the merging thread.
+ *  @param timestamp    The timestamp of the start of the interval that
+ *                      is being merged.
+ *
+ *  @return 1 if a merge took place, 0 if no merge took place, -1 if an
+ *          error occured.
+ */
 static int merge_finished_interval(corsaro_wdcap_global_t *glob,
         corsaro_wdcap_merger_t *mergestate, uint32_t timestamp) {
 
     corsaro_wdcap_interval_t *fin = mergestate->waiting;
     corsaro_wdcap_interval_t *prev = NULL;
 
+    /* If we only have one processing thread, don't worry about keeping
+     * track of which threads have ended the interval -- we can just
+     * "merge" right away.
+     */
     if (glob->threads == 1) {
         write_merged_output(glob, mergestate, timestamp);
-        return 0;
+        return 1;
     }
 
+    /* Find this interval in our list of incomplete intervals. Ideally,
+     * there should only be at most one entry in this list at any given time.
+     */
     while (fin != NULL) {
         if (fin->timestamp == timestamp) {
             break;
@@ -807,6 +848,7 @@ static int merge_finished_interval(corsaro_wdcap_global_t *glob,
     }
 
     if (fin == NULL) {
+        /* First time we've seen this interval; add it to the list */
         fin = (corsaro_wdcap_interval_t *)malloc(
                 sizeof(corsaro_wdcap_interval_t));
         fin->timestamp = timestamp;
@@ -819,16 +861,30 @@ static int merge_finished_interval(corsaro_wdcap_global_t *glob,
             mergestate->waiting = fin;
         }
     } else {
+        /* Update "finished thread" count. If we hit the maximum thread count,
+         * go ahead with a merge.
+         */
+
+        /* XXX we assume that each processing thread will only send us ONE
+         * interval over message per interval...
+         */
         fin->threads_done ++;
 
         if (fin->threads_done == glob->threads) {
+            int ret = 0;
             if (fin != mergestate->waiting) {
                 corsaro_log(glob->logger, "Warning: corsarowdcap has completed an interval out of order (missing %u, got %u)",
                         mergestate->waiting->timestamp, timestamp);
             }
-            write_merged_output(glob, mergestate, timestamp);
+            if (write_merged_output(glob, mergestate, timestamp) < 0) {
+                corsaro_log(glob->logger, "Failed to merge interim output files for interval %u", timestamp);
+                ret = -1;
+            } else {
+                ret = 1;
+            }
             mergestate->waiting = fin->next;
             free(fin);
+            return ret;
         }
     }
 
@@ -836,6 +892,12 @@ static int merge_finished_interval(corsaro_wdcap_global_t *glob,
 
 }
 
+/** Main loop for the corsarowdcap merging thread.
+ *
+ *  @param data     The global state for this corsarowdcap instance.
+ *
+ *  @return NULL once the thread is halted.
+ */
 static void *start_merging_thread(void *data) {
 	corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)data;
 	corsaro_wdcap_merger_t mergestate;
@@ -843,6 +905,7 @@ static void *start_merging_thread(void *data) {
 	int zero = 0;
     int badmessages = 0;
 
+    /* Create merging thread state */
     mergestate.writer = NULL;
 	mergestate.readers = calloc(glob->threads,
 			sizeof(corsaro_wdcap_interim_reader_t));
@@ -850,8 +913,8 @@ static void *start_merging_thread(void *data) {
     mergestate.waiting = NULL;
 	mergestate.zmq_pullsock = glob->zmq_pullsock;
 
-    corsaro_log(glob->logger, "wdcap merging thread is active");
 	while (1) {
+        /* Wait for a message on our zeromq socket */
 		if (zmq_recv(mergestate.zmq_pullsock, &msg, sizeof(msg), 0) < 0) {
 			corsaro_log(glob->logger,
 				"error receiving message on wdcap merge socket: %s",
@@ -860,8 +923,17 @@ static void *start_merging_thread(void *data) {
 		}
 
         if (msg.type == CORSARO_WDCAP_MSG_STOP) {
+            /* Main thread has told us to halt */
             break;
         } else if (msg.type == CORSARO_WDCAP_MSG_INTERVAL_DONE) {
+            /* An interval is complete, see if we are ready to do a merge. */
+
+            /* Close the file descriptor that was used to write the interim
+             * file -- we do this here to avoid blocking in the processing
+             * thread while we wait for any remaining async I/O to complete.
+             * We can afford to wait here, but we can't in the processing
+             * threads.
+             */
             close(msg.src_fd);
             merge_finished_interval(glob, &mergestate, msg.timestamp);
         } else {
@@ -878,7 +950,7 @@ static void *start_merging_thread(void *data) {
     }
 
 mergeover:
-
+    /* Tidy up any remaining local thread state */
     while (mergestate.waiting) {
         corsaro_wdcap_interval_t *fin = mergestate.waiting;
 
@@ -902,6 +974,9 @@ int main(int argc, char *argv[]) {
 	pthread_t mergetid;
     corsaro_wdcap_message_t haltmsg;
 
+    /* Disable threaded I/O in libwandio, in situations where wandio is
+     * used -- we only do uncompressed output so the threading is just
+     * extra overhead for us */
     if (setenv("LIBTRACEIO", "nothreads", 1) != 0) {
         fprintf(stderr, "corsarowdcap: unable to set libwandio environment");
         return -1;
@@ -940,7 +1015,8 @@ int main(int argc, char *argv[]) {
     }
 
     if (configfile == NULL) {
-        fprintf(stderr, "corsarowdcap: no config file specified. Use -c to specify one.\n");
+        fprintf(stderr,
+                "corsarowdcap: no config file specified. Use -c to specify one.\n");
         usage(argv[0]);
         return 1;
     }
@@ -964,6 +1040,8 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
+
+    /* Set up signal handling */
     sigact.sa_handler = cleanup_signal;
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags = SA_RESTART;
@@ -972,12 +1050,19 @@ int main(int argc, char *argv[]) {
     sigaction(SIGTERM, &sigact, NULL);
     signal(SIGPIPE, SIG_IGN);
 
+    /* Create initial global state based on configuration file content */
 	glob = corsaro_wdcap_init_global(configfile, logmode);
 	if (glob == NULL) {
         return 1;
     }
 	glob->zmq_ctxt = zmq_ctx_new();
 
+    /* Create the zeromq socket that the merge thread will use for
+     * receiving messages -- we do this first so as to ensure that the
+     * PULL socket is up and running before we try to use any
+     * corresponding PUSH sockets. If PULL is not ready, sending to a
+     * PUSH socket will block and we risk dropping packets.
+     */
 	glob->zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
 	if (zmq_setsockopt(glob->zmq_pullsock, ZMQ_LINGER, &zero,
 			sizeof(zero)) < 0) {
@@ -997,6 +1082,10 @@ int main(int argc, char *argv[]) {
 		goto endwdcap;
 	}
 
+    /* Create a PUSH socket that the main thread can use to send messages
+     * to the merge thread. This is only really used to tell the merge
+     * thread to stop running.
+     */
 	glob->zmq_pushsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
 	if (zmq_setsockopt(glob->zmq_pushsock, ZMQ_LINGER, &zero,
 			sizeof(zero)) < 0) {
@@ -1017,14 +1106,17 @@ int main(int argc, char *argv[]) {
 		goto endwdcap;
 	}
 
-	pthread_create(&mergetid, NULL, start_merging_thread, glob);
-
+    /* Create and initialise thread local state for the processing threads */
 	glob->threaddata = calloc(glob->threads, sizeof(corsaro_wdcap_local_t));
 
     for (i = 0; i < glob->threads; i++) {
         init_wdcap_thread_data(&(glob->threaddata[i]), i, glob);
     }
 
+    /* Disable signals before starting threads -- this will help ensure that
+     * any signals are received by the main thread (and its signal handlers)
+     * only.
+     */
 	sigemptyset(&sig_block_all);
 	if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
 		corsaro_log(glob->logger, "unable to disable signals before starting threads.");
@@ -1046,15 +1138,20 @@ int main(int argc, char *argv[]) {
 		goto endwdcap;
 	}
 
+    /* Re-enable signals */
 	if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
 		corsaro_log(glob->logger, "unable to re-enable signals after starting threads.");
 		goto endwdcap;
 	}
 
+    /* Now we just wait until we get a signal that causes our signal handler
+     * to set the halt flag.
+     */
 	while (!corsaro_halted) {
 		sleep(1);
 	}
 
+    /* Stop reading packets and halt the processing threads */
 	trace_pstop(glob->trace);
 	trace_join(glob->trace);
 
@@ -1077,10 +1174,10 @@ endwdcap:
         corsaro_log(glob->logger, "all threads have joined, exiting.");
     }
 
+    /* Tidy up all our global state */
 	for (i = 0; i < glob->threads; i++) {
 		clear_wdcap_thread_data(&(glob->threaddata[i]));
 	}
-
 
 	free(glob->threaddata);
 
@@ -1090,7 +1187,6 @@ endwdcap:
 
 	zmq_ctx_destroy(glob->zmq_ctxt);
 	corsaro_wdcap_free_global(glob);
-
 
 	if (processing) {
 		trace_destroy_callback_set(processing);
