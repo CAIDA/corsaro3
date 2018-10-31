@@ -436,22 +436,4 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
     return schedule_aiowrite(writer, logger);
 }
 
-int corsaro_set_lowest_io_priority(void) {
-    pid_t tid = (pid_t) syscall (SYS_gettid);
-    if (syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, tid,
-            IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE,7)) != 0) {
-        return -1;
-    }
-    return 0;
-}
-
-int corsaro_set_highest_io_priority(void) {
-    pid_t tid = (pid_t) syscall (SYS_gettid);
-    if (syscall(SYS_ioprio_set, IOPRIO_WHO_PROCESS, tid,
-            IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE,0)) != 0) {
-        return -1;
-    }
-    return 0;
-}
-
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
