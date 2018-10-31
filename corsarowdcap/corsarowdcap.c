@@ -339,7 +339,8 @@ static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
 
 	if (tls->writer) {
-		corsaro_destroy_fast_trace_writer(tls->writer, tls->glob->logger);
+		corsaro_destroy_fast_trace_writer(tls->glob->logger,
+                tls->writer);
 	}
 
     if (tls->interimfilename) {
@@ -517,11 +518,13 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
          * close for us, since it is a lot less time-sensitive than
          * the processing threads.
          */
-        mergemsg.src_fd = tls->writer->io_fd;
+        mergemsg.src_fd = -1;
 
         /* Prepare to rotate our interim output file */
         if (tls->writer) {
-            corsaro_reset_fast_trace_writer(tls->writer, glob->logger);
+            int srcfd;
+            srcfd = corsaro_reset_fast_trace_writer(glob->logger, tls->writer);
+            mergemsg.src_fd = srcfd;
             free(tls->interimfilename);
             tls->interimfilename = NULL;
         }
@@ -933,7 +936,9 @@ static void *start_merging_thread(void *data) {
              * We can afford to wait here, but we can't in the processing
              * threads.
              */
-            close(msg.src_fd);
+            if (msg.src_fd != -1) {
+                close(msg.src_fd);
+            }
             merge_finished_interval(glob, &mergestate, msg.timestamp);
         } else {
             corsaro_log(glob->logger,

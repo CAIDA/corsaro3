@@ -41,25 +41,39 @@
 #include "libcorsaro3_log.h"
 #include "libcorsaro3_trace.h"
 
+/** Use 24 MB as an initial buffer size for the fast writers */
 #define FAST_WRITER_BUFFER_SIZE (24 * 1024 * 1024)
+
+/** Amount of data required in a buffer before scheduling an async write */
 #define MIN_WRITE_TRIGGER (4 * 1024 * 1024)
 
+/** Quick macro for figuring out the index of the buffer that we should
+ *  append new packets into.
+ */
 #define THISBUF(w) (w->whichbuf)
+
+/** Quick macro for figuring out the index of the buffer that is currently
+ *  being written by the async I/O API */
 #define OTHERBUF(w) (w->whichbuf == 0 ? 1 : 0)
 
+/** Calculates the amount of buffer space remaining in the current storage
+ *  buffer.
+ */
 #define SPACEREM(w) \
     (w->bufsize[THISBUF(w)] - w->offset[THISBUF(w)])
 
+/** Local definition of a pcap file header */
 typedef struct pcapfile_header_t {
-    uint32_t magic_number;   /* magic number */
-    uint16_t version_major;  /* major version number */
-    uint16_t version_minor;  /* minor version number */
-    int32_t  thiszone;       /* GMT to local correction */
-    uint32_t sigfigs;        /* timestamp accuracy */
-    uint32_t snaplen;        /* aka "wirelen" */
-    uint32_t network;        /* data link type */
+    uint32_t magic_number;   /**< magic number */
+    uint16_t version_major;  /**< major version number */
+    uint16_t version_minor;  /**< minor version number */
+    int32_t  thiszone;       /**< GMT to local correction */
+    uint32_t sigfigs;        /**< timestamp accuracy */
+    uint32_t snaplen;        /**< packet truncation size */
+    uint32_t network;        /**< data link type */
 } PACKED pcapfile_header_t;
 
+/** Local definition of a basic ERF header */
 typedef struct dag_record {
     uint64_t  ts;           /**< ERF timestamp */
     uint8_t   type;         /**< GPP record type */
@@ -69,17 +83,20 @@ typedef struct dag_record {
     uint16_t  wlen;         /**< Wire length */
 } dag_record_t;
 
+/** Local definiton of a pcap packet header */
 typedef struct pcap_header {
-    uint32_t ts_sec;        /* Seconds portion of the timestamp */
-    uint32_t ts_usec;       /* Microseconds portion of the timestamp */
-    uint32_t caplen;        /* Capture length of the packet */
-    uint32_t wirelen;       /* The wire length of the packet */
+    uint32_t ts_sec;        /**< Seconds portion of the timestamp */
+    uint32_t ts_usec;       /**< Microseconds portion of the timestamp */
+    uint32_t caplen;        /**< Capture length of the packet */
+    uint32_t wirelen;       /**< The wire length of the packet */
 } PACKED pcap_header_t;
 
+/** Byteswaps a 32 bit integer */
 #define BYTESWAP32(n) \
     (((n & 0xFFU) << 24) | ((n & 0xFF00U) << 8) | ((n & 0xFF0000U) >> 8) \
         ((n & 0xFF000000U) >> 24))
 
+/** Byteswaps a 64 bit integer */
 #define BYTESWAP64(n) \
     ((BYTESWAP32((n & 0xFFFFFFFF00000000ULL) >> 32)) | \
         ((uint64_t)BYTESWAP32(n & 0xFFFFFFFFULL) << 32))
@@ -101,6 +118,8 @@ libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
         return NULL;
     }
 
+    /* No configuration required -- we're just doing a standard read */
+
     if (trace_start(trace) == -1) {
         err = trace_get_err(trace);
         corsaro_log(logger,
@@ -116,9 +135,10 @@ libtrace_t *corsaro_create_trace_reader(corsaro_logger_t *logger,
 libtrace_out_t *corsaro_create_trace_writer(corsaro_logger_t *logger,
         char *tracename, int level, trace_option_compresstype_t method) {
 
-    /* Relying on libtrace to be able to auto-detect the format here */
     libtrace_out_t *trace;
     libtrace_err_t err;
+
+    /* tracename must be a full URI, otherwise this is going to fail */
 
     trace = trace_create_output(tracename);
     if (trace_is_err_output(trace)) {
@@ -130,6 +150,7 @@ libtrace_out_t *corsaro_create_trace_writer(corsaro_logger_t *logger,
         return NULL;
     }
 
+    /* Configure compression options */
     if (trace_config_output(trace, TRACE_OPTION_OUTPUT_COMPRESS,
                 &(level)) == -1) {
         err = trace_get_err_output(trace);
@@ -176,6 +197,9 @@ corsaro_fast_trace_writer_t *corsaro_create_fast_trace_writer() {
     writer = (corsaro_fast_trace_writer_t *)calloc(1,
             sizeof(corsaro_fast_trace_writer_t));
 
+    /* To avoid reallocating these buffers for every file, we allow
+     * users to re-use a single fast writer.
+     */
     writer->localbuf[0] = malloc(FAST_WRITER_BUFFER_SIZE);
     writer->localbuf[1] = malloc(FAST_WRITER_BUFFER_SIZE);
     writer->bufsize[0] = FAST_WRITER_BUFFER_SIZE;
@@ -202,6 +226,12 @@ int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
                 strerror(errno));
         return -1;
     }
+
+    /* If the program calling this function is running as root via sudo,
+     * it's nicer if the resulting trace files actually end up being owned
+     * by the user who ran the program rather than root. The following code
+     * will do just that.
+     */
     sudoenv = getenv("SUDO_UID");
     if (sudoenv != NULL) {
         userid = strtol(sudoenv, NULL, 10);
@@ -219,12 +249,21 @@ int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
         return -1;
     }
 
+    /* Reset our buffers -- anything still in the buffers will be lost, so
+     * hopefully the caller remembered to call
+     * corsaro_reset_fast_trace_writer() beforehand if they had been using
+     * this writer for a previous trace file.
+     */
     writer->waiting = 0;
     writer->whichbuf = 0;
-    writer->written = 0;
     writer->offset[0] = 0;
     writer->offset[1] = 0;
 
+    /* Start our new file with a pcap file header.
+     *
+     * XXX if we end up supporting other trace formats as output, this may
+     *     need to happen somewhere else.
+     */
     filehdr.magic_number = 0xa1b2c3d4;
     filehdr.version_major = 2;
     filehdr.version_minor = 4;
@@ -235,6 +274,7 @@ int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
 
     memcpy(writer->localbuf[0], &filehdr, sizeof(filehdr));
     writer->offset[0] = sizeof(filehdr);
+    return 0;
 }
 
 static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
@@ -243,10 +283,14 @@ static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
     struct iocb *iocbs[1];
     size_t towrite, rem;
 
+    /* Prepare our aiocb which will tell the async I/O API what exactly
+     * we want to write to disk.
+     */
     memset(&(writer->aio[THISBUF(writer)]), 0, sizeof(struct aiocb));
     writer->aio[THISBUF(writer)].aio_buf = writer->localbuf[THISBUF(writer)];
     writer->aio[THISBUF(writer)].aio_nbytes = writer->offset[THISBUF(writer)];
     writer->aio[THISBUF(writer)].aio_fildes = writer->io_fd;
+    /* aio_offset = 0 only because we set O_APPEND */
     writer->aio[THISBUF(writer)].aio_offset = 0;
     writer->aio[THISBUF(writer)].aio_reqprio = 1;
 
@@ -257,6 +301,7 @@ static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
         return -1;
     }
 
+    /* Switch to the other buffer to keep storing incoming packets */
     writer->waiting = 1;
     writer->whichbuf = OTHERBUF(writer);
     return 1;
@@ -267,8 +312,8 @@ static inline int check_aiowrite_status(corsaro_fast_trace_writer_t *writer,
     int err = aio_error(&(writer->aio[OTHERBUF(writer)]));
 
     if (err == 0) {
+        /* Write has completed */
         /* TODO deal with partial writes */
-
         assert(aio_return(&(writer->aio[OTHERBUF(writer)])) ==
                 writer->offset[OTHERBUF(writer)]);
         writer->waiting = 0;
@@ -281,41 +326,58 @@ static inline int check_aiowrite_status(corsaro_fast_trace_writer_t *writer,
         writer->waiting = 0;
         return -1;
     }
-
+    /* If err == EINPROGRESS, then write has not yet completed */
     return 0;
 }
 
-void corsaro_reset_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
-        corsaro_logger_t *logger) {
+int corsaro_reset_fast_trace_writer(corsaro_logger_t *logger,
+        corsaro_fast_trace_writer_t *writer) {
 
+    int ret;
+    /* Wait for the current outstanding write to complete */
     while (writer->waiting) {
+        /* XXX technically this could block, but has not been a problem
+         * so far */
         if (check_aiowrite_status(writer, logger) == 0) {
             usleep(100);
         }
     }
 
+    /* If we have any stored data in our current buffer, schedule that to
+     * be written too.
+     */
     if (writer->offset[THISBUF(writer)] > 0) {
         schedule_aiowrite(writer, logger);
     }
 
+    /* Wait for that last write to complete */
     while (writer->waiting) {
         if (check_aiowrite_status(writer, logger) == 0) {
             usleep(100);
         }
     }
 
+    /* Save the fd so we can return it to the user */
+    ret = writer->io_fd;
+
+    /* DO NOT CLOSE THE FD -- this will definitely block and cause
+     * performance issues for high speed writers */
     writer->io_fd = -1;
+    return ret;
 }
 
-void corsaro_destroy_fast_trace_writer(corsaro_fast_trace_writer_t *writer,
-        corsaro_logger_t *logger) {
+void corsaro_destroy_fast_trace_writer(corsaro_logger_t *logger,
+        corsaro_fast_trace_writer_t *writer) {
 
-    int flags;
+    int fd;
 
     if (writer->io_fd != -1) {
-        corsaro_reset_fast_trace_writer(writer, logger);
+        fd = corsaro_reset_fast_trace_writer(logger, writer);
     }
-    close(writer->io_fd);
+    /* We're OK to close here because destroying the writer implies that
+     * there is no more work to be done, so blocking won't be a problem.
+     */
+    close(fd);
     if (writer->localbuf[0]) {
         free(writer->localbuf[0]);
     }
@@ -376,8 +438,13 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
     erfts = erfptr->ts;
 #endif
 
+    /* 18 = ERF header length + 2 bytes of padding */
+    /* XXX if we ever start using ERF extension headers, we will also need to
+     * account for those in this calculation.
+     */
     pcapcaplen = ntohs(erfptr->rlen) - 18;
 
+    /* Check if any outstanding writes have completed */
     if (writer->waiting) {
         if (check_aiowrite_status(writer, logger) < 0) {
             return -1;
@@ -385,6 +452,9 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
     }
 
     while (SPACEREM(writer) < sizeof(pcap_header_t) + pcapcaplen) {
+        /* Buffer doesn't have enough space to fit the current packet,
+         * extend it. Hopefully we don't do this often (if at all).
+         */
         corsaro_log(logger,
                 "extending fast write buffer (%u not enough)",
                 writer->bufsize[THISBUF(writer)]);
@@ -400,6 +470,7 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
         }
     }
 
+    /* Fill in the pcap header for our converted packet */
     pcaphdr = (pcap_header_t *)(writer->localbuf[THISBUF(writer)] +
             writer->offset[THISBUF(writer)]);
 
@@ -411,24 +482,34 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
         pcaphdr->ts_sec ++;
     }
 
-    // erf header size + 2 bytes of padding
-    /* XXX if we ever start using ERF extension headers, we will also need to
-     * account for those in this calculation.
-     */
     pcaphdr->caplen = pcapcaplen;
+
+    /* ERF wire length includes the Ethernet frame check sequence, pcap does
+     * not.
+     */
     pcaphdr->wirelen = ntohs(erfptr->wlen) - 4;
 
+    /* This will remove the FCS if the original packet has not been
+     * snapped in any way.
+     */
     if (pcaphdr->wirelen < pcaphdr->caplen) {
         pcaphdr->caplen = pcaphdr->wirelen;
     }
 
     writer->offset[THISBUF(writer)] += sizeof(pcap_header_t);
 
+    /* Write the packet contents into the buffer, starting from the
+     * Ethernet header */
     memcpy(writer->localbuf[THISBUF(writer)] + writer->offset[THISBUF(writer)],
             packet->payload, pcaphdr->caplen);
 
     writer->offset[THISBUF(writer)] += pcaphdr->caplen;
+
     if (writer->waiting || writer->offset[THISBUF(writer)] < MIN_WRITE_TRIGGER) {
+        /* Either we're still waiting on the other buffer to finish being written
+         * or we don't have enough in our buffer to warrant scheduling a write
+         * just yet.
+         */
         return 1;
     }
 
