@@ -1,0 +1,51 @@
+# Example configuration file for corsarowdcap.
+#
+# Run corsarowdcap as follows:
+#
+#   corsarowdcap -c <path to your config file> -l <logmode>
+#
+# where logmode is one of 'file', 'stderr', 'syslog' or 'none'.
+
+
+# Template used to name the trace files produced by corsarowdcap.
+# Tokens beginning with '%' are substituted with an appropriate value
+# based on either the time that the file was created or the configuration
+# of the running corsarowdcap process.
+#
+# In this example, we have three tokens:
+#  %s -- the unix timestamp when the file is created
+#  %N -- the monitor ID for this corsarowdcap instance
+#  %P -- will be replaced with 'wdcap'
+#
+# For timestamp tokens, any token supported by strftime(3) may be used.
+outtemplate: "/trace/captures/corsarowdcap-%s-%N.%P"
+
+# All log messages will be written to this file, IF the logmode is set
+# to 'file'
+logfilename: "/trace/log/corsarowdcap.log"
+
+# A libtrace URI describing where the packets should be captured from.
+# This URI refers to an nDAG multicast group on interface eth1
+# that is listening for joiners on 225.0.0.225:4001
+inputuri: "ndag:eth1,225.0.0.225,4001"
+
+# A unique identifier for this corsarowdcap instance. Can be used in
+# the 'outtemplate' to distinguish trace files created by this instance
+# from others captured at other locations.
+monitorid: mywdcap
+
+# Rotate output files every 60 seconds.
+interval: 60
+
+# Use 8 threads to capture packets and produce interim trace files.
+threads: 8
+
+# The trace file format to use when writing packets to disk.
+fileformat: pcapfile
+
+# Set to 'on' if there are VLAN tags in your captured packets that you
+# want stripped before the packets are written to disk. Do NOT set to
+# 'on' if your packets do not have VLAN tags -- corsarowdcap will still
+# run but your maximum throughput will be reduced due to time spent
+# looking for VLAN headers to remove.
+stripvlans: off
