@@ -1,0 +1,114 @@
+corsarowdcap
+
+Author: Shane Alcock
+
+Introduction
+============
+
+corsarowdcap is a re-imagining of wdcap, designed specifically to capture all
+traffic observed at the USCD Network Telescope as part of the STARDUST project.
+
+However, it can be used for general purpose packet trace capture. The main
+advantage of corsarowdcap over simpler capture options (e.g. tcpdump,
+tracesplit) is that it will automatically rotate the output trace files
+after a user-specified period, so long-term captures end up nicely separated
+into a series of files without any extra effort on the part of the user.
+
+The other key feature of corsarowdcap is that it supports the use of multiple
+threads for reading and saving captured packets, which can decrease the
+likelihood of dropping packets during the capture process. This also means
+that there is native support for capture methods which can separate incoming
+packets into multiple streams to achieve better performance via parallelism,
+such as DPDK or Endace DAG.
+
+
+Requirements
+============
+
+ * libtrace >= 4.0.5 -- download from https://github.com/LibtraceTeam/libtrace
+ * libcorsaro3
+ * libyaml -- https://github.com/yaml/libyaml
+ * libzmq -- https://github.com/zeromq/libzmq
+
+Debian / Ubuntu users can find packages for libtrace at
+https://packages.wand.net.nz/
+
+
+Installing
+==========
+
+Provided all dependencies have been met, standard installation from source
+instructions apply. That is:
+
+  ./configure
+  make
+  sudo make install
+
+
+Configuration
+=============
+
+corsarowdcap uses a YAML configuration file to specify values for optional
+parameters. All of the YAML options for corsarowdcap are simple key-value
+pairs using the "key: value" format.
+
+The configuration options accepted by corsarowdcap are as follows:
+
+  outtemplate           The template to use for output file names. The format
+                        specification semantics are the same as those used in
+                        previous versions of Corsaro (i.e. %P for plugin name,
+                        %N for monitor name, as well as all strftime(3)
+                        modifiers).
+
+  logfilename           If the log mode is set to 'file', the log messages
+                        will be written to the file name provided by this
+                        option. This option must be set if the log mode
+                        is set to 'file'.
+
+  inputuri              A libtrace URI describing where corsarowdcap should
+                        be capturing packets from. This should either be an
+			interface name, a PCI address (for DPDK capture) or
+			an nDAG multicast group (for nDAG capture). Only one
+			inputuri is supported by corsarowdcap.
+
+  threads               Set the number of threads to be created for packet
+			processing. Defaults to 2.
+
+  monitorid             Set the monitor name that will appear in output file
+                        names if the %N modifier is present in the template.
+
+  interval		Specifies the length of time between rotations of
+			the output files (in seconds). Note that rotation
+			boundaries are always aligned relative to the epoch,
+			so the first output file will probably be rotated
+			sooner to allow all subsequent files to be suitably
+			aligned. For instance, if you set 'interval' to 15
+			minutes and start corsarowdcap at 11:10, the first
+			rotation will occur at 11:15, then 11:30 and so on.
+
+  fileformat		Specifies the trace file format to use when writing
+			output files (e.g. pcapfile, erf).
+
+  stripvlans		If set to 'yes', any VLAN tags in the captured
+			packets will be removed. Turning this option on
+			will have an impact on performance, even if the
+			captured packets do not have VLAN tags (since we
+			still have to check for them). Defaults to 'no'.
+
+Running corsarowdcap
+====================
+
+To use corsarowdcap, write a suitable config file (as described above) and
+run the following command:
+
+  ./corsarowdcap -c <config filename> -l <logmode>
+
+The logmode option is used to determine where any log messages that are
+produced by corsarowdcap end up. There are four options available:
+
+  terminal              write log messages to stderr
+  syslog                write log messages to syslog (daemon.log)
+  file                  write log messages to a file
+  disabled              do not write log messages
+
+
