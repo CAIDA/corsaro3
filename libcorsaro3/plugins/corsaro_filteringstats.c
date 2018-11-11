@@ -78,7 +78,7 @@ KHASH_MAP_INIT_STR(cusstats, corsaro_filteringstats_counter_t *)
 struct corsaro_filteringstats_state_t {
 
     libtrace_list_t *customfilters;
-    khash_t(fstats) *stats;
+    corsaro_filteringstats_counter_t *stats;
     khash_t(cusstats) *customstats;
     int threadid;
     uint32_t lastpktts;
@@ -109,13 +109,10 @@ corsaro_plugin_t *corsaro_filteringstats_alloc(void) {
     return &(corsaro_filteringstats_plugin);
 }
 
-static corsaro_filteringstats_counter_t *init_counter(void) {
+static void init_counter(corsaro_filteringstats_counter_t *c) {
 
-    corsaro_filteringstats_counter_t *c = NULL;
-
-    c = calloc(1, sizeof(corsaro_filteringstats_counter_t));
     if (c == NULL) {
-        return NULL;
+        return;
     }
 
     c->sourceips = kh_init(32xx);
@@ -123,8 +120,6 @@ static corsaro_filteringstats_counter_t *init_counter(void) {
     c->packets = 0;
     c->bytes = 0;
     c->filtername = NULL;
-
-    return c;
 }
 
 static void free_counter(corsaro_filteringstats_counter_t *c) {
@@ -134,7 +129,6 @@ static void free_counter(corsaro_filteringstats_counter_t *c) {
 
     kh_destroy(32xx, c->sourceips);
     kh_destroy(32xx, c->destips);
-    free(c);
 }
 
 int corsaro_filteringstats_parse_config(corsaro_plugin_t *p,
@@ -180,6 +174,7 @@ void *corsaro_filteringstats_init_processing(corsaro_plugin_t *p,
         int threadid) {
 
     struct corsaro_filteringstats_state_t *state;
+    int i;
     state = (struct corsaro_filteringstats_state_t *)malloc(
             sizeof(struct corsaro_filteringstats_state_t));
     if (state == NULL) {
@@ -188,11 +183,16 @@ void *corsaro_filteringstats_init_processing(corsaro_plugin_t *p,
         return NULL;
     }
 
-    state->stats = kh_init(fstats);
+    state->stats = calloc(CORSARO_FILTERID_MAX,
+            sizeof(corsaro_filteringstats_counter_t));;
     state->customstats = kh_init(cusstats);
     state->lastpktts = 0;
     state->threadid = threadid;
     state->customfilters = NULL;
+
+    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
+        init_counter(&(state->stats[i]));
+    }
     return state;
 }
 
@@ -206,10 +206,8 @@ int corsaro_filteringstats_halt_processing(corsaro_plugin_t *p, void *local) {
         return 0;
     }
 
-    for (k = 0; k < kh_end(state->stats); ++k) {
-        if (kh_exist(state->stats, k)) {
-            free_counter(kh_value(state->stats, k));
-        }
+    for (k = 0; k < CORSARO_FILTERID_MAX; k++) {
+        free_counter(&(state->stats[k]));
     }
 
     for (k = 0; k < kh_end(state->customstats); ++k) {
@@ -218,7 +216,7 @@ int corsaro_filteringstats_halt_processing(corsaro_plugin_t *p, void *local) {
         }
     }
 
-    kh_destroy(fstats, state->stats);
+    free(state->stats);
     kh_destroy(cusstats, state->customstats);
     if (state->customfilters) {
         corsaro_destroy_filters(state->customfilters);
@@ -264,17 +262,7 @@ int corsaro_filteringstats_start_interval(corsaro_plugin_t *p, void *local,
     }
 
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
-        corsaro_filteringstats_counter_t *c;
-
-        c = init_counter();
-        if (c == NULL) {
-            corsaro_log(p->logger,
-                "corsaro_filteringstats_start_interval: OOM when creating fresh counters.");
-            return -1;
-        }
-
-        k = kh_put(fstats, state->stats, i, &khret);
-        kh_value(state->stats, k) = c;
+        init_counter(&(state->stats[i]));
     }
 
     /* TODO create custom filters if a) the user has specified a file with
@@ -290,6 +278,7 @@ void *corsaro_filteringstats_end_interval(corsaro_plugin_t *p, void *local,
         corsaro_interval_t *int_end) {
 
     struct corsaro_filteringstats_state_t *state, *copy;
+    int i;
 
     state = (struct corsaro_filteringstats_state_t *)local;
     if (state == NULL) {
@@ -301,9 +290,17 @@ void *corsaro_filteringstats_end_interval(corsaro_plugin_t *p, void *local,
     copy = (struct corsaro_filteringstats_state_t *)malloc(
             sizeof(struct corsaro_filteringstats_state_t));
 
-    copy->stats = state->stats;
+    copy->stats = calloc(CORSARO_FILTERID_MAX,
+            sizeof(corsaro_filteringstats_counter_t));
+    memcpy(copy->stats, state->stats, CORSARO_FILTERID_MAX *
+            sizeof(corsaro_filteringstats_counter_t));
+
     copy->customstats = state->customstats;
-    state->stats = kh_init(fstats);
+
+    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
+        init_counter(&(state->stats[i]));
+    }
+
     state->customstats = kh_init(cusstats);
 
     return (void *)copy;
@@ -359,18 +356,12 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
     }
 
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
-        corsaro_filteringstats_counter_t *c;
 
         if (torun[i].result == 0) {
             continue;
         }
 
-        k = kh_get(fstats, state->stats, i);
-        if (k == kh_end(state->stats)) {
-            continue;
-        }
-        c = kh_val(state->stats, k);
-        update_counter(c, iplen, srcip, destip);
+        update_counter(&(state->stats[i]), iplen, srcip, destip);
     }
 
     /* Check all custom filters TODO */
@@ -442,45 +433,18 @@ static int update_combined_result(
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
         corsaro_filteringstats_counter_t *existing, *toadd;
 
-        /* Membership of existing and toadd should be the same! */
-        k = kh_get(fstats, combined->stats, i);
-        if (k == kh_end(combined->stats)) {
-            existing = NULL;
-        } else {
-            existing = kh_val(combined->stats, k);
-        }
-
-        k = kh_get(fstats, next->stats, i);
-        if (k == kh_end(next->stats)) {
-            toadd = NULL;
-        } else {
-            toadd = kh_val(next->stats, k);
-        }
-
-        if (toadd == NULL) {
-            continue;
-        }
-
-        if (existing == NULL) {
-            kh_del(fstats, next->stats, k);
-            k = kh_put(fstats, combined->stats, i, &khret);
-            kh_value(combined->stats, k) = toadd;
-            continue;
-        }
+        existing = &(combined->stats[i]);
+        toadd = &(next->stats[i]);
 
         existing->packets += toadd->packets;
         existing->bytes += toadd->bytes;
         combine_32_hash(existing->sourceips, toadd->sourceips);
         combine_32_hash(existing->destips, toadd->destips);
+
+        free_counter(&(next->stats[i]));
     }
 
     /* TODO combine custom filter stats */
-
-    for (i = 0; i < kh_end(next->stats); ++i) {
-        if (kh_exist(next->stats, i)) {
-            free_counter(kh_value(next->stats, i));
-        }
-    }
 
     for (i = 0; i < kh_end(next->customstats); ++i) {
         if (kh_exist(next->customstats, i)) {
@@ -488,7 +452,7 @@ static int update_combined_result(
         }
     }
 
-    kh_destroy(fstats, next->stats);
+    free(next->stats);
     kh_destroy(cusstats, next->customstats);
 
     free(next);
@@ -519,7 +483,7 @@ static int filteringstats_to_avro(corsaro_logger_t *logger, avro_value_t *av,
 }
 
 static int write_builtin_filter_stats(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, kh_fstats_t *stats,
+        corsaro_avro_writer_t *writer, corsaro_filteringstats_counter_t *stats,
         uint32_t timestamp) {
 
     int i;
@@ -529,13 +493,8 @@ static int write_builtin_filter_stats(corsaro_logger_t *logger,
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
         corsaro_filteringstats_counter_t *c;
 
-        /* Membership of existing and toadd should be the same! */
-        k = kh_get(fstats, stats, i);
-        if (k == kh_end(stats)) {
-            continue;
-        }
+        c = &(stats[i]);
 
-        c = kh_value(stats, k);
         c->bin_ts = timestamp;
         c->filtername = (char *)corsaro_get_builtin_filter_name(logger, i);
 
@@ -602,10 +561,8 @@ int corsaro_filteringstats_merge_interval_results(corsaro_plugin_t *p,
 
     /* TODO write custom filter stats */
 
-    for (i = 0; i < kh_end(combined->stats); ++i) {
-        if (kh_exist(combined->stats, i)) {
-            free_counter(kh_value(combined->stats, i));
-        }
+    for (i = 0; i < CORSARO_FILTERID_MAX; ++i) {
+        free_counter(&(combined->stats[i]));
     }
 
     for (i = 0; i < kh_end(combined->customstats); ++i) {
@@ -614,7 +571,7 @@ int corsaro_filteringstats_merge_interval_results(corsaro_plugin_t *p,
         }
     }
 
-    kh_destroy(fstats, combined->stats);
+    free(combined->stats);
     kh_destroy(cusstats, combined->customstats);
 
     free(combined);
