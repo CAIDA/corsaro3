@@ -58,7 +58,7 @@ static void cleanup_signal(int sig) {
 
 static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
-    int hwm = 100000;
+    int hwm = 10000000;
     int one = 1;
 
     tls->stopped = 0;
@@ -175,8 +175,6 @@ static void simple_free(void *data, void *hint) {
 static void tbuf_free(void *data, void *hint) {
     corsaro_tagger_buffer_t *tbuf = (corsaro_tagger_buffer_t *)hint;
 
-    pthread_mutex_lock(&(tbuf->local->bufmutex));
-
     if (tbuf->local->fbclear) {
         free(tbuf->bufspace);
         free(tbuf);
@@ -186,8 +184,6 @@ static void tbuf_free(void *data, void *hint) {
         }
         tbuf->local->freebufs = tbuf;
     }
-
-    pthread_mutex_unlock(&(tbuf->local->bufmutex));
 }
 
 static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
@@ -198,7 +194,6 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     void *pktcontents;
     uint32_t rem;
     libtrace_linktype_t linktype;
-    zmq_msg_t outgoing;
     corsaro_tagged_packet_header_t *hdr;
     int ret;
     size_t bufsize;
@@ -216,14 +211,11 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
 
     bufsize = sizeof(corsaro_tagged_packet_header_t) + rem;
 
-    pthread_mutex_lock(&tls->bufmutex);
     if (tls->freebufs) {
         tbuf = tls->freebufs;
         tls->freebufs = tls->freebufs->next;
-        pthread_mutex_unlock(&tls->bufmutex);
         tbuf->next = NULL;
     } else {
-        pthread_mutex_unlock(&tls->bufmutex);
         tbuf = (corsaro_tagger_buffer_t *)calloc(1,
                 sizeof(corsaro_tagger_buffer_t));
         tbuf->next = NULL;
@@ -256,8 +248,7 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
 
     ret = 0;
 
-    zmq_msg_init_data(&outgoing, tbuf->bufspace, bufsize, tbuf_free, tbuf);
-    if (zmq_msg_send(&outgoing, tls->pubsock, 0) < 0) {
+    if (zmq_send(tls->pubsock, tbuf->bufspace, bufsize, 0) < 0) {
         corsaro_log(glob->logger,
                 "error while publishing tagged packet: %s", strerror(errno));
         tls->errorcount ++;
@@ -267,6 +258,7 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     }
 
 endpublish:
+    tbuf_free(tbuf->bufspace, tbuf);
     return ret;
 
 }
