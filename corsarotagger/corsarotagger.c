@@ -312,9 +312,10 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
 static void *start_zmq_proxy_thread(void *data) {
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)data;
 
-    void *proxy_recv = zmq_socket(glob->zmq_ctxt, ZMQ_XSUB);
-    void *proxy_fwd = zmq_socket(glob->zmq_ctxt, ZMQ_XPUB);
+    void *proxy_recv = zmq_socket(glob->zmq_ctxt, ZMQ_SUB);
+    void *proxy_fwd = zmq_socket(glob->zmq_ctxt, ZMQ_PUB);
     int zero = 0;
+    int onesec = 1000;
 
     if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
         corsaro_log(glob->logger,
@@ -326,6 +327,20 @@ static void *start_zmq_proxy_thread(void *data) {
     if (zmq_bind(proxy_recv, PROXY_RECV_SOCKNAME) < 0) {
         corsaro_log(glob->logger,
                 "unable to create tagger proxy recv socket: %s",
+                strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_setsockopt(proxy_recv, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
+        corsaro_log(glob->logger,
+                "unable to configure tagger proxy recv socket: %s",
+                strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_setsockopt(proxy_recv, ZMQ_SUBSCRIBE, "", 0) < 0) {
+        corsaro_log(glob->logger,
+                "unable to configure tagger proxy recv socket: %s",
                 strerror(errno));
         goto proxyexit;
     }
@@ -351,7 +366,24 @@ static void *start_zmq_proxy_thread(void *data) {
         goto proxyexit;
     }
 
-    zmq_proxy(proxy_recv, proxy_fwd, NULL);
+    while (!corsaro_halted) {
+        uint8_t recvspace[3000];
+        int r;
+        corsaro_tagged_packet_header_t *hdr;
+
+        if ((r = zmq_recv(proxy_recv, recvspace, 3000, 0)) < 0) {
+            if (errno == EAGAIN) {
+                continue;
+            }
+            break;
+        }
+
+        hdr = (corsaro_tagged_packet_header_t *)recvspace;
+
+        zmq_send(proxy_fwd, recvspace,
+                hdr->pktlen + sizeof(corsaro_tagged_packet_header_t), 0);
+    }
+
 
 proxyexit:
     zmq_close(proxy_recv);
