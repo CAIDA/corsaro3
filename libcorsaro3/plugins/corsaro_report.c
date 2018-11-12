@@ -997,15 +997,10 @@ static void *start_iptracker(void *tdata) {
 
         if (msg.msgtype == CORSARO_IP_MESSAGE_HALT) {
             pthread_mutex_lock(&(track->mutex));
-            if (libtrace_list_get_size(track->outstanding) == 0) {
-                corsaro_log(track->logger, "tracker thread has been halted");
-                track->haltphase = 2;
-            } else {
-                /* give outstanding intervals a chance to finish */
-                track->haltphase = 1;
-            }
+            track->haltphase = 2;
             pthread_mutex_unlock(&(track->mutex));
-            continue;
+
+            break;
         }
 
         if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
@@ -1024,7 +1019,7 @@ static void *start_iptracker(void *tdata) {
             }
 
             /* update our record of which processing threads have
-             * completed intervals. 8*/
+             * completed intervals. */
             complete = update_outstanding(track->outstanding, msg.timestamp,
                     track->sourcethreads, msg.sender);
             if (complete == 0) {
@@ -1076,7 +1071,6 @@ static void *start_iptracker(void *tdata) {
     free_metrichash(track, (track->nextresult));
     free_knownips(track, &(track->knownips));
     free_knownips(track, &(track->knownips_next));
-    corsaro_log(track->logger, "exiting tracker thread...");
     pthread_exit(NULL);
 }
 
@@ -1229,6 +1223,7 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
             conf->tracker_count, sizeof(corsaro_report_ip_message_t));
 
     for (i = 0; i < conf->tracker_count; i++) {
+        state->nextmsg[i].msgtype = CORSARO_IP_MESSAGE_INTERVAL;
         state->nextmsg[i].update = (corsaro_report_msg_body_t *)
             get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
         state->nextmsg[i].handler = state->msgbody_handler;
@@ -1285,7 +1280,10 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
 
     /* Wait for the tracker threads to stop */
     for (i = 0; i < conf->tracker_count; i++) {
-        pthread_join(conf->iptrackers[i].tid, NULL);
+        if (conf->iptrackers[i].tid != 0) {
+            pthread_join(conf->iptrackers[i].tid, NULL);
+            conf->iptrackers[i].tid = 0;
+        }
     }
 
     destroy_corsaro_memhandler(state->msgbody_handler);
