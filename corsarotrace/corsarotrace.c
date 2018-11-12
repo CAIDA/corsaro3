@@ -511,31 +511,29 @@ endmerger:
 static int receive_tagged_packet(corsaro_trace_global_t *glob) {
 
     /* receive message, decode it, forward to an appropriate worker */
-    zmq_msg_t zmsg;
     int rcvsize, i;
-    char *rcvspace;
+    uint8_t rcvspace[3000];
     corsaro_worker_msg_t jobmsg;
     int targetworker;
 
-    zmq_msg_init(&zmsg);
-    if (zmq_msg_recv(&zmsg, glob->zmq_subsock, 0) < 0) {
+    if (zmq_recv(glob->zmq_subsock, rcvspace, 3000, 0) < 0) {
+        if (errno == EAGAIN) {
+            return 0;
+        }
+
         corsaro_log(glob->logger,
                 "error while receiving message from sub socket: %s",
                 strerror(errno));
         return -1;
     }
 
-    rcvsize = zmq_msg_size(&zmsg);
-    rcvspace = (char *)zmq_msg_data(&zmsg);
-
     jobmsg.type = CORSARO_TRACE_MSG_PACKET;
     memcpy(&jobmsg.header, rcvspace, sizeof(corsaro_tagged_packet_header_t));
-    jobmsg.packetcontent = malloc(rcvsize -
-            sizeof(corsaro_tagged_packet_header_t));
 
+    jobmsg.packetcontent = malloc(jobmsg.header.pktlen);
     memcpy(jobmsg.packetcontent,
             rcvspace + sizeof(corsaro_tagged_packet_header_t),
-            rcvsize - sizeof(corsaro_tagged_packet_header_t));
+            jobmsg.header.pktlen);
 
     if (glob->first_pkt_ts == 0) {
         glob->first_pkt_ts = jobmsg.header.ts_sec;
@@ -549,8 +547,6 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
                 targetworker, strerror(errno));
         return -1;
     }
-
-    zmq_msg_close(&zmsg);
 
     return 0;
 }
@@ -698,7 +694,6 @@ int main(int argc, char *argv[]) {
     corsaro_worker_msg_t halt;
     corsaro_trace_worker_t *workers;
     corsaro_trace_merger_t merger;
-    zmq_pollitem_t pollitems[1];
     libtrace_t *dummy;
 
     glob = configure_corsaro(argc, argv);
@@ -787,30 +782,24 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_RCVTIMEO, &linger, sizeof(linger))
+            < 0) {
+        corsaro_log(glob->logger,
+                "unable to set eagain timeout for subscription socket: %s",
+                strerror(errno));
+        return 1;
+    }
+
     /* subscribe to the desired packet streams, based on our filter options */
     if (subscribe_streams(glob) < 0) {
         return 1;
     }
 
-    pollitems[0].socket = glob->zmq_subsock;
-    pollitems[0].fd = 0;
-    pollitems[0].events = ZMQ_POLLIN;
-    pollitems[0].revents = 0;
-
     while (!corsaro_halted) {
         /* poll our sub socket */
-        if (zmq_poll(pollitems, 1, 1000) < 0) {
-            corsaro_log(glob->logger,
-                    "error while polling socket for incoming tagged packets");
+        if (receive_tagged_packet(glob) < 0) {
             break;
         }
-
-        if (pollitems[0].revents == ZMQ_POLLIN) {
-            if (receive_tagged_packet(glob) < 0) {
-                break;
-            }
-        }
-
     }
 
     halt.type = CORSARO_TRACE_MSG_STOP;
