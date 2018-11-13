@@ -589,15 +589,17 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
     uint32_t translen = 0;          \
     uint16_t source_port = 0;       \
     uint16_t dest_port = 0;         \
+    uint32_t rem = 0;               \
+    uint16_t ethertype = 0;         \
                                     \
-    ip = trace_get_ip(packet);      \
+    ip = (libtrace_ip_t *)trace_get_layer3(packet, &ethertype, &rem);      \
                                     \
-    if (ip) {                       \
-        uint32_t rem = 0;           \
+    if (ethertype == TRACE_ETHERTYPE_IP) {                       \
         uint8_t proto = 0;          \
-        void *transport = trace_get_transport(packet, &proto, &rem);    \
+        void *transport = trace_get_payload_from_ip(ip, &proto, &rem);    \
         translen = rem;             \
                                     \
+        /* XXX what about IP in IP?  */             \
         if (proto == TRACE_IPPROTO_UDP) {           \
             udp = (libtrace_udp_t *)transport;      \
             if (rem >= 4) {                         \
