@@ -30,7 +30,6 @@
 
 #include <libtrace.h>
 #include <libtrace_parallel.h>
-#include <protobuf-c/protobuf-c.h>
 
 #include "libcorsaro3.h"
 #include "libcorsaro3_log.h"
