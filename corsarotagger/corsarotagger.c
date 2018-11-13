@@ -44,6 +44,10 @@
 #include "libcorsaro3_filtering.h"
 #include "libcorsaro3_memhandler.h"
 
+#ifndef ZMQ_IMMEDIATE
+#define ZMQ_IMMEDIATE ZMQ_DELAY_ATTACH_ON_CONNECT
+#endif
+
 #define PROXY_RECV_SOCKNAME "inproc://taggerproxy"
 libtrace_callback_set_t *processing = NULL;
 
