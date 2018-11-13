@@ -164,6 +164,8 @@ AC_SEARCH_LIBS([avro_generic_value_new], [avro], ,[AC_MSG_ERROR(
 AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
 
+AC_SEARCH_LIBS([tc_version], [tcmalloc tcmalloc_minimal])
+
 AM_CONDITIONAL([WITH_WANDIO], [test "x" == x])
 
 # Checks for header files.
