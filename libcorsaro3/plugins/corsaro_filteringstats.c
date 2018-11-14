@@ -416,9 +416,13 @@ static int combine_ipmap_hash(kh_ipmap_t *dest, kh_ipmap_t *src) {
         toadd = kh_key(src, i);
         toaddval = kh_value(src, i);
 
-        /* Just add it -- any duplicates should be silently ignored */
-        destkey = kh_put(ipmap, dest, toadd, &khret);
-        combval = kh_value(dest, destkey);
+        destkey = kh_get(ipmap, dest, toadd);
+        if (destkey == kh_end(dest)) {
+            destkey = kh_put(ipmap, dest, toadd, &khret);
+            combval = 0;
+        } else {
+            combval = kh_value(dest, destkey);
+        }
 
         combval |= toaddval;
         kh_value(dest, destkey) = combval;
