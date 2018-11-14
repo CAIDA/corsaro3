@@ -187,8 +187,12 @@ int corsaro_filteringstats_halt_processing(corsaro_plugin_t *p, void *local) {
         return 0;
     }
 
-    kh_destroy(ipmap, state->sourceips);
-    kh_destroy(ipmap, state->destips);
+    if (state->sourceips) {
+        kh_destroy(ipmap, state->sourceips);
+    }
+    if (state->destips) {
+        kh_destroy(ipmap, state->destips);
+    }
 
     for (k = 0; k < kh_end(state->customstats); ++k) {
         if (kh_exist(state->customstats, k)) {
@@ -276,6 +280,9 @@ void *corsaro_filteringstats_end_interval(corsaro_plugin_t *p, void *local,
             sizeof(uint64_t) * CORSARO_FILTERID_MAX);
     memcpy(copy->bytes, state->packets,
             sizeof(uint64_t) * CORSARO_FILTERID_MAX);
+
+    state->sourceips = NULL;
+    state->destips = NULL;
 
     copy->customstats = state->customstats;
 
