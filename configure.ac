@@ -164,7 +164,9 @@ AC_SEARCH_LIBS([avro_generic_value_new], [avro], ,[AC_MSG_ERROR(
 AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
 
-AC_SEARCH_LIBS([tc_version], [tcmalloc tcmalloc_minimal])
+AC_SEARCH_LIBS([tc_version], [tcmalloc tcmalloc_minimal],
+                AC_DEFINE_UNQUOTED([HAVE_TCMALLOC], [1],
+                        [tcmalloc is used for memory allocations]))
 
 AC_CHECK_LIB([Judy], [JudyLGet],, [AC_MSG_ERROR(
                 [libJudy required])])

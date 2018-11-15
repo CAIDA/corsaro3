@@ -323,10 +323,14 @@ void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
     state->threadid = threadid;
 
 
+#ifdef HAVE_TCMALLOC
+    state->fthandler = NULL;
+#else
     state->fthandler = (corsaro_memhandler_t *)malloc(
             sizeof(corsaro_memhandler_t));
     init_corsaro_memhandler(p->logger, state->fthandler,
             sizeof(struct corsaro_flowtuple), 1000000);
+#endif
 
     state->st_hash = kh_init(sixt);
     kh_resize_sixt(state->st_hash, 1000000);
@@ -345,7 +349,9 @@ int corsaro_flowtuple_halt_processing(corsaro_plugin_t *p, void *local) {
     }
 
     kh_destroy(sixt, state->st_hash);
-    destroy_corsaro_memhandler(state->fthandler);
+    if (state->fthandler) {
+        destroy_corsaro_memhandler(state->fthandler);
+    }
     free(state);
 
     return 0;
@@ -413,7 +419,9 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
     interim = (corsaro_flowtuple_interim_t *)calloc(1,
             sizeof(corsaro_flowtuple_interim_t));
     interim->handler = state->fthandler;
-    add_corsaro_memhandler_user(state->fthandler);
+    if (state->fthandler) {
+        add_corsaro_memhandler_user(state->fthandler);
+    }
     interim->hmap = state->st_hash;
     interim->usable = 0;
     interim->sorted_keys = NULL;
@@ -449,8 +457,12 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
   /* check if this is in the hash already */
   if ((khiter = kh_get(sixt, hash, t)) == kh_end(hash)) {
     /* create a new tuple struct */
-    new_6t = (struct corsaro_flowtuple *)
-            get_corsaro_memhandler_item(state->fthandler, &memsrc);
+    if (state->fthandler) {
+        new_6t = (struct corsaro_flowtuple *)
+                get_corsaro_memhandler_item(state->fthandler, &memsrc);
+    } else {
+        new_6t = calloc(1, sizeof(struct corsaro_flowtuple));
+    }
 
 
     if (new_6t == NULL) {
@@ -653,16 +665,16 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
     }
 
     if (nextft->tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
-        snprintf(valspace, 128, "%c%c", (int)(nextft->maxmind_continent & 0xff),
-                (int)((nextft->maxmind_continent >> 8) & 0xff));
+        valspace[0] = (char)(nextft->maxmind_continent & 0xff);
+        valspace[1] = (char)((nextft->maxmind_continent >> 8) & 0xff);
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
                     valspace, strlen(valspace)) < 0) {
             return;
         }
 
-        snprintf(valspace, 128, "%c%c", (int)(nextft->maxmind_country & 0xff),
-                (int)((nextft->maxmind_country >> 8) & 0xff));
+        valspace[0] = (char)(nextft->maxmind_country & 0xff);
+        valspace[1] = (char)((nextft->maxmind_country >> 8) & 0xff);
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
                     valspace, strlen(valspace)) < 0) {
@@ -682,16 +694,16 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
 
 
     if (nextft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
-        snprintf(valspace, 128, "%c%c", (int)(nextft->netacq_continent & 0xff),
-                (int)((nextft->netacq_continent >> 8) & 0xff));
+        valspace[0] = (char)(nextft->netacq_continent & 0xff);
+        valspace[1] = (char)((nextft->netacq_continent >> 8) & 0xff);
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
                     valspace, strlen(valspace)) < 0) {
             return;
         }
 
-        snprintf(valspace, 128, "%c%c", (int)(nextft->netacq_country & 0xff),
-                (int)((nextft->netacq_country >> 8) & 0xff));
+        valspace[0] = (char)(nextft->netacq_country & 0xff);
+        valspace[1] = (char)((nextft->netacq_country >> 8) & 0xff);
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
                     valspace, strlen(valspace)) < 0) {
@@ -734,7 +746,7 @@ static void merge_sorted_inputs(corsaro_plugin_t *p,
 
     int i;
     struct corsaro_flowtuple *nextft, *prevft;
-    corsaro_memhandler_t *handler;
+    corsaro_memhandler_t *handler = NULL;
     pqueue_t *pq;
     uint64_t count = 0, exptotal = 0, combines = 0;
 
@@ -767,11 +779,19 @@ static void merge_sorted_inputs(corsaro_plugin_t *p,
 
         if (prevft && !corsaro_flowtuple_hash_equal(prevft, nextft)) {
             _write_next_merged_ft(prevft,  m->writer, p->logger);
-            release_corsaro_memhandler_item(handler, prevft->memsrc);
+            if (handler) {
+                release_corsaro_memhandler_item(handler, prevft->memsrc);
+            } else {
+                free(prevft);
+            }
         } else if (prevft) {
             combines ++;
             nextft->packet_cnt += prevft->packet_cnt;
-            release_corsaro_memhandler_item(handler, prevft->memsrc);
+            if (handler) {
+                release_corsaro_memhandler_item(handler, prevft->memsrc);
+            } else {
+                free(prevft);
+            }
         }
 
         count ++;
@@ -793,7 +813,11 @@ static void merge_sorted_inputs(corsaro_plugin_t *p,
 
     if (prevft) {
         _write_next_merged_ft(prevft,  m->writer, p->logger);
-        release_corsaro_memhandler_item(handler, prevft->memsrc);
+        if (handler) {
+            release_corsaro_memhandler_item(handler, prevft->memsrc);
+        } else {
+            free(prevft);
+        }
     }
 
 }
@@ -821,8 +845,12 @@ static void merge_unsorted_inputs(corsaro_plugin_t *p,
                     khiter);
 
             _write_next_merged_ft(nextft, m->writer, p->logger);
-            release_corsaro_memhandler_item(inputs[i].handler,
-                        nextft->memsrc);
+            if (inputs[i].handler) {
+                release_corsaro_memhandler_item(inputs[i].handler,
+                            nextft->memsrc);
+            } else {
+                free(nextft);
+            }
             count ++;
         }
     }
@@ -926,7 +954,9 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
         if (inputs[i].sorted_keys) {
             free(inputs[i].sorted_keys);
         }
-        destroy_corsaro_memhandler(inputs[i].handler);
+        if (inputs[i].handler) {
+            destroy_corsaro_memhandler(inputs[i].handler);
+        }
 
         interim = (corsaro_flowtuple_interim_t *)(tomerge[i]);
 
