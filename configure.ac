@@ -166,6 +166,9 @@ AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
 
 AC_SEARCH_LIBS([tc_version], [tcmalloc tcmalloc_minimal])
 
+AC_CHECK_LIB([Judy], [JudyLGet],, [AC_MSG_ERROR(
+                [libJudy required])])
+
 AM_CONDITIONAL([WITH_WANDIO], [test "x" == x])
 
 # Checks for header files.

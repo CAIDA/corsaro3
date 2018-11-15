@@ -31,6 +31,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <yaml.h>
+#include <Judy.h>
 
 #include "khash.h"
 #include "ksort.h"
@@ -78,8 +79,8 @@ KHASH_MAP_INIT_STR(cusstats, corsaro_filteringstats_counter_t *)
 struct corsaro_filteringstats_state_t {
 
     libtrace_list_t *customfilters;
-    khash_t(ipmap) *sourceips;
-    khash_t(ipmap) *destips;
+    Pvoid_t sourceips;
+    Pvoid_t destips;
     uint64_t packets[CORSARO_FILTERID_MAX];
     uint64_t bytes[CORSARO_FILTERID_MAX];
 
@@ -180,7 +181,7 @@ void *corsaro_filteringstats_init_processing(corsaro_plugin_t *p,
 int corsaro_filteringstats_halt_processing(corsaro_plugin_t *p, void *local) {
 
     struct corsaro_filteringstats_state_t *state;
-    int k;
+    int k, ret;
 
     state = (struct corsaro_filteringstats_state_t *)local;
     if (state == NULL) {
@@ -188,10 +189,10 @@ int corsaro_filteringstats_halt_processing(corsaro_plugin_t *p, void *local) {
     }
 
     if (state->sourceips) {
-        kh_destroy(ipmap, state->sourceips);
+        JLFA(ret, state->sourceips);
     }
     if (state->destips) {
-        kh_destroy(ipmap, state->destips);
+        JLFA(ret, state->destips);
     }
 
     for (k = 0; k < kh_end(state->customstats); ++k) {
@@ -244,8 +245,6 @@ int corsaro_filteringstats_start_interval(corsaro_plugin_t *p, void *local,
         return -1;
     }
 
-    state->sourceips = kh_init(ipmap);
-    state->destips = kh_init(ipmap);
     memset(state->packets, 0, sizeof(uint64_t) * CORSARO_FILTERID_MAX);
     memset(state->bytes, 0, sizeof(uint64_t) * CORSARO_FILTERID_MAX);
 
@@ -298,9 +297,11 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
     corsaro_filter_torun_t torun[CORSARO_FILTERID_MAX];
     libtrace_ip_t *ip;
     int i, kret;
+    PWord_t srcvalp, destvalp;
     khiter_t srckey, destkey;
     uint16_t iplen;
     uint32_t srcip, destip;
+    uint32_t mask;
 
     state = (struct corsaro_filteringstats_state_t *)local;
     if (state == NULL) {
@@ -330,20 +331,18 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
     }
 
     /* TODO error handling via kret value */
-    srckey = kh_get(ipmap, state->sourceips, srcip);
-    if (srckey == kh_end(state->sourceips)) {
-        srckey = kh_put(ipmap, state->sourceips, srcip, &kret);
-        kh_value(state->sourceips, srckey) = 0;
+
+    JLG(srcvalp, state->sourceips, srcip);
+    if (srcvalp == NULL) {
+        JLI(srcvalp, state->sourceips, srcip);
     }
 
-    destkey = kh_get(ipmap, state->destips, destip);
-    if (destkey == kh_end(state->destips)) {
-        destkey = kh_put(ipmap, state->destips, destip, &kret);
-        kh_value(state->destips, destkey) = 0;
+    JLG(destvalp, state->destips, destip);
+    if (destvalp == NULL) {
+        JLI(destvalp, state->destips, destip);
     }
 
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
-        uint32_t mask;
 
         if (torun[i].result == 0) {
             continue;
@@ -352,14 +351,8 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
         state->packets[i] ++;
         state->bytes[i] += iplen;
 
-        mask = kh_value(state->sourceips, srckey);
-        mask |= (1 << i);
-        kh_value(state->sourceips, srckey) = mask;
-
-        mask = kh_value(state->destips, destkey);
-        mask |= (1 << i);
-        kh_value(state->destips, destkey) = mask;
-
+        (*srcvalp) = (*srcvalp) | (1 << i);
+        (*destvalp) = (*destvalp) | (1 << i);
     }
 
     /* Check all custom filters TODO */
@@ -401,42 +394,33 @@ int corsaro_filteringstats_halt_merging(corsaro_plugin_t *p, void *local) {
 }
 
 /* XXX Consider making this a utility function? */
-static int combine_ipmap_hash(kh_ipmap_t *dest, kh_ipmap_t *src) {
+static int combine_ipmap_hash(Pvoid_t dest, Pvoid_t src) {
 
-    khiter_t i, destkey;
-    uint32_t toadd;
-    uint32_t toaddval, combval;
-    int khret;
+    Word_t iterind = 0;
+    PWord_t pval;
+    PWord_t found;
 
-    for (i = kh_begin(src); i != kh_end(src); ++i) {
-        if (!kh_exist(src, i)) {
-            continue;
-        }
-
-        toadd = kh_key(src, i);
-        toaddval = kh_value(src, i);
-
-        destkey = kh_get(ipmap, dest, toadd);
-        if (destkey == kh_end(dest)) {
-            destkey = kh_put(ipmap, dest, toadd, &khret);
-            combval = 0;
+    JLF(pval, src, iterind);
+    while (pval) {
+        JLG(found, dest, iterind);
+        if (found == NULL) {
+            JLI(found, dest, iterind);
+            (*found) = (*pval);
         } else {
-            combval = kh_value(dest, destkey);
+            (*found) = (*found) | (*pval);
         }
 
-        combval |= toaddval;
-        kh_value(dest, destkey) = combval;
+        JLN(pval, src, iterind);
     }
     return 0;
 }
-
 
 static int update_combined_result(
         struct corsaro_filteringstats_state_t *combined,
         struct corsaro_filteringstats_state_t *next,
         corsaro_logger_t *logger) {
 
-    int i, khret;
+    int i, khret, ret;
     khiter_t k;
 
     combine_ipmap_hash(combined->sourceips, next->sourceips);
@@ -456,8 +440,8 @@ static int update_combined_result(
         }
     }
 
-    kh_destroy(ipmap, next->sourceips);
-    kh_destroy(ipmap, next->destips);
+    JLFA(ret, next->sourceips);
+    JLFA(ret, next->destips);
     kh_destroy(cusstats, next->customstats);
 
     free(next);
@@ -487,26 +471,21 @@ static int filteringstats_to_avro(corsaro_logger_t *logger, avro_value_t *av,
     return 0;
 }
 
-static void count_filter_ips(uint32_t *results, kh_ipmap_t *ipmap) {
+static void count_filter_ips(uint32_t *results, Pvoid_t ipmap) {
 
     int i;
-    khiter_t k;
-    uint32_t ipfilt;
+    PWord_t pval;
+    Word_t iterindex = 0;
 
-    for (k = kh_begin(ipmap); k != kh_end(ipmap); ++k) {
-        if (!kh_exist(ipmap, k)) {
-            continue;
-        }
-
-        ipfilt = kh_value(ipmap, k);
-
+    JLF(pval, ipmap, iterindex);
+    while (pval) {
         for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
-            if (ipfilt & (1 << i)) {
+            if ((*pval) & (1 << i)) {
                 results[i] ++;
             }
         }
+        JLN(pval, ipmap, iterindex);
     }
-
 }
 
 static int write_builtin_filter_stats(corsaro_logger_t *logger,
@@ -559,7 +538,7 @@ int corsaro_filteringstats_merge_interval_results(corsaro_plugin_t *p,
     struct corsaro_filteringstats_state_t *combined;
     corsaro_filteringstats_merge_state_t *m;
     int i;
-    int ret = 0;
+    int ret = 0, rcret;
 
     m = (corsaro_filteringstats_merge_state_t *)(local);
     if (m == NULL) {
@@ -606,8 +585,8 @@ int corsaro_filteringstats_merge_interval_results(corsaro_plugin_t *p,
         }
     }
 
-    kh_destroy(ipmap, combined->sourceips);
-    kh_destroy(ipmap, combined->destips);
+    JLFA(rcret, combined->sourceips);
+    JLFA(rcret, combined->destips);
     kh_destroy(cusstats, combined->customstats);
 
     free(combined);
