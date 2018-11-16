@@ -33,39 +33,124 @@
 
 #include "libcorsaro3_log.h"
 
+/** Structure for a custom corsaro filter */
 typedef struct corsaro_filter {
 
+    /** BPF string to be applied to the packet for this filter */
     char *filterstring;
+
+    /** Label used to identify this filter in output */
     char *filtername;
 
 } corsaro_filter_t;
 
+/** List of IDs for built-in filters.
+ *
+ *  Built-in filters are those that are implemented within corsaro
+ *  using libtrace code rather than by compiling BPF at run-time.
+ *  Note that filter descriptions in the documentation are generalised
+ *  and may not fully describe the filter -- refer to the source code
+ *  for the relevant filter for this information.
+ */
 typedef enum {
 
+    /** Matches if the packet is likely to have a spoofed source address.
+     *  Encompasses a number of sub-filters (if any match, then spoofed
+     *  also matches). */
     CORSARO_FILTERID_SPOOFED,
+
+    /** Matches if the packet is likely to match traffic that is known
+     *  to be erratic in volume (as opposed to consistent base-line
+     *  background traffic). Encompasses a number of sub-filters
+     *  (if any match, then erratic also matches).
+     */
     CORSARO_FILTERID_ERRATIC,
+
+    /** Matches if the source address belongs to any of the non-routable
+     *  RFC5735 address ranges.
+     */
     CORSARO_FILTERID_ROUTED,
 
+    /** Matches packets that are using a protocol other than TCP, UDP or
+     *  ICMP. Also matches TCP packets that have unconventional flag
+     *  combinations.
+     */
     CORSARO_FILTERID_ABNORMAL_PROTOCOL,
+
+    /** Matches if the packet has a TTL >= 200 */
     CORSARO_FILTERID_TTL_200,
+
+    /** Matches if the packet is an IP fragment */
     CORSARO_FILTERID_FRAGMENT,
+
+    /** Matches if the last byte of the source IP address is zero */
     CORSARO_FILTERID_LAST_SRC_IP_0,
+
+    /** Matches if the last byte of the source IP address is 255 */
     CORSARO_FILTERID_LAST_SRC_IP_255,
+
+    /** Matches if the source IP address and destination IP address are
+     *  the same. */
     CORSARO_FILTERID_SAME_SRC_DEST_IP,
+
+    /** Matches if the packet is UDP and has either a source or destination
+     *  port of zero.
+     */
     CORSARO_FILTERID_UDP_PORT_0,
+
+    /** Matches if the packet is TCP and has either a source or destination
+     *  port of zero.
+     */
     CORSARO_FILTERID_TCP_PORT_0,
+
+    /** Matches if the source address belongs to any of the non-routable
+     *  RFC5735 address ranges.
+     */
     CORSARO_FILTERID_RFC5735,
+
+    /** Matches packets that are likely to be backscatter, e.g. ICMP
+     *  replies, TCP SYN ACKs and RSTs, DNS replies
+     */
     CORSARO_FILTERID_BACKSCATTER,
+
+    /** Matches UDP bittorrent packets */
     CORSARO_FILTERID_BITTORRENT,
+
+    /** Matches UDP packets with a specific payload pattern */
     CORSARO_FILTERID_UDP_0X31,
+
+    /** Matches UDP packets with an IP length of 96 */
     CORSARO_FILTERID_UDP_IPLEN_96,
+
+    /** Matches packets where either the source or destination port is 53
+     *  (i.e. DNS)
+     */
     CORSARO_FILTERID_PORT_53,
+
+    /** Matches TCP packets where either the source or destination port is 23
+     *  (i.e. telnet)
+     */
     CORSARO_FILTERID_TCP_PORT_23,
+
+    /** Matches TCP packets where either the source or destination port is 80
+     *  (i.e. HTTP)
+     */
     CORSARO_FILTERID_TCP_PORT_80,
+
+    /** Matches TCP packets where either the source or destination port is 5000
+     *  (i.e. UPnP)
+     */
     CORSARO_FILTERID_TCP_PORT_5000,
+
+    /** Matches UDP packets where the payload appears to be a DNS response */
     CORSARO_FILTERID_DNS_RESP_NONSTANDARD,
+
+    /** Matches UDP packets that appear to be NetBIOS queries */
     CORSARO_FILTERID_NETBIOS_QUERY_NAME,
 
+    /** Special reserved ID for the "last" filter -- this should always
+     *  be at the end of enum declaration.
+     */
     CORSARO_FILTERID_MAX
 } corsaro_builtin_filter_id_t;
 
