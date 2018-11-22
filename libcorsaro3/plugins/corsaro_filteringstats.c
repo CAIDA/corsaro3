@@ -73,7 +73,6 @@ typedef struct corsaro_filteringstats_config {
     char *filtersource;
 } corsaro_filteringstats_config_t;
 
-KHASH_MAP_INIT_INT(ipmap, uint32_t)
 KHASH_MAP_INIT_STR(cusstats, corsaro_filteringstats_counter_t *)
 
 struct corsaro_filteringstats_state_t {
