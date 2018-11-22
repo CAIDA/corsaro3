@@ -90,6 +90,7 @@ struct corsaro_flowtuple {
   /** The number of packets that comprise this flowtuple
       This is populated immediately before the tuple is written out */
   uint32_t packet_cnt;
+  uint32_t hash_val;
 
   uint16_t maxmind_country;
   uint16_t maxmind_continent;
@@ -141,7 +142,7 @@ CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_flowtuple)
  *         |  TTL  |TCP_FLG|PROTO|  LEN   |
  *         --------------------------------
  */
-khint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
+uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
 
 /** Tests two flowtuples for equality */
 #define corsaro_flowtuple_hash_equal(alpha, bravo)                             \

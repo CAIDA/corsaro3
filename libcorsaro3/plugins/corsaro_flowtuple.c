@@ -25,6 +25,8 @@
  *
  */
 
+#include "config.h"
+
 #include <arpa/inet.h>
 #include <assert.h>
 #include <inttypes.h>
@@ -35,6 +37,7 @@
 #include <errno.h>
 #include <yaml.h>
 #include <sys/mman.h>
+#include <Judy.h>
 
 #include "pqueue.h"
 #include "libcorsaro3.h"
@@ -76,8 +79,7 @@ typedef enum corsaro_flowtuple_sort {
 
 /** Holds the state for an instance of this plugin */
 struct corsaro_flowtuple_state_t {
-    /** Array of hash tables, one for each corsaro_flowtuple_class_type_t */
-    khash_t(sixt) * st_hash;
+    Pvoid_t  st_hash;
 
     /** Timestamp of the start of the current interval */
     uint32_t last_interval_start;
@@ -95,9 +97,9 @@ struct corsaro_flowtuple_state_t {
 
 typedef struct corsaro_flowtuple_iterator {
     corsaro_memhandler_t *handler;
-    khiter_t khiter;
     int sortiter;
-    kh_sixt_t *hmap;
+    uint64_t hsize;
+    Pvoid_t hmap;
     struct corsaro_flowtuple *nextft;
     corsaro_result_type_t state;
     struct corsaro_flowtuple **sorted_keys;
@@ -105,7 +107,8 @@ typedef struct corsaro_flowtuple_iterator {
 
 typedef struct corsaro_flowtuple_interim {
     corsaro_memhandler_t *handler;
-    kh_sixt_t *hmap;
+    Pvoid_t hmap;
+    uint64_t hsize;
     struct corsaro_flowtuple **sorted_keys;
     corsaro_logger_t *logger;
     pthread_mutex_t mutex;
@@ -270,31 +273,35 @@ int corsaro_flowtuple_finalise_config(corsaro_plugin_t *p,
 }
 
 /** Given a st hash, malloc and return a sorted array of pointers */
-static int sort_hash(corsaro_logger_t *logger, kh_sixt_t *hash,
+static int sort_hash(corsaro_logger_t *logger, Pvoid_t hash,
         struct corsaro_flowtuple ***sorted)
 {
     khiter_t i;
-    struct corsaro_flowtuple **ptr;
+    struct corsaro_flowtuple **ptr, *ft;
+    Word_t index, hsize;
+    PWord_t pval;
 
-    if ((ptr = malloc(sizeof(struct corsaro_flowtuple *) * kh_size(hash))) == NULL) {
+    JLC(hsize, hash, 0, -1);
+    assert(hsize > 0);
+
+    if ((ptr = malloc(sizeof(struct corsaro_flowtuple *) * hsize)) == NULL) {
         corsaro_log(logger, "could not malloc array for sorted flowtuple keys");
         return -1;
     }
     *sorted = ptr;
 
-    if (kh_size(hash) == 0) {
-        /* no need to try and sort an empty hash */
-        return 0;
+    index = 0;
+    JLF(pval, hash, index);
+    while (pval) {
+        ft = (struct corsaro_flowtuple *)(*pval);
+
+        *ptr = ft;
+        ptr ++;
+
+        JLN(pval, hash, index);
     }
 
-    for (i = kh_begin(hash); i != kh_end(hash); ++i) {
-        if (kh_exist(hash, i)) {
-            *ptr = kh_key(hash, i);
-            ptr++;
-        }
-    }
-
-    ks_introsort(sixt, kh_size(hash), *sorted);
+    ks_introsort(sixt, hsize, *sorted);
     return 0;
 }
 
@@ -332,8 +339,7 @@ void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
             sizeof(struct corsaro_flowtuple), 1000000);
 #endif
 
-    state->st_hash = kh_init(sixt);
-    kh_resize_sixt(state->st_hash, 1000000);
+    state->st_hash = NULL;
 
     return state;
 }
@@ -342,13 +348,20 @@ int corsaro_flowtuple_halt_processing(corsaro_plugin_t *p, void *local) {
 
     struct corsaro_flowtuple_state_t *state;
     int i;
+    PWord_t pval;
+    Word_t index = 0;
 
     state = (struct corsaro_flowtuple_state_t *)local;
     if (state == NULL) {
         return 0;
     }
 
-    kh_destroy(sixt, state->st_hash);
+    JLF(pval, state->st_hash, index);
+    while (pval) {
+
+        JLN(pval, state->st_hash, index);
+    }
+
     if (state->fthandler) {
         destroy_corsaro_memhandler(state->fthandler);
     }
@@ -413,6 +426,7 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
     struct corsaro_flowtuple_state_t *state;
     corsaro_flowtuple_interim_t *interim = NULL;
     kh_sixt_t *h;
+    Word_t hashsize;
 
     FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_end_interval", NULL);
 
@@ -423,13 +437,15 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
         add_corsaro_memhandler_user(state->fthandler);
     }
     interim->hmap = state->st_hash;
+    JLC(hashsize, state->st_hash, 0, -1);
+    interim->hsize = hashsize;
     interim->usable = 0;
     interim->sorted_keys = NULL;
     interim->logger = p->logger;
 
     pthread_mutex_init(&(interim->mutex), NULL);
 
-    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
+    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED && hashsize > 0) {
         pthread_create(&(interim->tid), NULL, sort_job, interim);
     } else {
         interim->usable = 1;
@@ -437,7 +453,7 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
 
     /* Replace the hash map with an empty one -- the merging process
      * will free up everything associated with the old hash map. */
-    state->st_hash = kh_init(sixt);
+    state->st_hash = NULL;
     return interim;
 }
 
@@ -446,16 +462,16 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
 static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
         struct corsaro_flowtuple_state_t *state, struct corsaro_flowtuple *t,
         uint32_t increment) {
-  kh_sixt_t *hash = state->st_hash;
   int khret;
   khiter_t khiter;
   struct corsaro_flowtuple *new_6t = NULL;
   corsaro_memsource_t *memsrc = NULL;
-
-  assert(hash != NULL);
+  PWord_t pval;
 
   /* check if this is in the hash already */
-  if ((khiter = kh_get(sixt, hash, t)) == kh_end(hash)) {
+  JLG(pval, state->st_hash, t->hash_val);
+  if (pval == NULL) {
+
     /* create a new tuple struct */
     if (state->fthandler) {
         new_6t = (struct corsaro_flowtuple *)
@@ -473,16 +489,14 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
     /* fill it */
     memcpy(new_6t, t, sizeof(struct corsaro_flowtuple));
     new_6t->memsrc = memsrc;
+    new_6t->packet_cnt = increment;
 
     /* add it to the hash */
-    khiter = kh_put(sixt, hash, new_6t, &khret);
-    /* set the count to one */
-    /*kh_value(hash, khiter) = increment;*/
-    new_6t->packet_cnt = increment;
+    JLI(pval, state->st_hash, new_6t->hash_val);
+    *pval = (Word_t)new_6t;
   } else {
     /* simply increment the existing one */
-    /*kh_value(hash, khiter)+=increment;*/
-    new_6t = kh_key(hash, khiter);
+    new_6t =(struct corsaro_flowtuple *)(*pval);
 
     /* will this cause a wrap? */
     assert((UINT32_MAX - new_6t->packet_cnt) > increment);
@@ -558,8 +572,11 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     if (tags) {
         t.tagproviders = tags->providers_used;
     } else {
+        assert(0);
         t.tagproviders = 0;
     }
+
+    t.hash_val = corsaro_flowtuple_hash_func(&t);
 
     if (corsaro_flowtuple_add_inc(p->logger, state, &t, 1) != 0) {
         corsaro_log(p->logger, "could not increment value for flowtuple");
@@ -664,20 +681,24 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
         return;
     }
 
+    assert(nextft->tagproviders != 0);
+
     if (nextft->tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
         valspace[0] = (char)(nextft->maxmind_continent & 0xff);
         valspace[1] = (char)((nextft->maxmind_continent >> 8) & 0xff);
+        valspace[2] = '\0';
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                    valspace, strlen(valspace)) < 0) {
+                    valspace, 2) < 0) {
             return;
         }
 
         valspace[0] = (char)(nextft->maxmind_country & 0xff);
         valspace[1] = (char)((nextft->maxmind_country >> 8) & 0xff);
+        valspace[2] = '\0';
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                    valspace, strlen(valspace)) < 0) {
+                    valspace, 2) < 0) {
             return;
         }
 
@@ -696,17 +717,19 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
     if (nextft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
         valspace[0] = (char)(nextft->netacq_continent & 0xff);
         valspace[1] = (char)((nextft->netacq_continent >> 8) & 0xff);
+        valspace[2] = '\0';
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                    valspace, strlen(valspace)) < 0) {
+                    valspace, 2) < 0) {
             return;
         }
 
         valspace[0] = (char)(nextft->netacq_country & 0xff);
         valspace[1] = (char)((nextft->netacq_country >> 8) & 0xff);
+        valspace[2] = '\0';
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                    valspace, strlen(valspace)) < 0) {
+                    valspace, 2) < 0) {
             return;
         }
 
@@ -758,8 +781,9 @@ static void merge_sorted_inputs(corsaro_plugin_t *p,
     }
 
     for (i = 0; i < fin->threads_ended; i++) {
-        exptotal += kh_size(inputs[i].hmap);
-        while (inputs[i].sortiter < kh_size(inputs[i].hmap)) {
+
+        exptotal += inputs[i].hsize;
+        while (inputs[i].sortiter < inputs[i].hsize) {
             nextft = inputs[i].sorted_keys[inputs[i].sortiter];
             inputs[i].sortiter ++;
 
@@ -777,7 +801,7 @@ static void merge_sorted_inputs(corsaro_plugin_t *p,
 
         ftsrc = (corsaro_flowtuple_iterator_t *)(nextft->from);
 
-        if (prevft && !corsaro_flowtuple_hash_equal(prevft, nextft)) {
+        if (prevft && (prevft->hash_val != nextft->hash_val)) {
             _write_next_merged_ft(prevft,  m->writer, p->logger);
             if (handler) {
                 release_corsaro_memhandler_item(handler, prevft->memsrc);
@@ -798,7 +822,7 @@ static void merge_sorted_inputs(corsaro_plugin_t *p,
 
         prevft = nextft;
         handler = ftsrc->handler;
-        if (ftsrc->sortiter == kh_size(ftsrc->hmap)) {
+        if (ftsrc->sortiter == ftsrc->hsize) {
             continue;
         }
 
@@ -828,21 +852,17 @@ static void merge_unsorted_inputs(corsaro_plugin_t *p,
         corsaro_flowtuple_iterator_t *inputs, corsaro_fin_interval_t *fin) {
 
     int i;
-    khiter_t khiter;
     struct corsaro_flowtuple *nextft;
 
     uint64_t count = 0;
 
     for (i = 0; i < fin->threads_ended; i++) {
-        for (khiter = kh_begin(inputs[i].hmap);
-                khiter != kh_end(inputs[i].hmap); ++khiter) {
+        PWord_t pval;
+        Word_t index = 0;
 
-            if (!kh_exist(inputs[i].hmap, khiter)) {
-                continue;
-            }
-
-            nextft = (struct corsaro_flowtuple *)kh_key(inputs[i].hmap,
-                    khiter);
+        JLF(pval, inputs[i].hmap, index);
+        while (pval) {
+            nextft = (struct corsaro_flowtuple *)(*pval);
 
             _write_next_merged_ft(nextft, m->writer, p->logger);
             if (inputs[i].handler) {
@@ -852,6 +872,8 @@ static void merge_unsorted_inputs(corsaro_plugin_t *p,
                 free(nextft);
             }
             count ++;
+
+            JLN(pval, inputs[i].hmap, index);
         }
     }
 }
@@ -913,8 +935,8 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
                 inputsready ++;
 
                 inputs[i].hmap = interim->hmap;
+                inputs[i].hsize = interim->hsize;
                 inputs[i].handler = interim->handler;
-                inputs[i].khiter = kh_begin(inputs[i].hmap);
                 inputs[i].nextft = NULL;
                 if (interim->usable == 1) {
                     inputs[i].state = CORSARO_RESULT_TYPE_DATA;
@@ -949,8 +971,10 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
     /* All inputs are exhausted */
     for (i = 0; i < fin->threads_ended; i++) {
         corsaro_flowtuple_interim_t *interim;
+        Word_t ret;
 
-        kh_destroy(sixt, inputs[i].hmap);
+        JLFA(ret, inputs[i].hmap);
+
         if (inputs[i].sorted_keys) {
             free(inputs[i].sorted_keys);
         }
@@ -993,9 +1017,9 @@ int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local) {
  *         |  TTL  |TCP_FLG|PROTO|  LEN   |
  *         --------------------------------
  */
-khint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft)
+uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft)
 {
-  khint32_t h = (khint32_t)ft->src_ip * 59;
+  uint32_t h = (uint32_t)ft->src_ip * 59;
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR(ft->dst_ip);
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR(ft->src_port << 16);
   CORSARO_FLOWTUPLE_SHIFT_AND_XOR(ft->dst_port);
