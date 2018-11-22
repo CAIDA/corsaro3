@@ -25,6 +25,7 @@
  *
  */
 
+#include "config.h"
 #include <arpa/inet.h>
 #include <assert.h>
 #include <inttypes.h>
@@ -39,8 +40,8 @@
 #include <errno.h>
 #include <math.h>
 
-#include <uthash.h>
-#include "khash.h"
+#include <Judy.h>
+
 #include "libcorsaro3.h"
 #include "libcorsaro3_memhandler.h"
 #include "libcorsaro3_plugin.h"
@@ -148,27 +149,10 @@ typedef enum {
 
 /** Types of messages that can be sent to the IP tracker threads */
 enum {
-    CORSARO_IP_MESSAGE_HALT,        /* Halt tracker thread */
-    CORSARO_IP_MESSAGE_INTERVAL     /* Interval has ended, begin tally */
+    CORSARO_IP_MESSAGE_HALT,        /**< Halt tracker thread */
+    CORSARO_IP_MESSAGE_UPDATE,      /**< Message contains new stats */
+    CORSARO_IP_MESSAGE_INTERVAL     /**< Interval has ended, begin tally */
 };
-
-/** Hash map for storing metrics that have been observed for an IP address */
-KHASH_MAP_INIT_INT64(mset, uint8_t);
-
-/** Structure for tracking metrics that have been observed for an IP address,
- *  used in situations where the total number of metrics is low and thus
- *  a hash map is overkill.
- */
-typedef struct corsaro_standalone_metric {
-    uint64_t metricid;  /* the metric ID */
-    uint8_t metval;     /* a bitmap used to indicate if the IP has been a
-                         * source and/or dest IP for this metric */
-} PACKED corsaro_standalone_metric_t;
-
-/** Maximum number of metrics that can be seen by an IP address before we
- *  switch it over to using a hash map instead of an array.
- */
-#define METRIC_ARRAY_SIZE 20
 
 /** Structure describing an IP address that has been observed by an IP
  *  tracker thread.
@@ -178,26 +162,17 @@ typedef struct corsaro_standalone_metric {
  */
 typedef struct corsaro_ip_hash {
 
-    /** Hash state information required for uthash */
-    UT_hash_handle hh;
-
     /** The IP address as a 32 bit integer */
     uint32_t ipaddr;
 
     /** Pointer to the memory blob that this structure came from */
     corsaro_memsource_t *memsrc;
 
-    /** Array used to store associated metrics when the total
-     *  number of metrics is relatively small.
-     */
-    corsaro_standalone_metric_t firstmetrics[METRIC_ARRAY_SIZE];
-
     /** Number of metrics associated with this IP. */
     uint32_t metriccount;
 
-    /** Hash map used to store associated metrics once the total
-     *  number of metrics outgrows the firstmetrics array. */
-    kh_mset_t *metricsseen;
+    /** Judy array used to store associated metrics */
+    Pvoid_t metricsseen;
 } PACKED corsaro_ip_hash_t;
 
 
@@ -223,9 +198,6 @@ typedef struct corsaro_metric_ip_hash_t {
     /** Pointer to the memory blob that this structure came from */
     corsaro_memsource_t *memsrc;
 } PACKED corsaro_metric_ip_hash_t;
-
-/** Hash map for storing tallies for all observed metrics */
-KHASH_MAP_INIT_INT64(tally, corsaro_metric_ip_hash_t *);
 
 /** Structure used to keep track of which processing threads have ended
  *  an interval and which ones we are still waiting on.
@@ -269,12 +241,12 @@ typedef struct corsaro_report_iptracker {
     pthread_mutex_t mutex;
 
     /** Hash map of all IP addresses observed for the current interval */
-    corsaro_ip_hash_t *knownips;
+    Pvoid_t knownips;
 
     /** Hash map of all IP addresses observed that should be counted towards
      *  the next interval.
      */
-    corsaro_ip_hash_t *knownips_next;
+    Pvoid_t knownips_next;
 
     /** Corsaro custom memory allocator for IP address structures */
     corsaro_memhandler_t *ip_handler;
@@ -282,14 +254,14 @@ typedef struct corsaro_report_iptracker {
     corsaro_memhandler_t *metric_handler;
 
     /** Hash map containing the most recent complete metric tallies */
-    kh_tally_t *lastresult;
+    Pvoid_t lastresult;
 
     /** Hash map containing the ongoing tallies for the current interval */
-    kh_tally_t *currentresult;
+    Pvoid_t currentresult;
 
     /** Hash map containing the ongoing tallies for tags that should be
      *  counted towards the next interval. */
-    kh_tally_t *nextresult;
+    Pvoid_t nextresult;
 
     /** Reference to a corsaro logger for logging error messages etc. */
     corsaro_logger_t *logger;
@@ -456,8 +428,6 @@ typedef struct corsaro_report_result {
     /** Pointer to the memory blob that this structure came from */
     corsaro_memsource_t *memsrc;
 
-    /** Hash state information required for uthash */
-    UT_hash_handle hh;
 } PACKED corsaro_report_result_t;
 
 /** Avro schema for report plugin results */
@@ -584,25 +554,31 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
  *          address.
  */
 static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
-        corsaro_ip_hash_t **knownips, uint32_t ipaddr) {
+        Pvoid_t *knownips, uint32_t ipaddr) {
 
     corsaro_ip_hash_t *iphash;
     corsaro_memsource_t *memsrc;
+    PWord_t pval;
 
-    HASH_FIND(hh, *knownips, &(ipaddr), sizeof(ipaddr), iphash);
-    if (!iphash) {
-        iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
-                track->ip_handler, &memsrc);
+    JLG(pval, *knownips, (Word_t)ipaddr);
+    if (pval == NULL) {
+        if (track->ip_handler) {
+            iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
+                    track->ip_handler, &memsrc);
+            iphash->memsrc = memsrc;
+        } else {
+            iphash = calloc(1, sizeof(corsaro_ip_hash_t));
+        }
         iphash->ipaddr = ipaddr;
-        iphash->memsrc = memsrc;
-        memset(iphash->firstmetrics, 0, sizeof(corsaro_standalone_metric_t) *
-                METRIC_ARRAY_SIZE);
+        iphash->metricsseen = NULL;
         iphash->metriccount = 0;
-        iphash->metricsseen = kh_init(mset);
 
-        HASH_ADD_KEYPTR(hh, *knownips, &(iphash->ipaddr),
-                sizeof(iphash->ipaddr), iphash);
+        JLI(pval, *knownips, (Word_t)ipaddr);
+        *pval = (Word_t)(iphash);
+    } else {
+        iphash = (corsaro_ip_hash_t *)(*pval);
     }
+
     return iphash;
 
 }
@@ -623,14 +599,14 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
 static inline void update_metric_map(corsaro_ip_hash_t *iphash,
         uint64_t metricid, uint8_t issrc, corsaro_metric_ip_hash_t *m) {
 
-    int khret;
-    khiter_t khiter;
     uint8_t metval;
+    PWord_t pval;
 
-    khiter = kh_put(mset, iphash->metricsseen, metricid, &khret);
-    if (khret == 1) {
+    JLG(pval, iphash->metricsseen, (Word_t)metricid);
+    if (pval == NULL) {
         /* metricid was not in the metric hash for this IP */
-        kh_value(iphash->metricsseen, khiter) = 0;
+        JLI(pval, iphash->metricsseen, (Word_t)metricid);
+        *pval = 0;
         iphash->metriccount ++;
     }
 
@@ -643,83 +619,14 @@ static inline void update_metric_map(corsaro_ip_hash_t *iphash,
      * If we set a bit for the first time, we can also increment our combined
      * tally of source or dest IPs for this metric.
      */
-    metval = kh_value(iphash->metricsseen, khiter);
+    metval = (uint8_t) (*pval);
     if (issrc && !(metval & 0x01)) {
-        kh_value(iphash->metricsseen, khiter) |= 0x01;
+        metval |= 0x01;
+        *pval = metval;
         m->srcips ++;
     } else if (!issrc && !(metval & 0x02)) {
-        kh_value(iphash->metricsseen, khiter) |= 0x02;
-        m->destips ++;
-    }
-}
-
-/** Updates the array of metrics associated with a single IP address. If
- *  the metric has not been associated with the IP previously, a new
- *  array entry is assigned to that metric. If the array is full and we
- *  need a new array entry, we convert the array into a khash hash map
- *  instead and use that for metric tracking for this IP henceforth.
- *
- *  Also update the unique source or dest IP tally for the metric if this
- *  is the first time that IP has been seen in that context.
- *
- *  @param iphash       The IP hash entry to be updated.
- *  @param metricid     The ID of the metric.
- *  @param issrc        Set to 1 if the IP was seen as a source IP, 0 if
- *                      the IP was seen as a destination IP.
- *  @param m            The current tallies for the given metric.
- */
-static inline void update_metric_array(corsaro_ip_hash_t *iphash,
-        uint64_t metricid, uint8_t issrc, corsaro_metric_ip_hash_t *m) {
-
-    corsaro_standalone_metric_t *found = NULL;
-    int khret;
-    khiter_t khiter;
-    int i;
-
-    /* See if this metric is already in the array */
-    for (i = 0; i < iphash->metriccount; i++) {
-        if (iphash->firstmetrics[i].metricid == metricid) {
-            found = &(iphash->firstmetrics[i]);
-            break;
-        }
-    }
-
-    if (!found && iphash->metriccount == METRIC_ARRAY_SIZE) {
-        /* metric was not found but array is full, convert to hash map */
-        for (i = 0; i < iphash->metriccount; i++) {
-            khiter = kh_put(mset, iphash->metricsseen,
-                    iphash->firstmetrics[i].metricid, &khret);
-            kh_value(iphash->metricsseen, khiter) =
-                    iphash->firstmetrics[i].metval;
-        }
-
-        /* use the map update function instead */
-        update_metric_map(iphash, metricid, issrc, m);
-        return;
-    }
-
-    if (!found) {
-        /* metric was not found, use the next available array slot */
-        found = &(iphash->firstmetrics[iphash->metriccount]);
-        found->metricid = metricid;
-        found->metval = 0;
-        iphash->metriccount ++;
-    }
-
-    /* metval is a simple bitmask that indicates whether we've seen this
-     * IP + metric combination before, either as a source IP, destination IP
-     * or both.
-     * bit 1 (0b0000001) = seen as source
-     * bit 2 (0b0000010) = seen as dest
-     *
-     * If we set a bit for the first time, we can also increment our combined
-     * tally of source or dest IPs for this metric.
-     */
-    if (issrc && !(found->metval & 0x01)) {
-        found->metval |= 0x01;
-        m->srcips ++;
-    } else if (!issrc && !(found->metval & 0x02)) {
-        found->metval |= 0x02;
+        metval |= 0x02;
+        *pval = metval;
         m->destips ++;
     }
 }
@@ -738,31 +645,35 @@ static inline void update_metric_array(corsaro_ip_hash_t *iphash,
 
 static void update_knownip_metric(corsaro_report_iptracker_t *track,
         uint64_t metricid, corsaro_ip_hash_t *iphash, uint8_t issrc,
-        uint16_t iplen, kh_tally_t *metrictally) {
+        uint16_t iplen, Pvoid_t *metrictally) {
 
     corsaro_memsource_t *memsrc;
     corsaro_metric_ip_hash_t *m;
-    khiter_t khiter;
-    int khret;
 
-    /* First, check if we have a tally for this metric yet */
-    if ((khiter = kh_get(tally, metrictally, metricid)) ==
-            kh_end(metrictally)) {
-        /* No, create a new tally and put it back in the tally map */
-        m = (corsaro_metric_ip_hash_t *)get_corsaro_memhandler_item(
-                track->metric_handler, &memsrc);
+    PWord_t pval;
+
+    JLG(pval, *metrictally, (Word_t)metricid);
+    if (pval) {
+        m = (corsaro_metric_ip_hash_t *)(*pval);
+    } else {
+        if (track->metric_handler) {
+            m = (corsaro_metric_ip_hash_t *)get_corsaro_memhandler_item(
+                    track->metric_handler, &memsrc);
+            m->memsrc = memsrc;
+        } else {
+            m = (corsaro_metric_ip_hash_t *)calloc(1,
+                    sizeof(corsaro_metric_ip_hash_t));
+            m->memsrc = NULL;
+        }
+
         m->metricid = metricid;
         m->srcips = 0;
         m->destips = 0;
-        m->memsrc = memsrc;
         m->packets = 0;
         m->bytes = 0;
 
-        khiter = kh_put(tally, metrictally, metricid, &khret);
-        kh_value(metrictally, khiter) = m;
-    } else {
-        /* Yes, use the existing tally */
-        m = kh_value(metrictally, khiter);
+        JLI(pval, *metrictally, (Word_t)metricid);
+        *pval = (Word_t)(m);
     }
 
     /* An IP length of zero == the packet has already been tallied for
@@ -772,16 +683,7 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         m->bytes += iplen;
     }
 
-    /* Most IPs only see a small number of metrics, so it's actually
-     * more efficient for us to use a fixed size array to track the
-     * metrics observed for those IPs. Only once the number of metrics
-     * gets larger do we switch over to using a khash map. */
-    if (iphash->metriccount <= METRIC_ARRAY_SIZE) {
-        update_metric_array(iphash, metricid, issrc, m);
-    } else {
-        update_metric_map(iphash, metricid, issrc, m);
-    }
-
+    update_metric_map(iphash, metricid, issrc, m);
 }
 
 /** Frees an entire metric tally hash map.
@@ -790,17 +692,22 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
  *  @param methash      The hash map to be destroyed
  */
 static void free_metrichash(corsaro_report_iptracker_t *track,
-        kh_tally_t *methash) {
+        Pvoid_t methash) {
     corsaro_metric_ip_hash_t *ipiter;
-    khiter_t i;
+    Word_t index = 0, ret;
+    PWord_t pval;
 
-    for (i = kh_begin(methash); i != kh_end(methash); ++i) {
-        if (kh_exist(methash, i)) {
-            ipiter = kh_value(methash, i);
+    JLF(pval, methash, index);
+    while (pval) {
+        ipiter = (corsaro_metric_ip_hash_t *)(*pval);
+        if (track->metric_handler) {
             release_corsaro_memhandler_item(track->metric_handler, ipiter->memsrc);
+        } else {
+            free(ipiter);
         }
+        JLN(pval, methash, index);
     }
-    kh_destroy(tally, methash);
+    JLFA(ret, methash);
 
 }
 
@@ -810,14 +717,24 @@ static void free_metrichash(corsaro_report_iptracker_t *track,
  *  @param knownips     The IP hash map to be destroyed
  */
 static void free_knownips(corsaro_report_iptracker_t *track,
-        corsaro_ip_hash_t **knownips) {
-    corsaro_ip_hash_t *ipiter, *tmp;
+        Pvoid_t knownips) {
+    corsaro_ip_hash_t *ipiter;
+    Word_t index = 0, ret;
+    PWord_t pval;
 
-    HASH_ITER(hh, *knownips, ipiter, tmp) {
-        kh_destroy(mset, ipiter->metricsseen);
-        HASH_DELETE(hh, *knownips, ipiter);
-        release_corsaro_memhandler_item(track->ip_handler, ipiter->memsrc);
+    JLF(pval, knownips, index);
+    while (pval) {
+        ipiter = (corsaro_ip_hash_t *)(*pval);
+        JLFA(ret, ipiter->metricsseen);
+        if (track->ip_handler) {
+            release_corsaro_memhandler_item(track->ip_handler, ipiter->memsrc);
+        } else {
+            free(ipiter);
+        }
+
+        JLN(pval, knownips, index);
     }
+    JLFA(ret, knownips);
 }
 
 /** Checks if a packet processing thread has already sent us an interval end
@@ -859,22 +776,22 @@ static void process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender,
         corsaro_report_msg_body_t *body) {
 
     int i;
-    corsaro_ip_hash_t **knownip = NULL;
-    kh_tally_t *knowniptally = NULL;
+    Pvoid_t *knownip = NULL;
+    Pvoid_t *knowniptally = NULL;
     corsaro_ip_hash_t *thisip = NULL;
 
     /* figure out if our sender has finished the interval already; if
      * so, we need to update the next interval not the current one.
      */
     if (libtrace_list_get_size(track->outstanding) == 0) {
-        knownip = &track->knownips;
-        knowniptally = track->currentresult;
+        knownip = &(track->knownips);
+        knowniptally = &(track->currentresult);
     } else if (sender_in_outstanding(track->outstanding, sender)) {
-        knownip = &track->knownips_next;
-        knowniptally = track->nextresult;
+        knownip = &(track->knownips_next);
+        knowniptally = &(track->nextresult);
     } else {
-        knownip = &track->knownips;
-        knowniptally = track->currentresult;
+        knownip = &(track->knownips);
+        knowniptally = &(track->currentresult);
     }
 
     for (i = 0; i < body->numtags; i++) {
@@ -1037,6 +954,7 @@ static void *start_iptracker(void *tdata) {
                 assert(0);
             }
 
+            printf("switching to next map\n");
             pthread_mutex_lock(&(track->mutex));
             track->lastresult = track->currentresult;
             track->lastresultts = complete;
@@ -1049,13 +967,12 @@ static void *start_iptracker(void *tdata) {
             /* Reset IP and metric tally hash maps -- don't forget we may
              * already have some valid info in the "next" interval maps.
              */
-            free_knownips(track, &(track->knownips));
+            free_knownips(track, track->knownips);
             track->knownips = track->knownips_next;
             track->currentresult = track->nextresult;
             track->knownips_next = NULL;
-            track->nextresult = kh_init(tally);
+            track->nextresult = NULL;;
             continue;
-
         }
 
         /* This is an update message with a batch of IP + metric tag
@@ -1063,14 +980,18 @@ static void *start_iptracker(void *tdata) {
         for (i = 0; i < msg.bodycount; i++) {
             process_msg_body(track, msg.sender, &(msg.update[i]));
         }
-        release_corsaro_memhandler_item(msg.handler, msg.memsrc);
+        if (msg.handler) {
+            release_corsaro_memhandler_item(msg.handler, msg.memsrc);
+        } else {
+            free(msg.update);
+        }
     }
 
     /* Thread is ending, tidy up everything */
     free_metrichash(track, (track->currentresult));
     free_metrichash(track, (track->nextresult));
-    free_knownips(track, &(track->knownips));
-    free_knownips(track, &(track->knownips_next));
+    free_knownips(track, track->knownips);
+    free_knownips(track, track->knownips_next);
     pthread_exit(NULL);
 }
 
@@ -1105,7 +1026,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
             conf->outlabel);
 
     /* TODO add config option for this */
-    conf->tracker_count = 4;
+    conf->tracker_count = 1;
 
     corsaro_log(p->logger,
             "report plugin: starting %d IP tracker threads",
@@ -1127,14 +1048,18 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         conf->iptrackers[i].knownips = NULL;
         conf->iptrackers[i].knownips_next = NULL;
         conf->iptrackers[i].lastresult = NULL;
-        conf->iptrackers[i].currentresult = kh_init(tally);
-        conf->iptrackers[i].nextresult = kh_init(tally);
+        conf->iptrackers[i].currentresult = NULL;
+        conf->iptrackers[i].nextresult = NULL;
         conf->iptrackers[i].logger = p->logger;
         conf->iptrackers[i].sourcethreads = stdopts->procthreads;
         conf->iptrackers[i].haltphase = 0;
         conf->iptrackers[i].outstanding = libtrace_list_init(
-               sizeof(corsaro_report_out_interval_t)); 
+               sizeof(corsaro_report_out_interval_t));
 
+#ifdef HAVE_TCMALLOC
+        conf->iptrackers[i].ip_handler = NULL;
+        conf->iptrackers[i].metric_handler = NULL;
+#else
         conf->iptrackers[i].ip_handler = (corsaro_memhandler_t *)malloc(
                 sizeof(corsaro_memhandler_t));
         init_corsaro_memhandler(p->logger, conf->iptrackers[i].ip_handler,
@@ -1143,6 +1068,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
                 sizeof(corsaro_memhandler_t));
         init_corsaro_memhandler(p->logger, conf->iptrackers[i].metric_handler,
                 sizeof(corsaro_metric_ip_hash_t), 10000);
+#endif
 
         pthread_create(&(conf->iptrackers[i].tid), NULL,
                 start_iptracker, &(conf->iptrackers[i]));
@@ -1167,8 +1093,12 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
         /* Hopefully the tracker threads have joined by this point... */
         if (conf->iptrackers) {
             for (i = 0; i < conf->tracker_count; i++) {
-                destroy_corsaro_memhandler(conf->iptrackers[i].metric_handler);
-                destroy_corsaro_memhandler(conf->iptrackers[i].ip_handler);
+                if (conf->iptrackers[i].metric_handler) {
+                    destroy_corsaro_memhandler(conf->iptrackers[i].metric_handler);
+                }
+                if (conf->iptrackers[i].ip_handler) {
+                    destroy_corsaro_memhandler(conf->iptrackers[i].ip_handler);
+                }
                 pthread_mutex_destroy(&(conf->iptrackers[i].mutex));
                 libtrace_message_queue_destroy(&(conf->iptrackers[i].incoming));
                 libtrace_list_deinit(conf->iptrackers[i].outstanding);
@@ -1184,6 +1114,29 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
 
 /** ------------------ PACKET PROCESSING API -------------------*/
 
+static inline void reset_nextmsg(corsaro_report_state_t *state,
+        corsaro_report_ip_message_t *msg) {
+
+    corsaro_memsource_t *memsrc;
+
+    msg->msgtype = CORSARO_IP_MESSAGE_UPDATE;
+
+    msg->bodycount = 0;
+
+    if (state->msgbody_handler) {
+        msg->update = (corsaro_report_msg_body_t *)
+            get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
+        msg->handler = state->msgbody_handler;
+        msg->memsrc = memsrc;
+    } else {
+        msg->update = (corsaro_report_msg_body_t *)
+            calloc(REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+        msg->memsrc = NULL;
+        msg->handler = NULL;
+    }
+
+}
+
 /** Creates and initialises packet processing thread state for the report
  *  plugin. This state must be passed into all subsequent packet processing
  *  and interval boundary callbacks for the report plugin.
@@ -1197,7 +1150,6 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
 
     corsaro_report_state_t *state;
     corsaro_report_config_t *conf;
-    corsaro_memsource_t *memsrc;
     int i;
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -1207,11 +1159,15 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     state->threadid = threadid;
     state->queueblocks = 0;
 
+#ifdef HAVE_TCMALLOC
+    state->msgbody_handler = NULL;
+#else
     state->msgbody_handler = (corsaro_memhandler_t *)malloc(
             sizeof(corsaro_memhandler_t));
     init_corsaro_memhandler(p->logger, state->msgbody_handler,
             sizeof(corsaro_report_msg_body_t) * REPORT_BATCH_SIZE,
             10000);
+#endif
 
     /* Maintain a "message" for each of the IP tracker threads. As we
      * process packets, we'll fill each of the messages depending on which
@@ -1223,11 +1179,7 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
             conf->tracker_count, sizeof(corsaro_report_ip_message_t));
 
     for (i = 0; i < conf->tracker_count; i++) {
-        state->nextmsg[i].msgtype = CORSARO_IP_MESSAGE_INTERVAL;
-        state->nextmsg[i].update = (corsaro_report_msg_body_t *)
-            get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
-        state->nextmsg[i].handler = state->msgbody_handler;
-        state->nextmsg[i].memsrc = memsrc;
+        reset_nextmsg(state, &(state->nextmsg[i]));
         state->nextmsg[i].sender = state->threadid;
     }
 
@@ -1246,7 +1198,6 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
     corsaro_report_state_t *state;
     corsaro_report_ip_message_t msg;
     corsaro_report_config_t *conf;
-    corsaro_memsource_t *memsrc;
     int i;
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -1268,10 +1219,10 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
                     (void *)(&(state->nextmsg[i])));
 
             state->nextmsg[i].bodycount = 0;
-            state->nextmsg[i].update = (corsaro_report_msg_body_t *)
-                get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
-            state->nextmsg[i].handler = state->msgbody_handler;
-            state->nextmsg[i].memsrc = memsrc;
+            state->nextmsg[i].update = NULL;
+            state->nextmsg[i].memsrc = NULL;
+            state->nextmsg[i].handler = NULL;
+
         }
         /* Send the halt message */
         libtrace_message_queue_put(&(conf->iptrackers[i].incoming),
@@ -1286,7 +1237,10 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         }
     }
 
-    destroy_corsaro_memhandler(state->msgbody_handler);
+    if (state->msgbody_handler) {
+        destroy_corsaro_memhandler(state->msgbody_handler);
+    }
+    free(state->nextmsg);
     free(state);
 
     return 0;
@@ -1368,7 +1322,6 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     corsaro_report_state_t *state;
     corsaro_report_interim_t *interim;
     corsaro_report_ip_message_t msg;
-    corsaro_memsource_t *memsrc;
     int i;
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -1396,15 +1349,12 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
         if (state->nextmsg[i].bodycount > 0) {
             libtrace_message_queue_put(&(conf->iptrackers[i].incoming),
                     (void *)(&(state->nextmsg[i])));
-            state->nextmsg[i].bodycount = 0;
-            state->nextmsg[i].update = (corsaro_report_msg_body_t *)
-                get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
-            state->nextmsg[i].handler = state->msgbody_handler;
-            state->nextmsg[i].memsrc = memsrc;
+            reset_nextmsg(state, &(state->nextmsg[i]));
         }
         libtrace_message_queue_put(&(conf->iptrackers[i].incoming), (void *)(&msg));
     }
 
+    corsaro_log(p->logger, "suffered %u queueblocks", state->queueblocks);
     state->queueblocks = 0;
 
     return (void *)interim;
@@ -1685,7 +1635,6 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
     corsaro_report_msg_body_t *body;
     corsaro_report_ip_message_t *msg;
     int trackerhash;
-    corsaro_memsource_t *memsrc;
 
     /* Hash IPs to IP tracker threads based on the suffix octet of the IP
      * address -- should be reasonably balanced + easy to calculate.
@@ -1725,11 +1674,7 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
     /* Now that message has been sent, start a new one for the next lot
      * of IPs and metrics that we're going to send to that IP tracker thread.
      */
-    msg->bodycount = 0;
-    msg->update = (corsaro_report_msg_body_t *)
-        get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
-    msg->handler = state->msgbody_handler;
-    msg->memsrc = memsrc;
+    reset_nextmsg(state, msg);
 
 }
 
@@ -1767,7 +1712,6 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     update_metrics_for_address(conf, state, srcaddr, 1, iplen, tags, p->logger);
     /* Update our metrics observed for the destination address */
     update_metrics_for_address(conf, state, dstaddr, 0, iplen, tags, p->logger);
-
     return 0;
 }
 
@@ -1801,10 +1745,14 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
         return NULL;
     }
 
+#ifdef HAVE_TCMALLOC
+    m->res_handler = NULL;
+#else
     m->res_handler = (corsaro_memhandler_t *)malloc(
             sizeof(corsaro_memhandler_t));
     init_corsaro_memhandler(p->logger, m->res_handler,
             sizeof(corsaro_report_result_t), 10000);
+#endif
 
     return m;
 }
@@ -1952,31 +1900,42 @@ static int write_single_metric(corsaro_logger_t *logger,
  */
 
 static int write_all_metrics(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, corsaro_report_result_t **resultmap,
+        corsaro_avro_writer_t *writer, Pvoid_t resultmap,
         corsaro_memhandler_t *handler) {
 
     corsaro_report_result_t *r, *tmpres;
-    int ret = 0;
+    int writeret = 0;
     int stopwriting = 0;
     int haderror = 0;
+    Word_t index = 0, judyret;
+    PWord_t pval;
 
-    HASH_ITER(hh, *resultmap, r, tmpres) {
+    JLF(pval, resultmap, index);
+    while (pval) {
+        r = (corsaro_report_result_t *)(*pval);
+
         /* If we run into an error while writing, maybe don't try to write
          * anymore.
          */
         if (!stopwriting) {
-            ret = write_single_metric(logger, writer, r);
-            if (ret == AVRO_WRITE_FAILURE) {
+            writeret = write_single_metric(logger, writer, r);
+            if (writeret == AVRO_WRITE_FAILURE) {
                 stopwriting = 1;
             }
-            if (ret < 0) {
+            if (writeret < 0) {
                 haderror = 1;
             }
         }
-        HASH_DELETE(hh, *resultmap, r);
-        release_corsaro_memhandler_item(handler, r->memsrc);
+        if (handler) {
+            release_corsaro_memhandler_item(handler, r->memsrc);
+        } else {
+            free(r);
+        }
+
+        JLN(pval, resultmap, index);
     }
 
+    JLFA(judyret, resultmap);
     return haderror;
 
 }
@@ -1997,8 +1956,16 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
     corsaro_report_result_t *r;
     corsaro_memsource_t *memsrc;
 
-    r = (corsaro_report_result_t *)get_corsaro_memhandler_item(
-            reshandler, &memsrc);
+    if (reshandler) {
+        r = (corsaro_report_result_t *)get_corsaro_memhandler_item(
+                reshandler, &memsrc);
+        r->memsrc = memsrc;
+    } else {
+        r = (corsaro_report_result_t *)calloc(1,
+                sizeof(corsaro_report_result_t));
+        r->memsrc = NULL;
+    }
+
     r->metricid = metricid;
     r->pkt_cnt = 0;
     r->bytes = 0;
@@ -2008,7 +1975,6 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
     r->label = outlabel;
     r->metrictype = NULL;
     r->metricval = NULL;
-    r->memsrc = memsrc;
     return r;
 }
 
@@ -2024,42 +1990,50 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
  *  @param reshandler       The corsaro memory handler that will be allocating
  *                          the memory for any new metrics in the tally.
  */
-static void update_tracker_results(corsaro_report_result_t **results,
+static void update_tracker_results(Pvoid_t results,
         corsaro_report_iptracker_t *tracker, uint32_t ts,
         corsaro_report_config_t *conf, corsaro_memhandler_t *reshandler) {
 
     corsaro_report_result_t *r;
     corsaro_metric_ip_hash_t *iter;
-    khiter_t i;
+    PWord_t pval, pval2;
+    Word_t index = 0, ret;
 
     /* Simple loop over all metrics in the tracker tally and update our
      * combined metric map.
      */
-    for (i = kh_begin(tracker->lastresult); i != kh_end(tracker->lastresult);
-            ++i) {
 
-        if (!kh_exist(tracker->lastresult, i)) {
-            continue;
-        }
-        iter = kh_value(tracker->lastresult, i);
+    JLF(pval, tracker->lastresult, index);
+    while (pval) {
+        iter = (corsaro_metric_ip_hash_t *)(*pval);
 
-        HASH_FIND(hh, *results, &(iter->metricid), sizeof(iter->metricid),
-                r);
-        if (!r) {
+        JLG(pval2, results, iter->metricid);
+        if (pval2 == NULL) {
             /* This is a new metric, add it to our result hash map */
             r = new_result(iter->metricid, reshandler, conf->outlabel, ts);
-            HASH_ADD_KEYPTR(hh, *results, &(r->metricid),
-                    sizeof(r->metricid), r);
+            JLI(pval2, results, iter->metricid);
+            *pval2 = (Word_t)r;
+        } else {
+            r = (corsaro_report_result_t *)(*pval2);
         }
+
         r->uniq_src_ips += iter->srcips;
         r->uniq_dst_ips += iter->destips;
         r->pkt_cnt += iter->packets;
         r->bytes += iter->bytes;
 
         /* Don't forget to release the metric tally back to the IP tracker */
-        release_corsaro_memhandler_item(tracker->metric_handler, iter->memsrc);
+        if (tracker->metric_handler) {
+            release_corsaro_memhandler_item(tracker->metric_handler,
+                    iter->memsrc);
+        } else {
+            free(iter);
+        }
+
+        JLN(pval, tracker->lastresult, index);
     }
-    kh_destroy(tally, tracker->lastresult);
+
+    JLFA(ret, tracker->lastresult);
     tracker->lastresult = NULL;
 }
 
@@ -2080,7 +2054,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     corsaro_report_merge_state_t *m;
     int i, ret;
     char *outname;
-    corsaro_report_result_t *results = NULL;
+    Pvoid_t results = NULL;
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
 
@@ -2117,7 +2091,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
             if (pthread_mutex_trylock(&(procconf->iptrackers[i].mutex)) == 0) {
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
-                    update_tracker_results(&results, &(procconf->iptrackers[i]),
+                    update_tracker_results(results, &(procconf->iptrackers[i]),
                             fin->timestamp, conf, m->res_handler);
 
                     trackers_done[i] = 1;
@@ -2169,9 +2143,13 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
      * been merged into a single result -- write it out!
      */
     ret = 0;
-    if (write_all_metrics(p->logger, m->writer, &results, m->res_handler) < 0)
+    if (write_all_metrics(p->logger, m->writer, results, m->res_handler) < 0)
     {
         return -1;
+    }
+
+    for (i = 0; i < fin->threads_ended; i++) {
+        free(tomerge[i]);
     }
     return ret;
 }
