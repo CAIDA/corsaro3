@@ -877,6 +877,11 @@ static uint32_t update_outstanding(libtrace_list_t *outl, uint32_t ts,
         assert(o->interval_ts < ts);
     }
 
+    /* Only one processing thread, no need to wait */
+    if (limit == 1) {
+        return ts;
+    }
+
     memset(&(newentry.reports_recvd), 0, sizeof(newentry.reports_recvd));
     newentry.reports_recvd[sender] = 1;
     newentry.reports_total = 1;
@@ -954,7 +959,6 @@ static void *start_iptracker(void *tdata) {
                 assert(0);
             }
 
-            printf("switching to next map\n");
             pthread_mutex_lock(&(track->mutex));
             track->lastresult = track->currentresult;
             track->lastresultts = complete;
@@ -1026,7 +1030,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
             conf->outlabel);
 
     /* TODO add config option for this */
-    conf->tracker_count = 1;
+    conf->tracker_count = 4;
 
     corsaro_log(p->logger,
             "report plugin: starting %d IP tracker threads",
@@ -1900,7 +1904,7 @@ static int write_single_metric(corsaro_logger_t *logger,
  */
 
 static int write_all_metrics(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, Pvoid_t resultmap,
+        corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
         corsaro_memhandler_t *handler) {
 
     corsaro_report_result_t *r, *tmpres;
@@ -1910,7 +1914,7 @@ static int write_all_metrics(corsaro_logger_t *logger,
     Word_t index = 0, judyret;
     PWord_t pval;
 
-    JLF(pval, resultmap, index);
+    JLF(pval, *resultmap, index);
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
 
@@ -1932,10 +1936,10 @@ static int write_all_metrics(corsaro_logger_t *logger,
             free(r);
         }
 
-        JLN(pval, resultmap, index);
+        JLN(pval, *resultmap, index);
     }
 
-    JLFA(judyret, resultmap);
+    JLFA(judyret, *resultmap);
     return haderror;
 
 }
@@ -1990,7 +1994,7 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
  *  @param reshandler       The corsaro memory handler that will be allocating
  *                          the memory for any new metrics in the tally.
  */
-static void update_tracker_results(Pvoid_t results,
+static void update_tracker_results(Pvoid_t *results,
         corsaro_report_iptracker_t *tracker, uint32_t ts,
         corsaro_report_config_t *conf, corsaro_memhandler_t *reshandler) {
 
@@ -2007,11 +2011,11 @@ static void update_tracker_results(Pvoid_t results,
     while (pval) {
         iter = (corsaro_metric_ip_hash_t *)(*pval);
 
-        JLG(pval2, results, iter->metricid);
+        JLG(pval2, *results, iter->metricid);
         if (pval2 == NULL) {
             /* This is a new metric, add it to our result hash map */
             r = new_result(iter->metricid, reshandler, conf->outlabel, ts);
-            JLI(pval2, results, iter->metricid);
+            JLI(pval2, *results, iter->metricid);
             *pval2 = (Word_t)r;
         } else {
             r = (corsaro_report_result_t *)(*pval2);
@@ -2091,9 +2095,8 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
             if (pthread_mutex_trylock(&(procconf->iptrackers[i].mutex)) == 0) {
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
-                    update_tracker_results(results, &(procconf->iptrackers[i]),
+                    update_tracker_results(&results, &(procconf->iptrackers[i]),
                             fin->timestamp, conf, m->res_handler);
-
                     trackers_done[i] = 1;
                     totaldone ++;
                 } else if (procconf->iptrackers[i].haltphase == 2) {
@@ -2143,7 +2146,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
      * been merged into a single result -- write it out!
      */
     ret = 0;
-    if (write_all_metrics(p->logger, m->writer, results, m->res_handler) < 0)
+    if (write_all_metrics(p->logger, m->writer, &results, m->res_handler) < 0)
     {
         return -1;
     }
