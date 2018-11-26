@@ -1134,11 +1134,11 @@ static inline void reset_nextmsg(corsaro_report_state_t *state,
         msg->memsrc = memsrc;
     } else {
         msg->update = (corsaro_report_msg_body_t *)
-            calloc(REPORT_BATCH_SIZE, sizeof(corsaro_report_msg_body_t));
+            malloc(REPORT_BATCH_SIZE * sizeof(corsaro_report_msg_body_t));
+
         msg->memsrc = NULL;
         msg->handler = NULL;
     }
-
 }
 
 /** Creates and initialises packet processing thread state for the report
@@ -1358,7 +1358,6 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
         libtrace_message_queue_put(&(conf->iptrackers[i].incoming), (void *)(&msg));
     }
 
-    corsaro_log(p->logger, "suffered %u queueblocks", state->queueblocks);
     state->queueblocks = 0;
 
     return (void *)interim;
