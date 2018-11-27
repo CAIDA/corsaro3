@@ -43,7 +43,8 @@
     int plugin##_parse_config(corsaro_plugin_t *p, yaml_document_t *doc, \
             yaml_node_t *options);                          \
     int plugin##_finalise_config(corsaro_plugin_t *p,       \
-            corsaro_plugin_proc_options_t *stdopts);        \
+            corsaro_plugin_proc_options_t *stdopts,         \
+            void *zmq_ctxt);                                \
     void plugin##_destroy_self(corsaro_plugin_t *p);        \
     void *plugin##_init_processing(corsaro_plugin_t *p, int threadid);    \
     int plugin##_halt_processing(corsaro_plugin_t *p, void *local); \
@@ -122,7 +123,7 @@ struct corsaro_plugin {
     int (*parse_config)(corsaro_plugin_t *p, yaml_document_t *doc,
             yaml_node_t *options);
     int (*finalise_config)(corsaro_plugin_t *p,
-            corsaro_plugin_proc_options_t *stdopts);
+            corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt);
     void (*destroy_self)(corsaro_plugin_t *p);
 
     /* Callbacks for trace processing */
@@ -175,7 +176,7 @@ void corsaro_disable_plugin(corsaro_plugin_t *p);
 int corsaro_configure_plugin(corsaro_plugin_t *p, yaml_document_t *doc,
         yaml_node_t *options);
 int corsaro_finish_plugin_config(corsaro_plugin_t *p,
-        corsaro_plugin_proc_options_t *stdopts);
+        corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt);
 
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
         corsaro_plugin_t *plist, int count, int threadid);

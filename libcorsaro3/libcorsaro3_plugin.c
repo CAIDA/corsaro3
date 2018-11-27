@@ -223,13 +223,13 @@ int corsaro_configure_plugin(corsaro_plugin_t *p, yaml_document_t *doc,
 }
 
 int corsaro_finish_plugin_config(corsaro_plugin_t *plist,
-        corsaro_plugin_proc_options_t *stdopts) {
+        corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_plugin_t *p = plist;
 
     while (p != NULL) {
         if (p->config != NULL) {
-            p->finalise_config(p, stdopts);
+            p->finalise_config(p, stdopts, zmq_ctxt);
         }
         p = p->next;
     }

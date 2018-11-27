@@ -621,7 +621,7 @@ int corsaro_dos_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
  *  all user-specified values are within suitable bounds.
  */
 int corsaro_dos_finalise_config(corsaro_plugin_t *p,
-        corsaro_plugin_proc_options_t *stdopts) {
+        corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_dos_config_t *conf;
 

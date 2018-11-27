@@ -422,7 +422,8 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     stdopts.monitorid = glob->monitorid;
     stdopts.procthreads = glob->threads;
 
-    if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts) < 0) {
+    if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts,
+            glob->zmq_ctxt) < 0) {
         corsaro_log(glob->logger,
             "error while finishing plugin configuration. Exiting.");
         corsaro_trace_free_global(glob);

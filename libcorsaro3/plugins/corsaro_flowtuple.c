@@ -257,7 +257,7 @@ int corsaro_flowtuple_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
 }
 
 int corsaro_flowtuple_finalise_config(corsaro_plugin_t *p,
-        corsaro_plugin_proc_options_t *stdopts) {
+        corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_flowtuple_config_t *conf;
 
