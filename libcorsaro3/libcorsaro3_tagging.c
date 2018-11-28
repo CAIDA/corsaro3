@@ -424,13 +424,12 @@ static int update_pfx2as_tags(corsaro_logger_t *logger,
 
 static void update_basic_tags(corsaro_logger_t *logger,
         libtrace_packet_t *packet, corsaro_packet_tags_t *tags,
-        libtrace_ip_t *ip) {
+        libtrace_ip_t *ip, uint32_t *rem) {
 
     void *transport;
     uint8_t proto;
     libtrace_icmp_t *icmp;
     libtrace_tcp_t *tcp;
-    uint32_t rem;
     hash_fields_t hashdata;
 
     /* Basic tags refer to those that do not require any libipmeta providers
@@ -441,7 +440,7 @@ static void update_basic_tags(corsaro_logger_t *logger,
     tags->src_port = 0;
     tags->dest_port = 0;
 
-    transport = trace_get_transport(packet, &proto, &rem);
+    transport = trace_get_payload_from_ip(ip, &proto, rem);
 
     if (transport == NULL) {
         /* transport header is missing or this is an non-initial IP fragment */
@@ -456,18 +455,18 @@ static void update_basic_tags(corsaro_logger_t *logger,
     hashdata.ip_len = ntohs(ip->ip_len);
 
     tags->protocol = proto;
-    if (proto == TRACE_IPPROTO_ICMP && rem >= 2) {
+    if (proto == TRACE_IPPROTO_ICMP && *rem >= 2) {
         /* ICMP doesn't have ports, but we are interested in the type and
          * code, so why not reuse the space in the tag structure :) */
         icmp = (libtrace_icmp_t *)transport;
         tags->src_port = icmp->type;
         tags->dest_port = icmp->code;
     } else if ((proto == TRACE_IPPROTO_TCP || proto == TRACE_IPPROTO_UDP) &&
-            rem >= 4) {
+            *rem >= 4) {
         tags->src_port = ntohs(*((uint16_t *)transport));
         tags->dest_port = ntohs(*(((uint16_t *)transport) + 1));
 
-        if (proto == TRACE_IPPROTO_TCP && rem >= sizeof(libtrace_tcp_t)) {
+        if (proto == TRACE_IPPROTO_TCP && *rem >= sizeof(libtrace_tcp_t)) {
             tcp = (libtrace_tcp_t *)transport;
             hashdata.tcpflags =
                     ((tcp->cwr << 7) | (tcp->ece << 6) | (tcp->urg << 5) |
@@ -484,11 +483,15 @@ static void update_basic_tags(corsaro_logger_t *logger,
 }
 
 static inline void update_filter_tags(corsaro_logger_t *logger,
-        libtrace_packet_t *packet, corsaro_packet_tags_t *tags) {
+        libtrace_ip_t *ip, uint32_t iprem, corsaro_packet_tags_t *tags) {
 
 
     corsaro_filter_torun_t torun[3];
 
+    /* Filtering results are either 0 or 1 (didn't match and
+     * matched, respectively) so we use 255 here as an initial
+     * value to avoid confusion.
+     */
     torun[0].filterid = CORSARO_FILTERID_SPOOFED;
     torun[0].result = 255;
     torun[1].filterid = CORSARO_FILTERID_ERRATIC;
@@ -496,7 +499,7 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
     torun[2].filterid = CORSARO_FILTERID_ROUTED;
     torun[2].result = 255;
 
-    corsaro_apply_multiple_filters(logger, packet, torun, 3);
+    corsaro_apply_multiple_filters(logger, ip, iprem, torun, 3);
 
     if (torun[0].result == 1) {
         tags->highlevelfilterbits |= CORSARO_FILTERBIT_SPOOFED;
@@ -521,6 +524,8 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
     tags->providers_used = 0;
     uint32_t numips = 0;
     libtrace_ip_t *ip = NULL;
+    uint32_t rem;
+    uint16_t ethertype;
 
     memset(tags, 0, sizeof(corsaro_packet_tags_t));
     tags->providers_used = 0;
@@ -529,13 +534,16 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
         return 0;
     }
 
-    ip = trace_get_ip(packet);
-    if (!ip) {
+    ip = (libtrace_ip_t *)trace_get_layer3(packet, &ethertype, &rem);
+    if (rem < sizeof(libtrace_ip_t) || ip == NULL) {
+        return 0;
+    }
+    if (ethertype != TRACE_ETHERTYPE_IP) {
         return 0;
     }
 
-    update_basic_tags(tagger->logger, packet, tags, ip);
-    update_filter_tags(tagger->logger, packet, tags);
+    update_basic_tags(tagger->logger, packet, tags, ip, &rem);
+    update_filter_tags(tagger->logger, ip, rem, tags);
 
     if (tagger->providers == NULL) {
         return 0;

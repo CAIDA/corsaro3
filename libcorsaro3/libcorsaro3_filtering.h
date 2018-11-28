@@ -181,7 +181,7 @@ int corsaro_apply_single_custom_filter(corsaro_logger_t *logger,
  * individually.
  */
 int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
-        libtrace_packet_t *packet, corsaro_filter_torun_t *torun,
+        libtrace_ip_t *ip, uint32_t iprem, corsaro_filter_torun_t *torun,
         int torun_count);
 
 /* High level built-in filters */

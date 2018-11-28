@@ -578,6 +578,49 @@ static inline int _apply_bittorrent_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+#define PREPROCESS_FROM_IP(ip, rem) \
+    libtrace_tcp_t *tcp = NULL;     \
+    libtrace_udp_t *udp = NULL;     \
+    libtrace_icmp_t *icmp = NULL;     \
+    uint8_t *udppayload = NULL;     \
+    uint8_t *tcppayload = NULL;     \
+    uint32_t payloadlen = 0;        \
+    uint32_t translen = 0;          \
+    uint16_t source_port = 0;       \
+    uint16_t dest_port = 0;         \
+    uint16_t ethertype = 0;         \
+                                    \
+    uint8_t proto = 0;          \
+    void *transport = trace_get_payload_from_ip(ip, &proto, &rem);    \
+    translen = rem;             \
+                                \
+    /* XXX what about IP in IP?  */             \
+    if (proto == TRACE_IPPROTO_UDP) {           \
+        udp = (libtrace_udp_t *)transport;      \
+        if (rem >= 4) {                         \
+            source_port = ntohs(udp->source);   \
+            dest_port = ntohs(udp->dest);       \
+        }                                       \
+        udppayload = (uint8_t *)trace_get_payload_from_udp(udp, &rem);  \
+        payloadlen = rem;                       \
+    }                                           \
+    else if (proto == TRACE_IPPROTO_TCP) {      \
+        tcp = (libtrace_tcp_t *)transport;      \
+        if (rem >= 4) {                         \
+            source_port = ntohs(tcp->source);   \
+            dest_port = ntohs(tcp->dest);       \
+        }                                       \
+        tcppayload = (uint8_t *)trace_get_payload_from_tcp(tcp, &rem);  \
+        payloadlen = rem;                       \
+    } else if (proto == TRACE_IPPROTO_ICMP) {   \
+        icmp = (libtrace_icmp_t *)transport;    \
+        if (rem >= 2) {                         \
+            source_port = icmp->type;           \
+            dest_port = icmp->code;             \
+        }                                       \
+    }                                           \
+
+
 #define PREPROCESS_PACKET            \
     libtrace_ip_t *ip = NULL;       \
     libtrace_tcp_t *tcp = NULL;     \
@@ -949,11 +992,11 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
 }
 
 int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
-        libtrace_packet_t *packet, corsaro_filter_torun_t *torun,
+        libtrace_ip_t *ip, uint32_t iprem, corsaro_filter_torun_t *torun,
         int torun_count) {
     int i;
 
-    PREPROCESS_PACKET
+    PREPROCESS_FROM_IP(ip, iprem);
 
     for (i = 0; i < torun_count; i++) {
         switch(torun[i].filterid) {

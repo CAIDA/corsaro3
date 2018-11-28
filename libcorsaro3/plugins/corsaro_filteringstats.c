@@ -300,7 +300,8 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
     khiter_t srckey, destkey;
     uint16_t iplen;
     uint32_t srcip, destip;
-    uint32_t mask;
+    uint32_t mask, rem;
+    uint16_t ethertype;
 
     state = (struct corsaro_filteringstats_state_t *)local;
     if (state == NULL) {
@@ -309,8 +310,11 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
         return -1;
     }
 
-    ip = trace_get_ip(packet);
-    if (!ip) {
+    ip = (libtrace_ip_t *)trace_get_layer3(packet, &ethertype, &rem);
+    if (!ip || rem < sizeof(libtrace_ip_t)) {
+        return 0;
+    }
+    if (ethertype != TRACE_ETHERTYPE_IP) {
         return 0;
     }
 
@@ -324,7 +328,7 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
         torun[i].result = 0;
     }
 
-    if (corsaro_apply_multiple_filters(p->logger, packet, torun,
+    if (corsaro_apply_multiple_filters(p->logger, ip, rem, torun,
             CORSARO_FILTERID_MAX) < 0) {
         return -1;
     }
