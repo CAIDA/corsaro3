@@ -44,10 +44,14 @@
 #include "libcorsaro3_filtering.h"
 #include "libcorsaro3_memhandler.h"
 
+/** Older versions of libzmq use a different name for this option */
 #ifndef ZMQ_IMMEDIATE
 #define ZMQ_IMMEDIATE ZMQ_DELAY_ATTACH_ON_CONNECT
 #endif
 
+/** Name of the zeromq socket that tagged packets will be written to.
+ *  This is an internal socket, read by a proxy thread which will act
+ *  as a broker between the tagger and its clients. */
 #define PROXY_RECV_SOCKNAME "inproc://taggerproxy"
 libtrace_callback_set_t *processing = NULL;
 
@@ -60,6 +64,14 @@ static void cleanup_signal(int sig) {
     trace_halted = 1;
 }
 
+/** Initialises the local data for each processing thread.
+ *
+ *  @param tls          The thread-local data to be initialised
+ *  @param threadid     A numeric identifier for the thread that this data
+ *                      is going to be attached to
+ *  @param glob         The global data for this corsarotagger instance.
+ *
+ */
 static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
     int hwm = 10000000;
@@ -82,6 +94,7 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         return;
     }
 
+    /* Enable the libipmeta providers */
     if (corsaro_enable_ipmeta_provider(tls->tagger, glob->pfxipmeta) < 0) {
         corsaro_log(glob->logger,
                 "error while enabling prefix->asn tagging in thread %d",
@@ -129,24 +142,38 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
 
 }
 
+/** Initialisation callback for a libtrace processing thread
+ *
+ *  @param trace        The libtrace input that this thread belongs to (unused)
+ *  @param t            The libtrace processing thread
+ *  @param global       The global state for this corsarotagger instance
+ *
+ *  @return The initialised thread-local state for this thread.
+ */
 static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global) {
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
     corsaro_tagger_local_t *tls;
 
+    /* The thread-local data has already been initialised, we just need
+     * to pick our particular entry out of the array of TLS stored in
+     * the global state.
+     */
     tls = &(glob->threaddata[trace_get_perpkt_thread_id(t)]);
 
     return tls;
 }
 
-static void halt_trace_processing(corsaro_tagger_global_t *glob,
+/** Destroys the thread local state for a libtrace processing thread.
+ *
+ *  @param glob         The global state for this corsarotagger instance
+ *  @param tls          The thread-local state to be destroyed
+ *  @param threadid     The identifier for the thread that owned this state
+ */
+static void destroy_local_state(corsaro_tagger_global_t *glob,
         corsaro_tagger_local_t *tls, int threadid) {
     int linger = 1000;
 
-    /* -1 because we don't increment currenturi until all of the threads have
-     * stopped for the trace, so current and total will never be equal at this
-     * point.
-     */
     if (tls->tagger) {
         corsaro_destroy_packet_tagger(tls->tagger);
     }
@@ -167,17 +194,15 @@ static void halt_trace_processing(corsaro_tagger_global_t *glob,
     }
     tls->fbclear = 1;
     pthread_mutex_unlock(&(tls->bufmutex));
-
-    corsaro_log(glob->logger, "halted packet tagging thread %d, errors=%lu",
-            threadid, tls->errorcount);
 }
 
-static void simple_free(void *data, void *hint) {
-    free(data);
-}
-
-static void tbuf_free(void *data, void *hint) {
-    corsaro_tagger_buffer_t *tbuf = (corsaro_tagger_buffer_t *)hint;
+/** Releases a tagger buffer back into the free list.
+ *
+ *  If the freelist has been destroyed, just free the buffer instead.
+ *
+ *  @param tbuf     The tagger buffer to be released.
+ */
+static inline void tbuf_free(corsaro_tagger_buffer_t *tbuf) {
 
     if (tbuf->local->fbclear) {
         free(tbuf->bufspace);
@@ -190,6 +215,14 @@ static void tbuf_free(void *data, void *hint) {
     }
 }
 
+/** Create a tagged packet message and publishes it to the tagger proxy
+ *  queue.
+ *
+ *  @param glob         The global state for this corsarotagger instance.
+ *  @param tls          The thread-local state for this processing thread.
+ *  @param tags         The tags assigned to the packet.
+ *  @param packet       The packet to be published.
+ */
 static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
         corsaro_tagger_local_t *tls, corsaro_packet_tags_t *tags,
         libtrace_packet_t *packet) {
@@ -215,6 +248,7 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
 
     bufsize = sizeof(corsaro_tagged_packet_header_t) + rem;
 
+    /* Grab a tagger buffer from our freelist if one is available */
     if (tls->freebufs) {
         tbuf = tls->freebufs;
         tls->freebufs = tls->freebufs->next;
@@ -227,8 +261,16 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
         tbuf->bufspace = NULL;
     }
 
+    /* Check if we need to extend the size of the tagger buffer.
+     * All newly allocated buffers will need to be extended.
+     */
     if (bufsize > tbuf->bufalloc) {
         int toalloc;
+        /* Never create a buffer less than 512 bytes -- this means
+         * we only have to worry about reallocating if the packet
+         * itself is larger than usual. Most telescope packets
+         * are < 200 bytes.
+         */
         if (bufsize < 512) {
             toalloc = 512;
         } else {
@@ -247,26 +289,40 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     hdr->pktlen = rem;
     memcpy(&(hdr->tags), tags, sizeof(corsaro_packet_tags_t));
 
+    /* Put the packet itself in the buffer (minus the capture and
+     * meta-data headers -- we don't need them).
+     */
     memcpy(tbuf->bufspace + sizeof(corsaro_tagged_packet_header_t),
             pktcontents, rem);
 
     ret = 0;
 
+    /* Put a copy of our buffer on the queue */
     if (zmq_send(tls->pubsock, tbuf->bufspace, bufsize, 0) < 0) {
         corsaro_log(glob->logger,
                 "error while publishing tagged packet: %s", strerror(errno));
         tls->errorcount ++;
         ret = -1;
-        tbuf_free(tbuf->bufspace, tbuf);
-        goto endpublish;
     }
 
-endpublish:
-    tbuf_free(tbuf->bufspace, tbuf);
+    /* Return the buffer to our freelist */
+    tbuf_free(tbuf);
     return ret;
 
 }
 
+/** Per-packet processing callback for a libtrace processing thread.
+ *
+ *  This function simply tags, then forwards each received packet.
+ *
+ *  @param trace        The libtrace input that the packet has been read from.
+ *  @param t            The libtrace processing thread.
+ *  @param global       The global state for this corsarotagger instance.
+ *  @param local        The thread-local state for this processing thread.
+ *  @param packet       The packet is to be processed.
+ *
+ *  @return the packet so it can be released back to the capture device.
+ */
 static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local, libtrace_packet_t *packet) {
 
@@ -279,9 +335,11 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
         return packet;
     }
 
+    /* Tag the packet */
     if (corsaro_tag_packet(tls->tagger, &packettags, packet) != 0) {
         corsaro_log(glob->logger, "error while attempting to tag a packet");
         tls->errorcount ++;
+    /* Then forward it on to our clients */
     } else if (corsaro_publish_tags(glob, tls, &packettags, packet) != 0) {
         corsaro_log(glob->logger, "error while attempting to publish a packet");
         tls->errorcount ++;
@@ -289,6 +347,17 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     return packet;
 }
 
+/* Tick callback for a libtrace processing thread.
+ *
+ * The ticks are used simply to keep track of whether we are dropping
+ * packets or not.
+ *
+ *  @param trace        The libtrace input that is reading packets.
+ *  @param t            The libtrace processing thread.
+ *  @param global       The global state for this corsarotagger instance.
+ *  @param local        The thread-local state for this processing thread.
+ *  @param tick         The timestamp of the current tick.
+ */
 static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local, uint64_t tick) {
 
@@ -312,7 +381,16 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     free(stats);
 }
 
-
+/** Starts the thread which manages the proxy that bridges our zeromq
+ *  publishing sockets to the clients that are subscribing to them.
+ *
+ *  The reason for the proxy is to support our multiple-publisher,
+ *  multiple-subscriber architecture without either side having to
+ *  know how many sockets exist on the other side of the proxy.
+ *
+ *  @param data         The global state for this corsarotagger instance.
+ *  @return NULL when the proxy thread has halted.
+ */
 static void *start_zmq_proxy_thread(void *data) {
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)data;
 
@@ -335,6 +413,7 @@ static void *start_zmq_proxy_thread(void *data) {
         goto proxyexit;
     }
 
+    /* Only block for a max of one second when reading published packets */
     if (zmq_setsockopt(proxy_recv, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
         corsaro_log(glob->logger,
                 "unable to configure tagger proxy recv socket: %s",
@@ -342,6 +421,7 @@ static void *start_zmq_proxy_thread(void *data) {
         goto proxyexit;
     }
 
+    /* Subscribe to ALL streams */
     if (zmq_setsockopt(proxy_recv, ZMQ_SUBSCRIBE, "", 0) < 0) {
         corsaro_log(glob->logger,
                 "unable to configure tagger proxy recv socket: %s",
@@ -356,6 +436,10 @@ static void *start_zmq_proxy_thread(void *data) {
         goto proxyexit;
     }
 
+    /* Allow the forwarding socket to buffer as many messages as it
+     * wants -- NOTE: this means you will run out of memory if you
+     * have a slow client!
+     */
     if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &zero, sizeof(zero)) != 0) {
         corsaro_log(glob->logger,
                 "error while setting HWM for proxy forwarding socket: %s",
@@ -375,19 +459,22 @@ static void *start_zmq_proxy_thread(void *data) {
         int r;
         corsaro_tagged_packet_header_t *hdr;
 
+        /* Try read a tagged packet from one of our publishers */
         if ((r = zmq_recv(proxy_recv, recvspace, 3000, 0)) < 0) {
             if (errno == EAGAIN) {
+                /* Nothing available for now, check if we need to halt
+                 * then try again.
+                 */
                 continue;
             }
             break;
         }
 
         hdr = (corsaro_tagged_packet_header_t *)recvspace;
-
+        /* Got something, publish it to our clients */
         zmq_send(proxy_fwd, recvspace,
                 hdr->pktlen + sizeof(corsaro_tagged_packet_header_t), 0);
     }
-
 
 proxyexit:
     zmq_close(proxy_recv);
@@ -395,8 +482,15 @@ proxyexit:
     pthread_exit(NULL);
 }
 
+/** Creates and starts a libtrace input.
+ *
+ *  @param glob     The global state for this corsarotagger instance.
+ *
+ *  @return -1 if an error occurs, 0 if successful.
+ */
 static int start_trace_input(corsaro_tagger_global_t *glob) {
 
+    /* This is all pretty standard parallel libtrace configuration code */
     glob->trace = trace_create(glob->inputuris[glob->currenturi]);
     if (trace_is_err(glob->trace)) {
         libtrace_err_t err = trace_get_err(glob->trace);
@@ -405,17 +499,23 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
         return -1;
     }
 
+    /* nDAG does not require a hasher, so only set one if we're using
+     * a different type of input.
+     */
     if (glob->hasher_required) {
         trace_set_hasher(glob->trace, HASHER_BIDIRECTIONAL, glob->hasher,
                 glob->hasher_data);
     }
     trace_set_perpkt_threads(glob->trace, glob->threads);
+
+    /* trigger a tick every minute -- used for monitoring performance only */
     trace_set_tick_interval(glob->trace, 60 * 1000);
 
     if (!processing) {
         processing = trace_create_callback_set();
         trace_set_starting_cb(processing, init_trace_processing);
-        //trace_set_stopping_cb(processing, halt_trace_processing);
+        /* No stopping callback -- we free our thread-local data after
+         * the processing threads have joined instead. */
         trace_set_packet_cb(processing, per_packet);
         trace_set_tick_interval_cb(processing, process_tick);
     }
@@ -449,7 +549,6 @@ void usage(char *prog) {
     printf("Usage: %s [ -l logmode ] -c configfile \n\n", prog);
     printf("Accepted logmodes:\n");
     printf("\tterminal\n\tfile\n\tsyslog\n\tdisabled\n");
-
 }
 
 
@@ -535,10 +634,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Start the zeromq proxy thread */
     pthread_create(&proxythread, NULL, start_zmq_proxy_thread, glob);
 
+    /* Load the libipmeta provider data */
     glob->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
     if (glob->pfxtagopts.enabled) {
+        /* Prefix to ASN mapping */
         prov = corsaro_init_ipmeta_provider(glob->ipmeta,
                 IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts),
                 glob->logger);
@@ -550,6 +652,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (glob->maxtagopts.enabled) {
+        /* Maxmind geolocation */
         prov = corsaro_init_ipmeta_provider(glob->ipmeta,
                 IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts),
                 glob->logger);
@@ -561,6 +664,7 @@ int main(int argc, char *argv[]) {
         }
     }
     if (glob->netacqtagopts.enabled) {
+        /* Netacq Edge geolocation */
         prov = corsaro_init_ipmeta_provider(glob->ipmeta,
                 IPMETA_PROVIDER_NETACQ_EDGE, &(glob->netacqtagopts),
                 glob->logger);
@@ -574,6 +678,7 @@ int main(int argc, char *argv[]) {
 
     glob->threaddata = calloc(glob->threads, sizeof(corsaro_tagger_local_t));
 
+    /* Initialise all of our thread local state for the processing threads */
     for (i = 0; i < glob->threads; i++) {
         init_tagger_thread_data(&(glob->threaddata[i]), i, glob);
     }
@@ -600,6 +705,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
+        /* Wait for the input to finish (or be halted via user signal) */
         while (!trace_halted) {
             sleep(1);
         }
@@ -632,8 +738,9 @@ int main(int argc, char *argv[]) {
         glob->trace = NULL;
     }
 
+    /* Destroy the thread local state for each processing thread */
     for (i = 0; i < glob->threads; i++) {
-        halt_trace_processing(glob, &(glob->threaddata[i]), i);
+        destroy_local_state(glob, &(glob->threaddata[i]), i);
     }
     corsaro_log(glob->logger, "all threads have joined, exiting.");
     corsaro_tagger_free_global(glob);
@@ -643,8 +750,6 @@ int main(int argc, char *argv[]) {
         trace_destroy_callback_set(processing);
     }
     return 0;
-
-
 }
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
