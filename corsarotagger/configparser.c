@@ -642,10 +642,6 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
         zmq_ctx_destroy(glob->zmq_ctxt);
     }
 
-    for (i = 0; i < glob->threads; i++) {
-        pthread_mutex_destroy(&(glob->threaddata[i].bufmutex));
-    }
-
     if (glob->threaddata) {
         free(glob->threaddata);
     }

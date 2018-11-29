@@ -125,22 +125,6 @@ typedef struct corsaro_tagger_glob {
     corsaro_tagger_local_t *threaddata;
 } corsaro_tagger_global_t;
 
-typedef struct corsaro_tagger_buffer corsaro_tagger_buffer_t;
-
-/** Structure for managing a buffer containing a tagged packet */
-struct corsaro_tagger_buffer {
-    /** The allocated memory for the buffer itself */
-    uint8_t *bufspace;
-    /** The amount of memory allocated for the buffer */
-    uint16_t bufalloc;
-    /** Pointer to the thread that owns this buffer */
-    corsaro_tagger_local_t *local;
-    /** Pointer to the next available buffer in the freelist (only
-     *  relevant if this buffer is in the freelist)
-     */
-    corsaro_tagger_buffer_t *next;
-};
-
 /** Structure for storing thread-local state for a single processing thread */
 struct corsaro_tagger_local {
 
@@ -163,17 +147,12 @@ struct corsaro_tagger_local {
     /** Cumulative number of packets that have been accepted by this thread */
     uint64_t lastaccepted;
 
-    /** A mutex to protect the buffer freelist */
-    pthread_mutex_t bufmutex;
+    uint8_t *bufferspace;
 
-    /* A freelist of tagged packet buffers */
-    corsaro_tagger_buffer_t *freebufs;
+    uint32_t buffersize;
 
-    /** A boolean flag indicating whether the freelist has been cleared.
-     *  If true, then any released buffers must be freed rather than put
-     *  onto the freelist.
-     */
-    uint8_t fbclear;
+    uint32_t bufferused;
+
 };
 
 

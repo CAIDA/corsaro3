@@ -44,6 +44,11 @@
 #include "libcorsaro3_plugin.h"
 #include "libcorsaro3_filtering.h"
 
+/* TODO: this is currently defined in both the tagger and here, so we
+ * run the risk of them getting out of sync :/
+ */
+#define TAGGER_MAX_MSGSIZE (1 * 1024 * 1024)
+
 typedef struct pcaphdr_t {
     uint32_t ts_sec;        /* Seconds portion of the timestamp */
     uint32_t ts_usec;       /* Microseconds portion of the timestamp */
@@ -511,12 +516,13 @@ endmerger:
 static int receive_tagged_packet(corsaro_trace_global_t *glob) {
 
     /* receive message, decode it, forward to an appropriate worker */
-    int rcvsize, i;
-    uint8_t rcvspace[3000];
+    int rcvsize, rcvused;
+    uint8_t rcvspace[TAGGER_MAX_MSGSIZE];
     corsaro_worker_msg_t jobmsg;
     int targetworker;
 
-    if (zmq_recv(glob->zmq_subsock, rcvspace, 3000, 0) < 0) {
+    if ((rcvsize = zmq_recv(glob->zmq_subsock, rcvspace,
+            TAGGER_MAX_MSGSIZE, 0)) < 0) {
         if (errno == EAGAIN) {
             return 0;
         }
@@ -527,25 +533,33 @@ static int receive_tagged_packet(corsaro_trace_global_t *glob) {
         return -1;
     }
 
-    jobmsg.type = CORSARO_TRACE_MSG_PACKET;
-    memcpy(&jobmsg.header, rcvspace, sizeof(corsaro_tagged_packet_header_t));
+    rcvused = 0;
+    while (rcvused < rcvsize) {
 
-    jobmsg.packetcontent = malloc(jobmsg.header.pktlen);
-    memcpy(jobmsg.packetcontent,
-            rcvspace + sizeof(corsaro_tagged_packet_header_t),
-            jobmsg.header.pktlen);
+        jobmsg.type = CORSARO_TRACE_MSG_PACKET;
+        memcpy(&jobmsg.header, rcvspace + rcvused,
+                sizeof(corsaro_tagged_packet_header_t));
+        rcvused += sizeof(corsaro_tagged_packet_header_t);
 
-    if (glob->first_pkt_ts == 0) {
-        glob->first_pkt_ts = jobmsg.header.ts_sec;
-    }
+        assert(jobmsg.header.pktlen <= rcvsize - rcvused);
+        jobmsg.packetcontent = malloc(jobmsg.header.pktlen);
+        memcpy(jobmsg.packetcontent,
+                rcvspace + rcvused,
+                jobmsg.header.pktlen);
 
-    targetworker = jobmsg.header.tags.ft_hash % glob->threads;
-    if (zmq_send(glob->zmq_workersocks[targetworker], &jobmsg,
-            sizeof(jobmsg), 0) < 0) {
-        corsaro_log(glob->logger,
-                "error while pushing tagged packet to worker thread %d: %s",
-                targetworker, strerror(errno));
-        return -1;
+        rcvused += jobmsg.header.pktlen;
+        if (glob->first_pkt_ts == 0) {
+            glob->first_pkt_ts = jobmsg.header.ts_sec;
+        }
+
+        targetworker = jobmsg.header.tags.ft_hash % glob->threads;
+        if (zmq_send(glob->zmq_workersocks[targetworker], &jobmsg,
+                sizeof(jobmsg), 0) < 0) {
+            corsaro_log(glob->logger,
+                    "error while pushing tagged packet to worker thread %d: %s",
+                    targetworker, strerror(errno));
+            return -1;
+        }
     }
 
     return 0;
