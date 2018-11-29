@@ -27,7 +27,8 @@
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
         -I$(top_srcdir)/common/libpatricia \
         -I$(top_srcdir)/common/libcsv \
-        -I$(top_srcdir)/libcorsaro3
+        -I$(top_srcdir)/libcorsaro3 \
+        @TCMALLOC_FLAGS@
 
 noinst_LTLIBRARIES = libcorsaro3plugins.la
 

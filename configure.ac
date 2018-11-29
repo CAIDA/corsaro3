@@ -165,8 +165,16 @@ AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
 
 AC_SEARCH_LIBS([tc_version], [tcmalloc tcmalloc_minimal],
-                AC_DEFINE_UNQUOTED([HAVE_TCMALLOC], [1],
-                        [tcmalloc is used for memory allocations]))
+                havetcmalloc=true, havetcmalloc=false)
+
+if test "x$havetcmalloc" == xtrue; then
+
+        AC_DEFINE_UNQUOTED([HAVE_TCMALLOC], [1],
+                        [tcmalloc is used for memory allocations])
+        TCMALLOC_FLAGS="-fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free"
+else
+        TCMALLOC_FLAGS=""
+fi
 
 AC_CHECK_LIB([Judy], [JudyLGet],, [AC_MSG_ERROR(
                 [libJudy required])])
@@ -368,6 +376,7 @@ AC_HEADER_ASSERT
 AC_SUBST([CORSARO_MAJOR_VERSION])
 AC_SUBST([CORSARO_MID_VERSION])
 AC_SUBST([CORSARO_MINOR_VERSION])
+AC_SUBST([TCMALLOC_FLAGS])
 
 AC_HEADER_ASSERT
 

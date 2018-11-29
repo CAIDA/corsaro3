@@ -22,8 +22,8 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro3 
-	-I$(top_srcdir)/libcorsaro3/plugins
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro3 \
+	-I$(top_srcdir)/libcorsaro3/plugins @TCMALLOC_FLAGS@
 
 bin_PROGRAMS = corsarotrace
 

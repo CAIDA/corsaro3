@@ -25,7 +25,8 @@
 SUBDIRS = plugins
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
 	-I$(top_srcdir)/common/libpatricia \
-	-I$(top_srcdir)/libcorsaro3/plugins
+	-I$(top_srcdir)/libcorsaro3/plugins \
+        @TCMALLOC_FLAGS@
 
 lib_LTLIBRARIES = libcorsaro3.la
 
