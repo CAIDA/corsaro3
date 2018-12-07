@@ -339,8 +339,13 @@ static int parse_config(corsaro_tagger_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && !strcmp((char *)key->data.scalar.value, "threads")) {
-        glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
+            && !strcmp((char *)key->data.scalar.value, "pktthreads")) {
+        glob->pkt_threads = strtoul((char *)value->data.scalar.value, NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "tagthreads")) {
+        glob->tag_threads = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
@@ -354,7 +359,8 @@ static int parse_config(corsaro_tagger_global_t *glob,
 }
 
 static void log_configuration(corsaro_tagger_global_t *glob) {
-    corsaro_log(glob->logger, "using %d processing threads", glob->threads);
+    corsaro_log(glob->logger, "using %d processing threads", glob->pkt_threads);
+    corsaro_log(glob->logger, "using %d tagging threads", glob->tag_threads);
 
     if (glob->filterstring) {
         corsaro_log(glob->logger, "applying BPF filter '%s'",
@@ -470,7 +476,8 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->promisc = 0;
     glob->logmode = logmode;
     glob->logfilename = NULL;
-    glob->threads = 2;
+    glob->pkt_threads = 2;
+    glob->tag_threads = 2;
 
     glob->pubqueuename = NULL;
     glob->trace = NULL;

@@ -38,6 +38,7 @@
 #include "libcorsaro3_memhandler.h"
 
 typedef struct corsaro_tagger_local corsaro_tagger_local_t;
+typedef struct corsaro_packet_local corsaro_packet_local_t;
 
 /** Structure for storing global state for a corsarotagger instance */
 typedef struct corsaro_tagger_glob {
@@ -80,7 +81,10 @@ typedef struct corsaro_tagger_glob {
     uint8_t logmode;
 
     /** The number of packet processing threads to use */
-    uint8_t threads;
+    uint8_t pkt_threads;
+
+    /** The number of tagging threads to use */
+    uint8_t tag_threads;
 
     /** The configuration options for the libipmeta prefix to ASN module */
     pfx2asn_opts_t pfxtagopts;
@@ -123,16 +127,24 @@ typedef struct corsaro_tagger_glob {
      *  thread.
      */
     corsaro_tagger_local_t *threaddata;
+    corsaro_packet_local_t *packetdata;
 } corsaro_tagger_global_t;
 
 /** Structure for storing thread-local state for a single processing thread */
 struct corsaro_tagger_local {
+
+    pthread_t ptid;
+
+    corsaro_tagger_global_t *glob;
 
     /** A corsaro tagger instance */
     corsaro_packet_tagger_t *tagger;
 
     /** A zeromq socket to publish tagged packets onto */
     void *pubsock;
+
+    /** A zeromq socket to pull untagged packets from */
+    void *pullsock;
 
     /** A boolean flag indicating whether this thread has halted */
     uint8_t stopped;
@@ -141,6 +153,20 @@ struct corsaro_tagger_local {
      *  thread.
      */
     uint64_t errorcount;
+
+    uint8_t *bufferspace;
+
+    uint32_t buffersize;
+
+    uint32_t bufferused;
+
+};
+
+
+struct corsaro_packet_local {
+
+    /** A boolean flag indicating whether this thread has halted */
+    uint8_t stopped;
 
     /** Cumulative number of packets missed by this thread */
     uint64_t lastmisscount;
@@ -153,8 +179,9 @@ struct corsaro_tagger_local {
 
     uint32_t bufferused;
 
+    /** A zeromq socket to publish tagged packets onto */
+    void *pubsock;
 };
-
 
 /** Initialises the global state for a corsarotagger instance, based on
  *  the YAML configuration found in the given config file.
