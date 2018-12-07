@@ -423,8 +423,7 @@ static int update_pfx2as_tags(corsaro_logger_t *logger,
 }
 
 static void update_basic_tags(corsaro_logger_t *logger,
-        libtrace_packet_t *packet, corsaro_packet_tags_t *tags,
-        libtrace_ip_t *ip, uint32_t *rem) {
+        corsaro_packet_tags_t *tags, libtrace_ip_t *ip, uint32_t *rem) {
 
     void *transport;
     uint8_t proto;
@@ -488,6 +487,11 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
 
     corsaro_filter_torun_t torun[3];
 
+    if (ip == NULL) {
+        tags->highlevelfilterbits = CORSARO_FILTERBIT_NOTIP;
+        return;
+    }
+
     /* Filtering results are either 0 or 1 (didn't match and
      * matched, respectively) so we use 255 here as an initial
      * value to avoid confusion.
@@ -514,36 +518,18 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
     }
 }
 
-int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
-        corsaro_packet_tags_t *tags, libtrace_packet_t *packet) {
+static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
+        corsaro_packet_tags_t *tags, libtrace_ip_t *ip, uint32_t rem) {
 
-    struct sockaddr_storage saddr;
-    struct sockaddr_in *sin;
-    libtrace_list_node_t *n;
-    ipmeta_record_t *rec;
-    tags->providers_used = 0;
     uint32_t numips = 0;
-    libtrace_ip_t *ip = NULL;
-    uint32_t rem;
-    uint16_t ethertype;
+    ipmeta_record_t *rec;
 
-    memset(tags, 0, sizeof(corsaro_packet_tags_t));
-    tags->providers_used = 0;
-
-    if (packet == NULL) {
-        return 0;
-    }
-
-    ip = (libtrace_ip_t *)trace_get_layer3(packet, &ethertype, &rem);
-    if (rem < sizeof(libtrace_ip_t) || ip == NULL) {
-        return 0;
-    }
-    if (ethertype != TRACE_ETHERTYPE_IP) {
-        return 0;
-    }
-
-    update_basic_tags(tagger->logger, packet, tags, ip, &rem);
     update_filter_tags(tagger->logger, ip, rem, tags);
+    if (ip == NULL) {
+        return 0;
+    }
+
+    update_basic_tags(tagger->logger, tags, ip, &rem);
 
     if (tagger->providers == NULL) {
         return 0;
@@ -584,9 +570,39 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
                 printf("???: %u\n", rec->source);
         }
     }
-
     return 0;
 }
 
+int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
+        corsaro_packet_tags_t *tags, libtrace_packet_t *packet) {
+
+    libtrace_ip_t *ip = NULL;
+    uint32_t rem;
+    uint16_t ethertype;
+
+    memset(tags, 0, sizeof(corsaro_packet_tags_t));
+    tags->providers_used = 0;
+
+    if (packet == NULL) {
+        return 0;
+    }
+
+    ip = (libtrace_ip_t *)trace_get_layer3(packet, &ethertype, &rem);
+    if (rem < sizeof(libtrace_ip_t) || ip == NULL) {
+        return 0;
+    }
+    if (ethertype != TRACE_ETHERTYPE_IP) {
+        return 0;
+    }
+
+    return _corsaro_tag_ip_packet(tagger, tags, ip, rem);
+
+}
+
+int corsaro_tag_ippayload(corsaro_packet_tagger_t *tagger,
+        corsaro_packet_tags_t *tags, libtrace_ip_t *ip, uint32_t rem) {
+
+    return _corsaro_tag_ip_packet(tagger, tags, ip, rem);
+}
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -51,8 +51,10 @@ enum {
     CORSARO_FILTERBIT_SPOOFED = 1,
     /** Packet matched the filter for erratic traffic types */
     CORSARO_FILTERBIT_ERRATIC = 2,
-    /** Packet match the filter for RFC 5735 addresses */
+    /** Packet matched the filter for RFC 5735 addresses */
     CORSARO_FILTERBIT_NONROUTABLE = 4,
+    /** Packet is not an IP packet, so can be ignored by most applications */
+    CORSARO_FILTERBIT_NOTIP = 32768,
 };
 
 /** Identifiers for each of the supported built-in tags.
@@ -312,6 +314,23 @@ void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger);
  */
 int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
         corsaro_packet_tags_t *tags, libtrace_packet_t *packet);
+
+/** Derives the set of tags that should be applied to a given IP packet.
+ *  In this case, the packet is provided via a pointer to the IP header.
+ *
+ *  @param tagger       The corsaro tagger to use when doing the tagging.
+ *  @param tags         A pointer to the set of tags that is to be updated by
+ *                      this function.
+ *  @param ip           The IP header of the packet that will be 'tagged'.
+ *  @param rem          The amount of bytes remaining in the packet, starting
+ *                      from the IP header.
+ *  @return 0 in all situations.
+ *
+ *  @note Any tag information previously contained in 'tags' will be
+ *  overwritten by this function with the tags for the provided packet.
+ */
+int corsaro_tag_ippayload(corsaro_packet_tagger_t *tagger,
+        corsaro_packet_tags_t *tags, libtrace_ip_t *ip, uint32_t rem);
 
 #endif
 
