@@ -52,6 +52,12 @@ typedef struct corsaro_tagger_glob {
     /** An array of URI strings to read packets from */
     char **inputuris;
 
+    /** A constant ERF framing size for incoming packets -- used to speed
+     *  up packet processing for nDAG inputs in cases where the user is
+     *  able to guarantee a consistent packet "type" will be captured.
+     */
+    int consterfframing;
+
     /** A string describing a BPF filter to apply to all received packets */
     char *filterstring;
 

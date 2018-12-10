@@ -109,6 +109,12 @@ typedef struct corsaro_wdcap_global {
     /** Indicates whether logging is to stderr, syslog or to a file */
     uint8_t logmode;
 
+	/** A constant ERF framing size for incoming packets -- used to speed
+     *  up packet processing for nDAG inputs in cases where the user is
+     *  able to guarantee a consistent packet "type" will be captured.
+     */
+    int consterfframing;
+
     /** The number of libtrace processing threads to use for reading
      *  packets from the input source.
      */

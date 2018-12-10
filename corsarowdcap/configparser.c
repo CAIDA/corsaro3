@@ -103,6 +103,12 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "consterfframing")) {
+        glob->consterfframing = strtol((char *)value->data.scalar.value,
+                NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "threads")) {
         glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
@@ -116,6 +122,10 @@ static void log_configuration(corsaro_wdcap_global_t *glob) {
     corsaro_log(glob->logger, "reading from %s\n", glob->inputuri);
     corsaro_log(glob->logger, "interval length is set to %u seconds",
             glob->interval);
+    if (glob->consterfframing >= 0) {
+        corsaro_log(glob->logger, "assuming constant ERF framing length of %d",
+                glob->consterfframing);
+    }
     corsaro_log(glob->logger, "rotating files every interval");
     corsaro_log(glob->logger, "writing files using the %s format",
             glob->fileformat);
@@ -205,6 +215,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->monitorid = NULL;
     glob->logmode = logmode;
     glob->logfilename = NULL;
+    glob->consterfframing = 16;     // ethernet with no extension headers
     glob->threads = 8;
     glob->logger = NULL;
     glob->trace = NULL;

@@ -329,6 +329,13 @@ static int parse_config(corsaro_tagger_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "consterfframing")) {
+
+        glob->consterfframing = (int)strtol((char *)value->data.scalar.value,
+                NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "basicfilter")) {
         glob->filterstring = strdup((char *)value->data.scalar.value);
     }
@@ -361,6 +368,11 @@ static int parse_config(corsaro_tagger_global_t *glob,
 static void log_configuration(corsaro_tagger_global_t *glob) {
     corsaro_log(glob->logger, "using %d processing threads", glob->pkt_threads);
     corsaro_log(glob->logger, "using %d tagging threads", glob->tag_threads);
+
+    if (glob->consterfframing >= 0) {
+        corsaro_log(glob->logger, "using constant ERF framing size of %d",
+                glob->consterfframing);
+    }
 
     if (glob->filterstring) {
         corsaro_log(glob->logger, "applying BPF filter '%s'",
@@ -473,6 +485,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->totaluris = 0;
     glob->alloceduris = 0;
     glob->filterstring = NULL;
+    glob->consterfframing = 16;     /* Typical ethernet with no extensions */
     glob->promisc = 0;
     glob->logmode = logmode;
     glob->logfilename = NULL;

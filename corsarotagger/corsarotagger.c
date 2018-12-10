@@ -662,6 +662,17 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
         }
     }
 
+    if (glob->consterfframing >= 0 &&
+            trace_config(glob->trace, TRACE_OPTION_CONSTANT_ERF_FRAMING,
+            &(glob->consterfframing)) < 0) {
+        libtrace_err_t err = trace_get_err(glob->trace);
+        if (err.err_num != TRACE_ERR_OPTION_UNAVAIL) {
+            corsaro_log(glob->logger, "error configuring trace object: %s",
+                    err.problem);
+            return -1;
+        }
+    }
+
     if (trace_pstart(glob->trace, glob, processing, NULL) == -1) {
         libtrace_err_t err = trace_get_err(glob->trace);
         corsaro_log(glob->logger, "unable to start reading from trace object: %s",
