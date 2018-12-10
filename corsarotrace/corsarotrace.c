@@ -231,18 +231,18 @@ static void fast_construct_packet(libtrace_t *deadtrace,
     memcpy(packet->header, &pcaphdr, sizeof(pcaphdr));
     packet->type = TRACE_RT_DATA_DLT + TRACE_DLT_EN10MB;
 
-    packet->l2_header = packet->payload;
-    packet->l3_header = NULL;
-    packet->l4_header = NULL;
-    packet->link_type = TRACE_TYPE_ETH;
-    packet->l3_ethertype = 0;
-    packet->transport_proto = 0;
-    packet->capture_length = tp->header.pktlen;
-    packet->wire_length = tp->header.pktlen;
-    packet->payload_length = -1;
-    packet->l2_remaining = tp->header.pktlen;
-    packet->l3_remaining = 0;
-    packet->l4_remaining = 0;
+    packet->cached.l2_header = packet->payload;
+    packet->cached.l3_header = NULL;
+    packet->cached.l4_header = NULL;
+    packet->cached.link_type = TRACE_TYPE_ETH;
+    packet->cached.l3_ethertype = 0;
+    packet->cached.transport_proto = 0;
+    packet->cached.capture_length = tp->header.pktlen;
+    packet->cached.wire_length = tp->header.pktlen;
+    packet->cached.payload_length = -1;
+    packet->cached.l2_remaining = tp->header.pktlen;
+    packet->cached.l3_remaining = 0;
+    packet->cached.l4_remaining = 0;
     packet->refcount = 0;
     packet->which_trace_start = 0;
 }
