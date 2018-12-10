@@ -716,6 +716,11 @@ static int _apply_spoofing_filter(corsaro_logger_t *logger,
 static int _apply_erratic_filter(corsaro_logger_t *logger,
         filter_params_t *fparams) {
 
+    /* All spoofed packets are automatically erratic */
+    if (_apply_spoofing_filter(logger, fparams) > 0) {
+        return 1;
+    }
+
     if (_apply_udp_0x31_filter(logger, fparams) > 0) {
         return 1;
     }
@@ -983,9 +988,8 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
     int i;
     uint32_t rem = iprem;
     filter_params_t fparams;
-    uint8_t proto = 0;
+    uint8_t proto = 0, alreadyspoofed = 0;
     void *transport = trace_get_payload_from_ip(ip, &proto, &rem);
-
 
     memset(&fparams, 0, sizeof(filter_params_t));
     fparams.ip = ip;
@@ -1021,9 +1025,16 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
         switch(torun[i].filterid) {
             case CORSARO_FILTERID_SPOOFED:
                 torun[i].result = _apply_spoofing_filter(logger, &fparams);
+                if (torun[i].result) {
+                    alreadyspoofed = 1;
+                }
                 break;
             case CORSARO_FILTERID_ERRATIC:
-                torun[i].result = _apply_erratic_filter(logger, &fparams);
+                if (alreadyspoofed) {
+                    torun[i].result = 1;
+                } else {
+                    torun[i].result = _apply_erratic_filter(logger, &fparams);
+                }
                 break;
             case CORSARO_FILTERID_ROUTED:
                 torun[i].result = _apply_routable_filter(logger, fparams.ip);
