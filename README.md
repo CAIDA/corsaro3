@@ -1,88 +1,175 @@
-Overview
-========
-
-Both Corsaro and this documentation are still under active development and
-features will likely change between versions.
-Please contact corsaro-info@caida.org with any questions and/or suggestions.
+Corsaro 3: the Parallel Edition
+-------------------------------
 
 Introduction
 ============
 
-Corsaro is a software suite for performing large-scale analysis of trace
-data. It was specifically designed to be used with passive traces captured by
-darknets, but the overall structure is generic enough to be used with any type
-of passive trace data.
+Corsaro 3 is a re-implementation of a decent chunk of the original Corsaro
+which aims to be better suited to processing parallel traffic sources, such
+as nDAG streams or DPDK pipelines.
 
-Because of the scale of passive trace data, Corsaro has been designed from the
-ground up to be fast and efficient, both in terms of run-time and output data
-size. For more details about the design goals of Corsaro, see the
-[Goals](http://www.caida.org/tools/measurement/corsaro/docs/goals.html) section.
+At present, Corsaro 3 exists (and is built) alongside the previous version
+of Corsaro and any results / output produced by Corsaro 3 should be
+compatible with tools or analysis programs written using the old Corsaro.
 
-Corsaro allows high-speed analysis of trace data on a per-packet basis and
-provides a mechanism for aggregating results based on customizable time
-intervals. Trace data is read using the
-[libtrace](http://research.wand.net.nz/software/libtrace.php) trace processing
-library, and a high-level IO abstraction layer allows results to be
-transparently written to compressed files, using threaded IO. The actual trace
-analysis logic is clearly separated into a set of plugins, several of which are
-shipped with Corsaro. For more information about how the pieces of Corsaro fit
-together, see the [Architecture](http://www.caida.org/tools/measurement/corsaro/docs/arch.html) section.
 
-In addition to the [Core Plugins](http://www.caida.org/tools/measurement/corsaro/docs/plugins.html) which are shipped with Corsaro,
-the plugin framework makes the creation of new plugins as simple as
-possible. The low overhead involved in creating a new plugin, coupled with the
-efficiency and reliability of Corsaro means that it can be used both to perform
-ad-hoc exploratory investigations as well as in a production context to carry
-out large-scale near-realtime analysis. To learn how to create a plugin, or
-perform analysis on existing Corsaro results, see the [Tutorials](http://www.caida.org/tools/measurement/corsaro/docs/tutorials.html)
-section.
-
-Corsaro can be used both as a library and as a stand-alone application for
-processing any format of trace data that _libtrace_ supports. The Corsaro
-distribution also includes several other supporting tools for basic analysis of
-Corsaro output data. For information on using the Corsaro application and the
-other tools included, see the [Tools](http://www.caida.org/tools/measurement/corsaro/docs/tools.html) section.
-
-Download
-========
-
-The latest version of Corsaro is
-[2.0.0](http://www.caida.org/tools/measurement/corsaro/downloads/corsaro-2.0.0.tar.gz),
-released on November 21 2013.
-
-We also maintain a detailed [Change Log](http://www.caida.org/tools/measurement/corsaro/docs/changelog.html).
-
-Quick Start
-===========
-
-If you want to just dive right in and get started using Corsaro, take a look at
-the [Quick Start](http://www.caida.org/tools/measurement/corsaro/docs/quickstart.html) guide.
-
-Dependencies
+Requirements
 ============
 
-Corsaro is written in C and should compile with any ANSI compliant C Compiler
-which supports the C99 standard. Please email corsaro-info@caida.org with any
-issues.
+ * libtrace >= 4.0.3 -- download from https://github.com/LibtraceTeam/libtrace
+ * libwandio >= 1.0.4 -- download from https://github.com/wanduow/wandio
+ * libyaml -- https://github.com/yaml/libyaml
 
-Corsaro requires [libtrace](http://research.wand.net.nz/software/libtrace.php)
-version 3.0.14 or higher. (3.0.8 or higher can be used if the libwandio patch
-included in the corsaro distribution is applied).
-
-Usage
-=====
-
-Corsaro has many different usage scenarios which are outlined in this manual,
-but if you are looking to just run the analysis engine with the bundled plugins,
-see the [Corsaro](http://www.caida.org/tools/measurement/corsaro/docs/tools.html#tool_corsaro) section of the [Tools](http://www.caida.org/tools/measurement/corsaro/docs/tools.html) page.
+Debian / Ubuntu users can also find packages for libtrace and libwandio at
+http://packages.wand.net.nz/
 
 
-Documentation
+Installing
+==========
+
+Standard installation instructions apply.
+
+
+Configuration
 =============
 
-The online
-[Corsaro Documentation](http://www.caida.org/tools/measurement/corsaro/docs/) is
-the best source of information about using Corsaro. It contains full API
-documentation, usage instructions for the Corsaro tools. It also has tutorials
-about writing Corsaro plugins and using the libcorsaro library to perform
-analysis on Corsaro-generated data.
+Old Corsaro used a pile of CLI arguments for configuring each run. This has
+now been replaced with a YAML configuration file.
+
+The YAML required to use Corsaro 3 is pretty simple to write. There are a
+large number of top-level global config options which are simply set by
+specifying a key value pair using the following format:
+
+key: value
+
+The plugins to apply are expressed as a YAML sequence, with the
+plugin-specific options appearing as key value pairs following the
+plugin name itself. For instance, the following config segment will
+run a Corsaro 3 tool using the flowtuple and dos plugins. The flowtuple
+plugin will be configured with the 'sorttuples' option set to 'yes'.
+The dos plugin will be configured with the 'minattackduration' option set
+to 60.
+
+plugins:
+ - flowtuple:
+     sorttuples: yes
+ - dos:
+     minattackduration: 60
+
+Note that the indentation and colon placement is important.
+
+An example configuration file for the corsarotrace tool is included with the
+Corsaro 3 source code.
+
+Running corsarotrace
+====================
+
+Right now, the only tool implemented for Corsaro 3 is corsarotrace, which
+reads packets from a libtrace input (which can be a packet trace or a live
+capture interface), applies the packet processing functions of one or more
+corsaro plugins to those packets, and then writes the resulting output to a
+Corsaro result file.
+
+To use corsarotrace, write a suitable config file (see below for more
+details) and run the following command:
+
+  ./corsarotrace -c <config filename> -l <logmode>
+
+The logmode option is used to determine where any log messages that are
+produced by corsarotrace end up. There are four options available:
+
+  terminal              write log messages to stderr
+  syslog                write log messages to syslog (daemon.log)
+  file                  write log messages to a file
+  disabled              do not write log messages
+
+
+corsarotrace Config Options
+===========================
+
+The full set of supported global config options is:
+
+  outtemplate           The template to use for output file names. The format
+                        specification semantics are the same as they were in
+                        old Corsaro (i.e. %P for plugin name, %N for monitor
+                        name, as well as all strftime(3) modifiers).
+
+  logfilename           If the log mode is set to 'file', the log messages
+                        will be written to the file name provided by this
+                        option. This option must be set if the log mode
+                        is set to 'file'.
+
+  inputuri              A libtrace URI describing where corsarotrace should
+                        read captured packets from. Specify multiple 'inputuri'
+                        options to have corsarotrace process multiple trace
+                        files in sequence. Multiple URIs are processed in the
+                        order that they appear.
+
+  threads               Set the number of threads to be created for packet
+                        processing. Defaults to 2.
+
+  outputmode            Set to 'ascii' to have the result file written in
+                        ASCII format. Set to 'binary' to have output written
+                        using a custom binary format. Defaults to 'binary'.
+
+  compressmethod        Set to 'gzip' to have the output file compressed using
+                        gzip. Set to 'bz2' to have the output file compressed
+                        using bzip2. Set to 'none' to not compress the output
+                        file at all. Defaults to 'none'.
+
+  compresslevel         Sets the compression level to be applied when writing
+                        compressed output files. Must be a number between 1-9
+                        inclusive. Defaults to 6.
+
+  monitorid             Set the monitor name that will appear in output file
+                        names if the %N modifier is present in the template.
+
+  interval              Specifies the distribution interval length in seconds.
+                        Defaults to 60.
+
+  rotatefreq            Specifies the number of intervals that must complete
+                        before the output file is rotated. Defaults to 4. If
+                        set to 0, no file rotation is performed (all output
+                        ends up in a single file).
+
+  promisc               If set to 'yes', the input source will be configured
+                        to use promiscuous mode (if possible). Defaults to
+                        'no'.
+
+  mergeoutput           If set to 'no', the multiple output files produced by
+                        each processing thread for a rotation interval will NOT
+                        be merged into a one output file per rotation interval.
+                        Defaults to 'yes', which is usually the most sensible
+                        option.
+
+  startboundaryts       Ignore all packets that have a timestamp earlier than
+                        the Unix timestamp given by this option.
+
+  endboundaryts         Ignore all packets that have a timestamp after the Unix
+                        timestamp given by this option.
+
+  filter                Ignore all packets that do not match this BPF filter.
+
+  plugins               A sequence that specifies which plugins to use for
+                        packet processing, as well as any plugin-specific
+                        configuration options (see below for more details).
+
+
+Supported Plugins and their Configuration Options
+=================================================
+
+So far, just the flowtuple plugin has been ported to Corsaro 3, but more will
+follow shortly.
+
+Remember that plugin-specific configuration must be appear as a map within
+the appearance of the plugin name in the config file, not alongside the global
+options.
+
+The flowtuple plugin only has the one option:
+
+  sorttuples            If 'yes', the flowtuples are output in sorted order.
+                        The sorting is based on the same sorting method as in
+                        previous Corsaro versions. Defaults to 'yes'.
+
+
+
