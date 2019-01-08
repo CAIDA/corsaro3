@@ -22,7 +22,7 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-SUBDIRS = common libcorsaro3 corsarotrace corsarotagger corsarowdcap
+SUBDIRS = common libcorsaro corsarotrace corsarotagger corsarowdcap
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common
 
 ACLOCAL_AMFLAGS = -I m4

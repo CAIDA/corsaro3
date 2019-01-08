@@ -24,7 +24,7 @@ corsarowdcap/corsarowdcap
 
 # Auto-generated files
 corsaro-*.tar.gz
-libcorsaro3/libcorsaro3.h
+libcorsaro/libcorsaro.h
 
 # Autotools files
 # http://www.gnu.org/software/automake

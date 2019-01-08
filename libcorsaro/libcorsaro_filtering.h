@@ -31,7 +31,7 @@
 #include <libtrace/linked_list.h>
 #include <libtrace.h>
 
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 
 /** Structure for a custom corsaro filter */
 typedef struct corsaro_filter {

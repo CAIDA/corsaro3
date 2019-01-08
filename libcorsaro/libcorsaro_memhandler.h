@@ -33,7 +33,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 
 typedef struct corsaro_memblob corsaro_memsource_t;
 

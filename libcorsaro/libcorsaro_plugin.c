@@ -28,7 +28,7 @@
 #include "config.h"
 
 #include <assert.h>
-#include "libcorsaro3_plugin.h"
+#include "libcorsaro_plugin.h"
 
 #ifdef WITH_PLUGIN_SIXT
 #include "corsaro_flowtuple.h"

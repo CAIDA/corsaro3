@@ -39,8 +39,8 @@
 #include <libtrace_parallel.h>
 
 #include "corsarowdcap.h"
-#include "libcorsaro3_log.h"
-#include "libcorsaro3_trace.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro_trace.h"
 
 /** corsarowdcap
  *

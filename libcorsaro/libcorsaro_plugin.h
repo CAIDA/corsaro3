@@ -31,9 +31,9 @@
 #include <yaml.h>
 #include <libtrace.h>
 
-#include "libcorsaro3_tagging.h"
-#include "libcorsaro3.h"
-#include "libcorsaro3_log.h"
+#include "libcorsaro_tagging.h"
+#include "libcorsaro.h"
+#include "libcorsaro_log.h"
 
 /** Convenience macros that define all the function prototypes for the corsaro
  * plugin API

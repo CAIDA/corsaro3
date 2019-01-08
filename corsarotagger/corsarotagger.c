@@ -38,11 +38,11 @@
 #include <libtrace_parallel.h>
 #include <zmq.h>
 
-#include "libcorsaro3_log.h"
-#include "libcorsaro3_tagging.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro_tagging.h"
 #include "corsarotagger.h"
-#include "libcorsaro3_filtering.h"
-#include "libcorsaro3_memhandler.h"
+#include "libcorsaro_filtering.h"
+#include "libcorsaro_memhandler.h"
 
 /** Older versions of libzmq use a different name for this option */
 #ifndef ZMQ_IMMEDIATE

@@ -29,8 +29,8 @@
 #ifndef CORSARO_AVRO_H_
 #define CORSARO_AVRO_H_
 
-#include "libcorsaro3.h"
-#include "libcorsaro3_log.h"
+#include "libcorsaro.h"
+#include "libcorsaro_log.h"
 
 #include <stdlib.h>
 #include <avro.h>

@@ -35,9 +35,9 @@
 
 #include "khash.h"
 #include "ksort.h"
-#include "libcorsaro3_plugin.h"
-#include "libcorsaro3_avro.h"
-#include "libcorsaro3_filtering.h"
+#include "libcorsaro_plugin.h"
+#include "libcorsaro_avro.h"
+#include "libcorsaro_filtering.h"
 #include "corsaro_filteringstats.h"
 #include "utils.h"
 

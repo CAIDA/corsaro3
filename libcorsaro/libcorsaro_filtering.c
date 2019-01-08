@@ -29,8 +29,8 @@
 #include <string.h>
 #include <libtrace.h>
 
-#include "libcorsaro3_filtering.h"
-#include "libcorsaro3_log.h"
+#include "libcorsaro_filtering.h"
+#include "libcorsaro_log.h"
 
 typedef struct filter_params {
     libtrace_ip_t *ip;

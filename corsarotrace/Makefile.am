@@ -22,8 +22,8 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro3 \
-	-I$(top_srcdir)/libcorsaro3/plugins @TCMALLOC_FLAGS@
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro \
+	-I$(top_srcdir)/libcorsaro/plugins @TCMALLOC_FLAGS@
 
 bin_PROGRAMS = corsarotrace
 
@@ -34,9 +34,9 @@ corsarotrace_SOURCES = \
         configparser.h \
         corsarotrace.h
 
-corsarotrace_LDADD = -lcorsaro3
+corsarotrace_LDADD = -lcorsaro
 
-corsarotrace_LDFLAGS = -L$(top_builddir)/libcorsaro3
+corsarotrace_LDFLAGS = -L$(top_builddir)/libcorsaro
 
 ACLOCAL_AMFLAGS = -I m4
 

@@ -37,9 +37,9 @@
 #include <sys/time.h>
 #include <math.h>
 
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 /* Yes, I know about the redundancy between this enum and the one
- * in libcorsaro3_log.h -- feel free to fix if it is bothering you.
+ * in libcorsaro_log.h -- feel free to fix if it is bothering you.
  */
 enum {
     CORSARO_LOG_SYSLOG,

@@ -38,8 +38,8 @@
 
 #include "khash.h"
 #include "ksort.h"
-#include "libcorsaro3_plugin.h"
-#include "libcorsaro3_avro.h"
+#include "libcorsaro_plugin.h"
+#include "libcorsaro_avro.h"
 #include "corsaro_dos.h"
 #include "utils.h"
 

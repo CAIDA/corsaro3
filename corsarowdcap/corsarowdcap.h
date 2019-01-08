@@ -29,9 +29,9 @@
 #define CORSARO_WDCAP_STRIP_VLANS_ON 1
 #define CORSARO_DEFAULT_WDCAP_STRIP_VLANS CORSARO_WDCAP_STRIP_VLANS_ON
 
-#include "libcorsaro3_trace.h"
-#include "libcorsaro3_log.h"
-#include "libcorsaro3.h"
+#include "libcorsaro_trace.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro.h"
 
 /** Types of messages that can be received by the merging thread */
 enum {

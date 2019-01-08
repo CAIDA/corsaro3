@@ -32,9 +32,9 @@
 #include "config.h"
 #include "khash.h"
 #include "ksort.h"
-#include "libcorsaro3.h"
-#include "libcorsaro3_plugin.h"
-#include "libcorsaro3_memhandler.h"
+#include "libcorsaro.h"
+#include "libcorsaro_plugin.h"
+#include "libcorsaro_memhandler.h"
 
 corsaro_plugin_t *corsaro_flowtuple_alloc(void);
 

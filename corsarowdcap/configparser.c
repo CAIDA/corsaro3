@@ -27,7 +27,7 @@
 
 #include <errno.h>
 
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 #include "corsarowdcap.h"
 
 #include <yaml.h>

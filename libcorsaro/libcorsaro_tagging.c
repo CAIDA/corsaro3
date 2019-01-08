@@ -29,9 +29,9 @@
 #include <string.h>
 
 #include <libipmeta.h>
-#include "libcorsaro3_filtering.h"
-#include "libcorsaro3_tagging.h"
-#include "libcorsaro3_log.h"
+#include "libcorsaro_filtering.h"
+#include "libcorsaro_tagging.h"
+#include "libcorsaro_log.h"
 
 typedef struct hash_fields {
     uint32_t src_ip;

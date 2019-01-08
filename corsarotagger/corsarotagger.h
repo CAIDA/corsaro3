@@ -31,11 +31,11 @@
 #include <libtrace.h>
 #include <libtrace_parallel.h>
 
-#include "libcorsaro3.h"
-#include "libcorsaro3_log.h"
-#include "libcorsaro3_filtering.h"
-#include "libcorsaro3_tagging.h"
-#include "libcorsaro3_memhandler.h"
+#include "libcorsaro.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro_filtering.h"
+#include "libcorsaro_tagging.h"
+#include "libcorsaro_memhandler.h"
 
 typedef struct corsaro_tagger_local corsaro_tagger_local_t;
 typedef struct corsaro_packet_local corsaro_packet_local_t;

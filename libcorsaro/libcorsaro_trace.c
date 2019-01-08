@@ -38,8 +38,8 @@
 
 #include <wandio.h>
 #include <libtrace.h>
-#include "libcorsaro3_log.h"
-#include "libcorsaro3_trace.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro_trace.h"
 
 /** Use 24 MB as an initial buffer size for the fast writers */
 #define FAST_WRITER_BUFFER_SIZE (24 * 1024 * 1024)

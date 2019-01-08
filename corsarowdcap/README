@@ -26,7 +26,7 @@ Requirements
 ============
 
  * libtrace >= 4.0.5 -- download from https://github.com/LibtraceTeam/libtrace
- * libcorsaro3
+ * libcorsaro
  * libyaml -- https://github.com/yaml/libyaml
  * libzmq -- https://github.com/zeromq/libzmq
 

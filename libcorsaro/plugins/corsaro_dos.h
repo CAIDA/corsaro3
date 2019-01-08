@@ -29,8 +29,8 @@
 #define CORSARO_DOS_PLUGIN_H
 
 #include "config.h"
-#include "libcorsaro3.h"
-#include "libcorsaro3_plugin.h"
+#include "libcorsaro.h"
+#include "libcorsaro_plugin.h"
 
 corsaro_plugin_t *corsaro_dos_alloc(void);
 

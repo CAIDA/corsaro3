@@ -32,7 +32,7 @@
 #include <libipmeta.h>
 #include <libtrace.h>
 
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 
 /* These are our "built-in" tags */
 /* TODO think about how we could support "custom" tags? */

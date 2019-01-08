@@ -25,34 +25,34 @@
 SUBDIRS = plugins
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
 	-I$(top_srcdir)/common/libpatricia \
-	-I$(top_srcdir)/libcorsaro3/plugins \
+	-I$(top_srcdir)/libcorsaro/plugins \
         @TCMALLOC_FLAGS@
 
-lib_LTLIBRARIES = libcorsaro3.la
+lib_LTLIBRARIES = libcorsaro.la
 
-include_HEADERS = libcorsaro3_log.h libcorsaro3.h
+include_HEADERS = libcorsaro_log.h libcorsaro.h
 
-libcorsaro3_la_SOURCES = 	\
-	libcorsaro3_log.c 		\
-	libcorsaro3_log.h 		\
-	libcorsaro3_plugin.c 	        \
-	libcorsaro3_plugin.h            \
-        libcorsaro3_avro.c              \
-        libcorsaro3_avro.h              \
-        libcorsaro3_trace.c             \
-        libcorsaro3_trace.h             \
-        libcorsaro3_filtering.c         \
-        libcorsaro3_filtering.h         \
-        libcorsaro3_tagging.c           \
-        libcorsaro3_tagging.h           \
-        libcorsaro3_memhandler.c        \
-        libcorsaro3_memhandler.h        \
+libcorsaro_la_SOURCES = 	\
+	libcorsaro_log.c 		\
+	libcorsaro_log.h 		\
+	libcorsaro_plugin.c 	        \
+	libcorsaro_plugin.h            \
+        libcorsaro_avro.c              \
+        libcorsaro_avro.h              \
+        libcorsaro_trace.c             \
+        libcorsaro_trace.h             \
+        libcorsaro_filtering.c         \
+        libcorsaro_filtering.h         \
+        libcorsaro_tagging.c           \
+        libcorsaro_tagging.h           \
+        libcorsaro_memhandler.c        \
+        libcorsaro_memhandler.h        \
         pqueue.c pqueue.h               \
-        libcorsaro3.h
+        libcorsaro.h
 
-libcorsaro3_la_LIBADD = $(top_builddir)/common/libcccommon.la \
-	$(top_builddir)/libcorsaro3/plugins/libcorsaro3plugins.la
-libcorsaro3_la_LDFLAGS = -version-info @CORSARO_MAJOR_VERSION@:@CORSARO_MINOR_VERSION@:@CORSARO_MID_VERSION@
+libcorsaro_la_LIBADD = $(top_builddir)/common/libcccommon.la \
+	$(top_builddir)/libcorsaro/plugins/libcorsaroplugins.la
+libcorsaro_la_LDFLAGS = -version-info @CORSARO_MAJOR_VERSION@:@CORSARO_MINOR_VERSION@:@CORSARO_MID_VERSION@
 
 ACLOCAL_AMFLAGS = -I m4
 

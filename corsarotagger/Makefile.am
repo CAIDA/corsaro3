@@ -22,7 +22,7 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro3 @TCMALLOC_FLAGS@
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro @TCMALLOC_FLAGS@
 
 bin_PROGRAMS = corsarotagger
 
@@ -33,8 +33,8 @@ corsarotagger_SOURCES = \
         configparser.h \
         corsarotagger.h
 
-corsarotagger_LDADD = -lcorsaro3
-corsarotagger_LDFLAGS = -L$(top_builddir)/libcorsaro3
+corsarotagger_LDADD = -lcorsaro
+corsarotagger_LDFLAGS = -L$(top_builddir)/libcorsaro
 
 ACLOCAL_AMFLAGS = -I m4
 

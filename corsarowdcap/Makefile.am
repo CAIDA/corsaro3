@@ -22,7 +22,7 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro3 @TCMALLOC_FLAGS@
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro @TCMALLOC_FLAGS@
 
 bin_PROGRAMS = corsarowdcap
 EXTRA_DIST = README exampleconfig.yaml
@@ -33,9 +33,9 @@ corsarowdcap_SOURCES = \
         configparser.c \
         corsarowdcap.h
 
-corsarowdcap_LDADD = -lcorsaro3
+corsarowdcap_LDADD = -lcorsaro
 
-corsarowdcap_LDFLAGS = -L$(top_builddir)/libcorsaro3
+corsarowdcap_LDFLAGS = -L$(top_builddir)/libcorsaro
 
 ACLOCAL_AMFLAGS = -I m4
 

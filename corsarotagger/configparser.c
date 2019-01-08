@@ -28,7 +28,7 @@
 #include <errno.h>
 
 #include <libtrace/hash_toeplitz.h>
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 #include "corsarotagger.h"
 
 #include <zmq.h>

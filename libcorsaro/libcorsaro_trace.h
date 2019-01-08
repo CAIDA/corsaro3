@@ -33,7 +33,7 @@
 #include <libtrace.h>
 #include <wandio.h>
 
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 
 /** Structure to store state for asynchronous trace file output.
  *

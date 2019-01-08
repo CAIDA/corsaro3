@@ -42,10 +42,10 @@
 #include <zmq.h>
 #include <Judy.h>
 
-#include "libcorsaro3.h"
-#include "libcorsaro3_memhandler.h"
-#include "libcorsaro3_plugin.h"
-#include "libcorsaro3_avro.h"
+#include "libcorsaro.h"
+#include "libcorsaro_memhandler.h"
+#include "libcorsaro_plugin.h"
+#include "libcorsaro_avro.h"
 #include "corsaro_report.h"
 #include "utils.h"
 
@@ -1741,7 +1741,7 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
  *  @param p            A reference to the running instance of the report plugin
  *  @param local        The packet processing thread state for this plugin.
  *  @param packet       The packet that is being used to update the metrics.
- *  @param tags         The tags associated with this packet by the libcorsaro3
+ *  @param tags         The tags associated with this packet by the libcorsaro
  *                      tagging component.
  *  @return 0 if the packet was successfully processed, -1 if an error occurs.
  */

@@ -53,7 +53,7 @@ AM_INIT_AUTOMAKE
 
 AC_CONFIG_MACRO_DIR([m4])
 
-AC_CONFIG_SRCDIR([libcorsaro3/libcorsaro3_trace.c])
+AC_CONFIG_SRCDIR([libcorsaro/libcorsaro_trace.c])
 AC_CONFIG_HEADERS([config.h])
 
 # Check for -fvisibility
@@ -218,9 +218,9 @@ AC_SUBST([TCMALLOC_FLAGS])
 AC_HEADER_ASSERT
 
 AC_CONFIG_FILES([Makefile
-                        libcorsaro3/Makefile
-                        libcorsaro3/plugins/Makefile
-                        libcorsaro3/libcorsaro3.h
+                        libcorsaro/Makefile
+                        libcorsaro/plugins/Makefile
+                        libcorsaro/libcorsaro.h
                         corsarotrace/Makefile
                         corsarotagger/Makefile
                         corsarowdcap/Makefile

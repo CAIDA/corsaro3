@@ -29,9 +29,9 @@
 #include <errno.h>
 #include <sys/time.h>
 
-#include "libcorsaro3_avro.h"
-#include "libcorsaro3.h"
-#include "libcorsaro3_log.h"
+#include "libcorsaro_avro.h"
+#include "libcorsaro.h"
+#include "libcorsaro_log.h"
 
 corsaro_avro_writer_t *corsaro_create_avro_writer(corsaro_logger_t *logger,
         const char *schemadef) {

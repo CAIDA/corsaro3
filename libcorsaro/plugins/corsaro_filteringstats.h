@@ -29,8 +29,8 @@
 #define CORSARO_FILTERINGSTATS_PLUGIN_H_
 
 #include "config.h"
-#include "libcorsaro3.h"
-#include "libcorsaro3_plugin.h"
+#include "libcorsaro.h"
+#include "libcorsaro_plugin.h"
 
 corsaro_plugin_t *corsaro_filteringstats_alloc(void);
 CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_filteringstats)

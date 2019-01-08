@@ -28,8 +28,8 @@
 #include <errno.h>
 
 #include <libtrace/hash_toeplitz.h>
-#include "libcorsaro3_log.h"
-#include "libcorsaro3_plugin.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro_plugin.h"
 #include "corsarotrace.h"
 
 #include <yaml.h>

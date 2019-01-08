@@ -40,9 +40,9 @@
 #include <Judy.h>
 
 #include "pqueue.h"
-#include "libcorsaro3.h"
-#include "libcorsaro3_plugin.h"
-#include "libcorsaro3_avro.h"
+#include "libcorsaro.h"
+#include "libcorsaro_plugin.h"
+#include "libcorsaro_avro.h"
 #include "corsaro_flowtuple.h"
 #include "utils.h"
 

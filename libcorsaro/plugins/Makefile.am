@@ -27,10 +27,10 @@
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
         -I$(top_srcdir)/common/libpatricia \
         -I$(top_srcdir)/common/libcsv \
-        -I$(top_srcdir)/libcorsaro3 \
+        -I$(top_srcdir)/libcorsaro \
         @TCMALLOC_FLAGS@
 
-noinst_LTLIBRARIES = libcorsaro3plugins.la
+noinst_LTLIBRARIES = libcorsaroplugins.la
 
 include_HEADERS =
 PLUGIN_SRC=
@@ -56,10 +56,10 @@ PLUGIN_SRC+=corsaro_report.c corsaro_report.h
 include_HEADERS+=corsaro_report.h
 endif
 
-libcorsaro3plugins_la_SOURCES = \
+libcorsaroplugins_la_SOURCES = \
         $(PLUGIN_SRC)
 
-libcorsaro3plugins_la_LIBADD = \
+libcorsaroplugins_la_LIBADD = \
         $(PLUGIN_LIBS)
 
 ACLOCAL_AMFLAGS = -I m4

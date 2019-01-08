@@ -39,10 +39,10 @@
 #include <libtrace.h>
 #include <zmq.h>
 
-#include "libcorsaro3_log.h"
+#include "libcorsaro_log.h"
 #include "corsarotrace.h"
-#include "libcorsaro3_plugin.h"
-#include "libcorsaro3_filtering.h"
+#include "libcorsaro_plugin.h"
+#include "libcorsaro_filtering.h"
 
 /* TODO: this is currently defined in both the tagger and here, so we
  * run the risk of them getting out of sync :/

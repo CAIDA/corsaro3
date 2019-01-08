@@ -34,8 +34,8 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "libcorsaro3_log.h"
-#include "libcorsaro3_memhandler.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro_memhandler.h"
 
 /** Corsaro memory handler
  *  ======================

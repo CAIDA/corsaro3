@@ -25,16 +25,22 @@
  *
  */
 
-#ifndef CORSARO_REPORT_PLUGIN_H_
-#define CORSARO_REPORT_PLUGIN_H_
+#ifndef CORSARO_WDCAP_PLUGIN_H_
+#define CORSARO_WDCAP_PLUGIN_H
 
 #include "config.h"
-#include "libcorsaro3.h"
-#include "libcorsaro3_plugin.h"
+#include "libcorsaro.h"
+#include "libcorsaro_plugin.h"
 
-corsaro_plugin_t *corsaro_report_alloc(void);
-CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_report)
+#define CORSARO_WDCAP_STRIP_VLANS_OFF 0
+#define CORSARO_WDCAP_STRIP_VLANS_ON 1
+#define CORSARO_DEFAULT_WDCAP_STRIP_VLANS CORSARO_WDCAP_STRIP_VLANS_ON
+
+corsaro_plugin_t *corsaro_wdcap_alloc(void);
+
+CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_wdcap);
 
 #endif
+
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

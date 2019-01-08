@@ -32,11 +32,11 @@
 #include <libtrace_parallel.h>
 #include <libtrace/message_queue.h>
 
-#include "libcorsaro3.h"
-#include "libcorsaro3_log.h"
-#include "libcorsaro3_plugin.h"
-#include "libcorsaro3_filtering.h"
-#include "libcorsaro3_tagging.h"
+#include "libcorsaro.h"
+#include "libcorsaro_log.h"
+#include "libcorsaro_plugin.h"
+#include "libcorsaro_filtering.h"
+#include "libcorsaro_tagging.h"
 
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
