@@ -47,7 +47,7 @@ include_HEADERS+=corsaro_dos.h
 endif
 
 if WITH_PLUGIN_FILTERINGSTATS
-PLUGIN_SRC+=corsaro_filteringstats.c corsarofiltering_stats.h
+PLUGIN_SRC+=corsaro_filteringstats.c corsaro_filteringstats.h
 include_HEADERS+=corsaro_filteringstats.h
 endif
 
