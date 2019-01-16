@@ -205,7 +205,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
 
     if (glob == NULL) {
         fprintf(stderr,
-            "corsarotrace: failed to malloc memory for global variables.\n");
+            "corsarowdcap: failed to malloc memory for global variables.\n");
         return NULL;
     }
 
@@ -228,7 +228,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     if (parse_corsaro_wdcap_config(glob, filename,
                 grab_corsaro_filename_template) == -1) {
         fprintf(stderr,
-            "corsarotrace: errors while parsing configuration file %s.\n",
+            "corsarowdcap: errors while parsing configuration file %s.\n",
             filename);
         corsaro_wdcap_free_global(glob);
         return NULL;
@@ -236,23 +236,23 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
 
     /* Create global logger */
     if (glob->logmode == GLOBAL_LOGMODE_STDERR) {
-        glob->logger = init_corsaro_logger("corsarotrace", "");
+        glob->logger = init_corsaro_logger("corsarowdcap", "");
     } else if (glob->logmode == GLOBAL_LOGMODE_SYSLOG) {
-        glob->logger = init_corsaro_logger("corsarotrace", NULL);
+        glob->logger = init_corsaro_logger("corsarowdcap", NULL);
     } else if (glob->logmode == GLOBAL_LOGMODE_FILE) {
         if (glob->logfilename == NULL) {
             fprintf(stderr,
-                "corsarotrace: logfilename option must be present in config "
+                "corsarowdcap: logfilename option must be present in config "
                 "file if using 'file' logmode.\n");
             corsaro_wdcap_free_global(glob);
             return NULL;
         }
 
-        glob->logger = init_corsaro_logger("corsarotrace", glob->logfilename);
+        glob->logger = init_corsaro_logger("corsarowdcap", glob->logfilename);
     }
 
     if (glob->logger == NULL && glob->logmode != GLOBAL_LOGMODE_DISABLED) {
-        fprintf(stderr, "corsarotrace: failed to create logger. Exiting.\n");
+        fprintf(stderr, "corsarowdcap: failed to create logger. Exiting.\n");
         corsaro_wdcap_free_global(glob);
         return NULL;
     }
@@ -261,7 +261,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     if (parse_corsaro_wdcap_config(glob, filename,
                 parse_remaining_config) == -1) {
         corsaro_log(glob->logger,
-            "corsarotrace: errors while parsing configuration file %s.",
+            "corsarowdcap: errors while parsing configuration file %s.",
             filename);
         corsaro_wdcap_free_global(glob);
         return NULL;
