@@ -243,10 +243,8 @@ int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
 
     if (userid != 0 && fchown(writer->io_fd, userid, groupid) == -1) {
         corsaro_log(logger,
-                "unable to set ownership on fast output file %s: %s",
+                "unable to change ownership on fast output file %s: %s",
                 filename, strerror(errno));
-        close(writer->io_fd);
-        return -1;
     }
 
     /* Reset our buffers -- anything still in the buffers will be lost, so
