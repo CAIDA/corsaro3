@@ -230,23 +230,25 @@ int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
     /* If the program calling this function is running as root via sudo,
      * it's nicer if the resulting trace files actually end up being owned
      * by the user who ran the program rather than root. The following code
-     * will do just that.
+     * will do just that. (but only do this if the current user is root)
      */
-    sudoenv = getenv("SUDO_UID");
-    if (sudoenv != NULL) {
-        userid = strtol(sudoenv, NULL, 10);
-    }
-    sudoenv = getenv("SUDO_GID");
-    if (sudoenv != NULL) {
-        groupid = strtol(sudoenv, NULL, 10);
-    }
+    if (getuid() == 0) {
+        sudoenv = getenv("SUDO_UID");
+        if (sudoenv != NULL) {
+            userid = strtol(sudoenv, NULL, 10);
+        }
+        sudoenv = getenv("SUDO_GID");
+        if (sudoenv != NULL) {
+            groupid = strtol(sudoenv, NULL, 10);
+        }
 
-    if (userid != 0 && fchown(writer->io_fd, userid, groupid) == -1) {
-        corsaro_log(logger,
-                "unable to set ownership on fast output file %s: %s",
-                filename, strerror(errno));
-        close(writer->io_fd);
-        return -1;
+        if (userid != 0 && fchown(writer->io_fd, userid, groupid) == -1) {
+            corsaro_log(logger,
+                        "unable to set ownership on fast output file %s: %s",
+                        filename, strerror(errno));
+            close(writer->io_fd);
+            return -1;
+        }
     }
 
     /* Reset our buffers -- anything still in the buffers will be lost, so
