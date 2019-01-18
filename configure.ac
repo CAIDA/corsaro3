@@ -117,6 +117,15 @@ AC_FUNC_REALLOC
 
 AX_LIB_SOCKET_NSL
 
+# figure out how to get pthreads linked correctly
+STASH_CFLAGS="$CFLAGS"
+CFLAGS=
+AX_PTHREAD(, [AC_MSG_ERROR([pthreads required])])
+CFLAGS="$STASH_CFLAGS"
+LIBS="$PTHREAD_LIBS $LIBS"
+CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+CC="$PTHREAD_CC"
+
 # Checks for libraries.
 AC_CHECK_LIB([trace], [libtrace_message_queue_put], ,[AC_MSG_ERROR(
 		      [libtrace >= 4.0.6 required])])
