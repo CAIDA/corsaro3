@@ -95,6 +95,11 @@ The configuration options accepted by corsarowdcap are as follows:
 			captured packets do not have VLAN tags (since we
 			still have to check for them). Defaults to 'no'.
 
+  writestats            If set to 'yes', some capture and operational
+                        statistics will be written to an output file using
+                        the outtemplate pattern ('.stats' will be appended
+                        to the pattern). Defaults to 'no'.
+
 Running corsarowdcap
 ====================
 

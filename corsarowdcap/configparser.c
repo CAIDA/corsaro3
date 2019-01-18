@@ -75,6 +75,14 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
         yaml_document_t *doc, yaml_node_t *key, yaml_node_t *value) {
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+        && !strcmp((char *)key->data.scalar.value, "writestats")) {
+        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+                &(glob->writestats), "write stats file") < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "stripvlans")) {
         if (parse_onoff_option(glob, (char *)value->data.scalar.value,
                 &(glob->stripvlans), "strip vlans") < 0) {
@@ -131,7 +139,8 @@ static void log_configuration(corsaro_wdcap_global_t *glob) {
             glob->fileformat);
     corsaro_log(glob->logger, "stripping vlans has been %s",
             glob->stripvlans ? "enabled" : "disabled");
-
+    corsaro_log(glob->logger, "stats output file creation has been %s",
+            glob->writestats ? "enabled" : "disabled");
 }
 
 static int parse_corsaro_wdcap_config(corsaro_wdcap_global_t *glob,
@@ -221,6 +230,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->trace = NULL;
     glob->inputuri = NULL;
     glob->stripvlans = CORSARO_DEFAULT_WDCAP_STRIP_VLANS;
+    glob->writestats = CORSARO_DEFAULT_WDCAP_WRITE_STATS;
 
     /* Need to grab the template first, in case we need it for logging.
      * This will mean we read the config file twice... :(
