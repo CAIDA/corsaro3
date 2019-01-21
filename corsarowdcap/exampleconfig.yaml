@@ -49,3 +49,6 @@ fileformat: pcapfile
 # run but your maximum throughput will be reduced due to time spent
 # looking for VLAN headers to remove.
 stripvlans: off
+
+# Write per-thread and overall statistics to a file
+writestats: no

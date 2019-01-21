@@ -41,6 +41,7 @@
 #include "corsarowdcap.h"
 #include "libcorsaro_log.h"
 #include "libcorsaro_trace.h"
+#include "utils.h"
 
 /** corsarowdcap
  *
@@ -188,16 +189,18 @@ static char *stradd(const char *str, char *bufp, char *buflim) {
  *  @param needformat   If 1, prepend the trace file format followed by a
  *                      colon to the output filename to create a valid
  *                      libtrace URI.
- *  @param needdone     If 1, append the '.done' extension to the filename.
+ *  @param exttype      If 1, append the '.done' extension to the filename.
  *                      This is used to create special empty files which
  *                      indicate to archival scripts that an output file is
  *                      complete and ready to be archived.
+ *                      If 2, append the '.stats' extension to the filename.
+ *                      This is used to create the stats files.
  *  @return A pointer to a string allocated via strdup() that contains the
  *  output file name derived from the given parameters. This name must be
  *  later freed by the caller to avoid leaking the memory holding the string.
  */
 static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
-        uint32_t timestamp, int threadid, int needformat, int needdone) {
+        uint32_t timestamp, int threadid, int needformat, int exttype) {
 
     /* Adapted from libwdcap but slightly modified to fit corsaro
      * environment and templating format.
@@ -286,10 +289,11 @@ static char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
         char thspace[1024];
         snprintf(thspace, 1024, "--%d", threadid);
         w = stradd(thspace, w, end);
-    } else if (needdone) {
+    } else if (exttype == 1) {
         /* needdone only applies to merged output files, not interim ones. */
-        char *dotdone = ".done";
-        w = stradd(dotdone, w, end);
+        w = stradd(".done", w, end);
+    } else if (exttype == 2) {
+        w = stradd(".stats", w, end);
     }
 
     if (w >= end) {
@@ -506,6 +510,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     while (tls->next_report && ptv.tv_sec >= tls->next_report) {
         /* Tell merger that we've reached the end of the interval */
+        mergemsg.threadid = trace_get_perpkt_thread_id(t);
         mergemsg.type = CORSARO_WDCAP_MSG_INTERVAL_DONE;
         mergemsg.timestamp = tls->current_interval.time;
 
@@ -519,6 +524,14 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
          * the processing threads.
          */
         mergemsg.src_fd = -1;
+
+        if (glob->writestats) {
+            /* ask libtrace for stats about our processing thread and hand
+             * them off to the merger.
+             */
+            trace_clear_statistics(&mergemsg.lt_stats);
+            trace_get_thread_statistics(trace, t, &mergemsg.lt_stats);
+        }
 
         /* Prepare to rotate our interim output file */
         if (tls->writer) {
@@ -701,27 +714,66 @@ static int choose_next_merge_packet(corsaro_wdcap_merger_t *mergestate,
     return candind;
 }
 
+#define MERGE_FIELD(field)                      \
+    if (from->field##_valid) {                  \
+        to->field##_valid = 1;                  \
+        to->field += from->field;               \
+    }
+
+static inline void merge_ltstats(libtrace_stat_t *to, libtrace_stat_t *from) {
+    /* if a field is valid in 'from' it is then set to valid in 'to' */
+    MERGE_FIELD(accepted);
+    MERGE_FIELD(filtered);
+    MERGE_FIELD(received);
+    MERGE_FIELD(dropped);
+    MERGE_FIELD(captured);
+    MERGE_FIELD(missing);
+    MERGE_FIELD(errors);
+}
+
+#define LOG_FIELD(field)                                        \
+    fprintf(f, "thread:%d "STR(field)"_pkts:%"PRIi64"\n",       \
+            threadid, s->field##_valid ? s->field : -1);
+
+static void log_ltstats(FILE *f, libtrace_stat_t *s, int threadid) {
+    LOG_FIELD(accepted);
+    LOG_FIELD(filtered);
+    LOG_FIELD(received);
+    LOG_FIELD(dropped);
+    LOG_FIELD(captured);
+    LOG_FIELD(missing);
+    LOG_FIELD(errors);
+}
+
 
 /** Merges all interim files for a given interval into a single output file.
  *
  *  @param glob         The global state for this instance of corsarowdcap.
  *  @param mergestate   The state for the merging thread.
- *  @param timestamp    The timestamp of the start of the interval that
- *                      is being merged.
+ *  @param interval     The state for the interval that is being merged.
  *
  *  @return -1 if an error occurs, 0 if merging is successful.
  */
 static int write_merged_output(corsaro_wdcap_global_t *glob,
-        corsaro_wdcap_merger_t *mergestate, uint32_t timestamp) {
+        corsaro_wdcap_merger_t *mergestate,
+        corsaro_wdcap_interval_t *interval) {
 
     int candind, i, ret = 0;
     char *outname = NULL;
     int success = 0;
+    uint64_t start_time;
+    libtrace_stat_t overall_stats;
+
+    if (glob->writestats) {
+        memset(&overall_stats, 0, sizeof(overall_stats));
+        /* time the merge process */
+        start_time = epoch_msec();
+    }
 
     /* Create read handlers for each of the interim files */
     for (i = 0; i < glob->threads; i++) {
         mergestate->readers[i].uri = corsaro_wdcap_derive_output_name(glob,
-                timestamp, i, 1, 0);
+                interval->timestamp, i, 1, 0);
         mergestate->readers[i].source = corsaro_create_trace_reader(
                 glob->logger, mergestate->readers[i].uri);
         if (mergestate->readers[i].source == NULL) {
@@ -741,7 +793,8 @@ static int write_merged_output(corsaro_wdcap_global_t *glob,
     }
 
     /* Create the output file handle for the merged result */
-    outname = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 1, 0);
+    outname = corsaro_wdcap_derive_output_name(glob, interval->timestamp,
+                                               -1, 1, 0);
     mergestate->writer = corsaro_create_trace_writer(glob->logger,
             outname, 0, TRACE_OPTION_COMPRESSTYPE_NONE);
     if (mergestate->writer == NULL) {
@@ -778,6 +831,34 @@ fail:
         mergestate->writer = NULL;
     }
 
+    if (glob->writestats) {
+        char *statfilename;
+        FILE *f;
+
+        statfilename =
+            corsaro_wdcap_derive_output_name(glob, interval->timestamp,
+                                             -1, 0, 2);
+        if ((f = fopen(statfilename, "w")) == NULL) {
+            corsaro_log(glob->logger, "error while creating stats file '%s'",
+                        statfilename);
+        } else {
+            fprintf(f, "time:%"PRIu32"\n", interval->timestamp);
+            /* per-thread stats and update overall stats */
+            for (i=0; i < glob->threads; i++) {
+                log_ltstats(f, &interval->thread_stats[i],
+                            interval->thread_ids[i]);
+                merge_ltstats(&overall_stats, &interval->thread_stats[i]);
+            }
+            /* overall stats */
+            log_ltstats(f, &overall_stats, -1);
+
+            /* output merge duration */
+            fprintf(f, "merge_duration_msec:%"PRIu64"\n",
+                     epoch_msec() - start_time);
+            fclose(f);
+        }
+    }
+
     if (success) {
         /* All packets have been written to the merged file, now create a special
          * ".done" file so that our archiving scripts can tell that the file is
@@ -785,7 +866,8 @@ fail:
         char *donefilename;
         FILE *f;
 
-        donefilename = corsaro_wdcap_derive_output_name(glob, timestamp, -1, 0, 1);
+        donefilename = corsaro_wdcap_derive_output_name(glob, interval->timestamp,
+                                                        -1, 0, 1);
         f = fopen(donefilename, "w");
         /* File can be empty, just has to exist */
         fclose(f);
@@ -818,6 +900,9 @@ fail:
         free(outname);
     }
 
+    corsaro_log(glob->logger, "done merging output files for %"PRIu32,
+                interval->timestamp);
+
     return ret;
 }
 
@@ -835,19 +920,11 @@ fail:
  *          error occured.
  */
 static int merge_finished_interval(corsaro_wdcap_global_t *glob,
-        corsaro_wdcap_merger_t *mergestate, uint32_t timestamp) {
+    corsaro_wdcap_merger_t *mergestate, uint8_t threadid,
+    uint32_t timestamp, libtrace_stat_t *lt_stats) {
 
     corsaro_wdcap_interval_t *fin = mergestate->waiting;
     corsaro_wdcap_interval_t *prev = NULL;
-
-    /* If we only have one processing thread, don't worry about keeping
-     * track of which threads have ended the interval -- we can just
-     * "merge" right away.
-     */
-    if (glob->threads == 1) {
-        write_merged_output(glob, mergestate, timestamp);
-        return 1;
-    }
 
     /* Find this interval in our list of incomplete intervals. Ideally,
      * there should only be at most one entry in this list at any given time.
@@ -866,6 +943,10 @@ static int merge_finished_interval(corsaro_wdcap_global_t *glob,
                 sizeof(corsaro_wdcap_interval_t));
         fin->timestamp = timestamp;
         fin->threads_done = 1;
+        fin->thread_ids = malloc(glob->threads);
+        fin->thread_stats = malloc(sizeof(libtrace_stat_t) * glob->threads);
+        fin->thread_ids[0] = threadid;
+        memcpy(&fin->thread_stats[0], lt_stats, sizeof(libtrace_stat_t));
         fin->next = NULL;
 
         if (prev) {
@@ -874,31 +955,33 @@ static int merge_finished_interval(corsaro_wdcap_global_t *glob,
             mergestate->waiting = fin;
         }
     } else {
-        /* Update "finished thread" count. If we hit the maximum thread count,
-         * go ahead with a merge.
-         */
-
+        /* Update "finished thread" information */
+        fin->thread_ids[fin->threads_done] = threadid;
+        memcpy(&fin->thread_stats[fin->threads_done], lt_stats,
+               sizeof(libtrace_stat_t));
         /* XXX we assume that each processing thread will only send us ONE
          * interval over message per interval...
          */
         fin->threads_done ++;
+    }
 
-        if (fin->threads_done == glob->threads) {
-            int ret = 0;
-            if (fin != mergestate->waiting) {
-                corsaro_log(glob->logger, "Warning: corsarowdcap has completed an interval out of order (missing %u, got %u)",
+    if (fin->threads_done == glob->threads) {
+        int ret = 0;
+        if (fin != mergestate->waiting) {
+            corsaro_log(glob->logger, "Warning: corsarowdcap has completed an interval out of order (missing %u, got %u)",
                         mergestate->waiting->timestamp, timestamp);
-            }
-            if (write_merged_output(glob, mergestate, timestamp) < 0) {
-                corsaro_log(glob->logger, "Failed to merge interim output files for interval %u", timestamp);
-                ret = -1;
-            } else {
-                ret = 1;
-            }
-            mergestate->waiting = fin->next;
-            free(fin);
-            return ret;
         }
+        if (write_merged_output(glob, mergestate, fin) < 0) {
+            corsaro_log(glob->logger, "Failed to merge interim output files for interval %u", timestamp);
+            ret = -1;
+        } else {
+            ret = 1;
+        }
+        mergestate->waiting = fin->next;
+        free(fin->thread_ids);
+        free(fin->thread_stats);
+        free(fin);
+        return ret;
     }
 
     return 0;
@@ -912,10 +995,9 @@ static int merge_finished_interval(corsaro_wdcap_global_t *glob,
  *  @return NULL once the thread is halted.
  */
 static void *start_merging_thread(void *data) {
-	corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)data;
-	corsaro_wdcap_merger_t mergestate;
-	corsaro_wdcap_message_t msg;
-	int zero = 0;
+    corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)data;
+    corsaro_wdcap_merger_t mergestate;
+    corsaro_wdcap_message_t msg;
     int badmessages = 0;
 
     /* Create merging thread state */
@@ -950,7 +1032,8 @@ static void *start_merging_thread(void *data) {
             if (msg.src_fd != -1) {
                 close(msg.src_fd);
             }
-            merge_finished_interval(glob, &mergestate, msg.timestamp);
+            merge_finished_interval(glob, &mergestate, msg.threadid,
+                                    msg.timestamp, &msg.lt_stats);
         } else {
             corsaro_log(glob->logger,
                     "received unexpected message (type %u) in merging thread.",
@@ -964,12 +1047,12 @@ static void *start_merging_thread(void *data) {
         }
     }
 
-mergeover:
     /* Tidy up any remaining local thread state */
     while (mergestate.waiting) {
         corsaro_wdcap_interval_t *fin = mergestate.waiting;
-
         mergestate.waiting = fin->next;
+        free(fin->thread_ids);
+        free(fin->thread_stats);
         free(fin);
     }
 
@@ -984,7 +1067,6 @@ int main(int argc, char *argv[]) {
 	int logmode = GLOBAL_LOGMODE_STDERR;
 	struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
-    libtrace_stat_t *stats;
 	int i, zero=0, mergestarted = 0;
 	pthread_t mergetid;
     corsaro_wdcap_message_t haltmsg;
@@ -993,7 +1075,7 @@ int main(int argc, char *argv[]) {
      * used -- we only do uncompressed output so the threading is just
      * extra overhead for us */
     if (setenv("LIBTRACEIO", "nothreads", 1) != 0) {
-        fprintf(stderr, "corsarowdcap: unable to set libwandio environment");
+        fprintf(stderr, "corsarowdcap: unable to set libwandio environment\n");
         return -1;
     }
 

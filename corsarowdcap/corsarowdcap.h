@@ -27,7 +27,9 @@
 
 #define CORSARO_WDCAP_STRIP_VLANS_OFF 0
 #define CORSARO_WDCAP_STRIP_VLANS_ON 1
-#define CORSARO_DEFAULT_WDCAP_STRIP_VLANS CORSARO_WDCAP_STRIP_VLANS_ON
+#define CORSARO_DEFAULT_WDCAP_STRIP_VLANS CORSARO_WDCAP_STRIP_VLANS_OFF
+
+#define CORSARO_DEFAULT_WDCAP_WRITE_STATS 0
 
 #include "libcorsaro_trace.h"
 #include "libcorsaro_log.h"
@@ -59,6 +61,9 @@ enum {
 
 /** Message that is sent to the corsarowdcap merging thread */
 typedef struct corsaro_wdcap_message {
+    /** The ID of the thread that sent this message */
+    uint8_t threadid;
+
     /** The type of message (see CORSARO_WDCAP_MSG_*) enum for types */
     uint8_t type;
 
@@ -71,6 +76,9 @@ typedef struct corsaro_wdcap_message {
      *  interim file (used by CORSARO_WDCAP_MSG_INTERVAL_DONE messages)
      */
     int src_fd;
+
+    /** Stats counters from libtrace */
+    libtrace_stat_t lt_stats;
 } corsaro_wdcap_message_t;
 
 typedef struct corsaro_wdcap_interval corsaro_wdcap_interval_t;
@@ -85,6 +93,10 @@ struct corsaro_wdcap_interval {
     uint32_t timestamp;
     /** The number of threads that have reported completion for this interval */
     uint8_t threads_done;
+    /** The IDs of done threads (in the same order as the stats structures) */
+    uint8_t *thread_ids;
+    /** Array of stats stuctures (one per done thread) */
+    libtrace_stat_t *thread_stats;
     /** Next pointer to maintain a linked list of outstanding intervals */
     corsaro_wdcap_interval_t *next;
 };
@@ -142,6 +154,9 @@ typedef struct corsaro_wdcap_global {
 
     /** Indicates whether VLAN tags should be stripped from received packets */
     uint8_t stripvlans;
+
+    /** Indicates whether a stats file should be written */
+    uint8_t writestats;
 
     /** ZeroMQ context for managing message queues */
     void *zmq_ctxt;

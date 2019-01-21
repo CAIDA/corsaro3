@@ -22,7 +22,8 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro @TCMALLOC_FLAGS@
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro \
+	-I$(top_srcdir)/common @TCMALLOC_FLAGS@
 
 bin_PROGRAMS = corsarowdcap
 EXTRA_DIST = README exampleconfig.yaml
