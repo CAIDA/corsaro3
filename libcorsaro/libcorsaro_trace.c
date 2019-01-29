@@ -38,6 +38,7 @@
 
 #include <wandio.h>
 #include <libtrace.h>
+#include "libcorsaro.h"
 #include "libcorsaro_log.h"
 #include "libcorsaro_trace.h"
 
@@ -444,7 +445,7 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
     /* XXX if we ever start using ERF extension headers, we will also need to
      * account for those in this calculation.
      */
-    pcapcaplen = ntohs(erfptr->rlen) - 18;
+    pcapcaplen = ntohs(erfptr->rlen) - CORSARO_ERF_ETHERNET_FRAMING;
 
     /* Check if any outstanding writes have completed */
     if (writer->waiting) {

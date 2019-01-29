@@ -224,7 +224,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->monitorid = NULL;
     glob->logmode = logmode;
     glob->logfilename = NULL;
-    glob->consterfframing = 16;     // ethernet with no extension headers
+    glob->consterfframing = CORSARO_ERF_ETHERNET_FRAMING;
     glob->threads = 8;
     glob->logger = NULL;
     glob->trace = NULL;

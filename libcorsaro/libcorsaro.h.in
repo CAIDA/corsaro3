@@ -67,6 +67,9 @@
 #  define PRINTF(formatpos, argpos)
 #endif
 
+/** The framing length of ERF ethernet packets (ERF header len + 2
+ * bytes of padding) */
+#define CORSARO_ERF_ETHERNET_FRAMING 18
 
 #define CORSARO_MAGIC (0x45444752)
 #define CORSARO_MAGIC_INTERVAL (0x494E5452)
