@@ -485,7 +485,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->totaluris = 0;
     glob->alloceduris = 0;
     glob->filterstring = NULL;
-    glob->consterfframing = 16;     /* Typical ethernet with no extensions */
+    glob->consterfframing = CORSARO_ERF_ETHERNET_FRAMING;
     glob->promisc = 0;
     glob->logmode = logmode;
     glob->logfilename = NULL;
