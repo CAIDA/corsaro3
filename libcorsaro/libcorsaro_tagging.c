@@ -466,11 +466,11 @@ static void update_basic_tags(corsaro_logger_t *logger,
         tags->dest_port = ntohs(*(((uint16_t *)transport) + 1));
 
         if (proto == TRACE_IPPROTO_TCP && *rem >= sizeof(libtrace_tcp_t)) {
-            tcp = (libtrace_tcp_t *)transport;
-            hashdata.tcpflags =
-                    ((tcp->cwr << 7) | (tcp->ece << 6) | (tcp->urg << 5) |
-                     (tcp->ack << 4) | (tcp->psh << 3) | (tcp->rst << 2) |
-                     (tcp->syn << 1) | (tcp->fin));
+            /* Quicker to just read the whole byte direct from the packet,
+             * rather than dealing with the individual flags.
+             */
+	    uint8_t *tcpf = ((uint8_t *)transport) + 13;
+            hashdata.tcpflags = *tcpf;
         }
     }
 

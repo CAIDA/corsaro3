@@ -389,24 +389,26 @@ static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
         return 1;
     }
 
-    /* 192.0.0.0/24 */
-    if ((srcip & 0xffffff00) == 0xc0000000) {
-        return 1;
-    }
+    if ((srcip & 0xff000000) == 0xc0000000) {
+        /* 192.0.0.0/24 */
+        if ((srcip & 0x00ffff00) == 0x00000000) {
+            return 1;
+        }
 
-    /* 192.0.2.0/24 */
-    if ((srcip & 0xffffff00) == 0xc0000200) {
-        return 1;
-    }
+        /* 192.0.2.0/24 */
+        if ((srcip & 0x00ffff00) == 0x00000200) {
+           return 1;
+        }
 
-    /* 192.88.99.0/24 */
-    if ((srcip & 0xffffff00) == 0xc0586300) {
-        return 1;
-    }
+        /* 192.88.99.0/24 */
+        if ((srcip & 0x00ffff00) == 0x00586300) {
+            return 1;
+        }
 
-    /* 192.168.0.0/16 */
-    if ((srcip & 0xffff0000) == 0xc0a80000) {
-        return 1;
+        /* 192.168.0.0/16 */
+        if ((srcip & 0x00ff0000) == 0x00a80000) {
+            return 1;
+        }
     }
 
     /* 198.18.0.0/15 */
@@ -424,13 +426,8 @@ static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
         return 1;
     }
 
-    /* 224.0.0.0/4 */
-    if ((srcip & 0xf0000000) == 0xe0000000) {
-        return 1;
-    }
-
-    /* 240.0.0.0/4 */
-    if ((srcip & 0xf0000000) == 0xf0000000) {
+    /* 224.0.0.0/4 and 240.0.0.0/4 */
+    if ((srcip & 0xf0000000) >= 0xe0000000) {
         return 1;
     }
 
