@@ -309,8 +309,7 @@ static const char DOS_RESULT_SCHEMA[] =
         {\"name\":\"start_time_usec\", \"type\": \"int\"}, \
         {\"name\":\"latest_time_sec\", \"type\": \"long\"}, \
         {\"name\":\"latest_time_usec\", \"type\": \"int\"}, \
-        {\"name\":\"initial_packet\", \"type\": \"bytes\"}, \
-        {\"name\":\"thread_cnt\", \"type\": \"int\"} \
+        {\"name\":\"initial_packet\", \"type\": \"bytes\"} \
         ]}";
 
 
@@ -445,8 +444,6 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
             vec->latest_time.tv_sec);
     CORSARO_AVRO_SET_FIELD(int, av, field, 14, "latest_time_usec", "dos",
             vec->latest_time.tv_usec);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 16, "thread_cnt", "dos",
-            vec->thread_cnt);
 
     /* Write the saved bytes from the initial packet. */
     if (avro_value_get_by_index(av, 15, &field, NULL)) {
