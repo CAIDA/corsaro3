@@ -656,7 +656,7 @@ static void *start_zmq_proxy_thread(void *data) {
 
             recvd = (corsaro_tagger_buffer_t **)recvbuf;
             buf = *recvd;
-            zmq_msg_init_data(&msg, buf->space, buf->size, freebuf, NULL);
+            zmq_msg_init_data(&msg, buf->space, buf->used, freebuf, NULL);
             
             r = zmq_msg_send(&msg, proxy_fwd, ZMQ_DONTWAIT);
             if (r >= 0) {
