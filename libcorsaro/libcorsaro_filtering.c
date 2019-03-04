@@ -364,19 +364,25 @@ static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
 
     /* TODO return different positive values for filter quality analysis */
 
-    /* 0.0.0.0/8 */
-    if ((srcip & 0xff000000) == 0x00000000) {
-        return 1;
-    }
+    /* Optimization: if first bit of srcip is not set, then we only need
+     * to check ranges where the first octet <= 127
+     */
+    if ((srcip & 0x80000000) == 0) {
+        /* 0.0.0.0/8 */
+        if ((srcip & 0xff000000) == 0x00000000) {
+            return 1;
+        }
 
-    /* 10.0.0.0/8 */
-    if ((srcip & 0xff000000) == 0x0a000000) {
-        return 1;
-    }
+        /* 10.0.0.0/8 */
+        if ((srcip & 0xff000000) == 0x0a000000) {
+            return 1;
+        }
 
-    /* 127.0.0.0/8 */
-    if ((srcip & 0xff000000) == 0x7f000000) {
-        return 1;
+        /* 127.0.0.0/8 */
+        if ((srcip & 0xff000000) == 0x7f000000) {
+            return 1;
+        }
+        return 0;
     }
 
     /* 169.254.0.0/16 */
