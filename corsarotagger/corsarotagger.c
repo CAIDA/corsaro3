@@ -78,18 +78,42 @@ static void cleanup_signal(int sig) {
     trace_halted = 1;
 }
 
+#define ENQUEUE_BUFFER(tls) \
+    if (tls->buf) { \
+        zmq_send(tls->pubsock, &(tls->buf), sizeof(corsaro_tagger_buffer_t *), 0); \
+    }
+
+static inline corsaro_tagger_buffer_t *create_tls_buffer() {
+
+    corsaro_tagger_buffer_t *buf;
+
+    buf = calloc(1, sizeof(corsaro_tagger_buffer_t));
+    buf->space = malloc(TAGGER_BUFFER_SIZE * sizeof(uint8_t));
+    buf->used = 0;
+    buf->size = TAGGER_BUFFER_SIZE;
+
+    return buf;
+}
+
+static inline void free_tls_buffer(corsaro_tagger_buffer_t *buf) {
+    free(buf->space);
+    free(buf);
+}
+
+static void freebuf(void *data, void *hint) {
+    free(data);
+}
+
 static inline void init_packet_thread_data(corsaro_packet_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
 
-    int hwm = 10000000;
+    int hwm = 0;
     int one = 1;
     tls->stopped = 0;
     tls->lastmisscount = 0;
     tls->lastaccepted = 0;
 
-    tls->bufferspace = calloc(TAGGER_BUFFER_SIZE, sizeof(uint8_t));
-    tls->bufferused = 0;
-    tls->buffersize = TAGGER_BUFFER_SIZE;
+    tls->buf = create_tls_buffer();
 
     /* create zmq socket for publishing */
     tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
@@ -126,7 +150,7 @@ static inline void init_packet_thread_data(corsaro_packet_local_t *tls,
  */
 static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
-    int hwm = 10000000;
+    int hwm = 0;
     int one = 1;
     char pubname[1024];
 
@@ -136,9 +160,7 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
     tls->tagger = corsaro_create_packet_tagger(glob->logger, glob->ipmeta);
     tls->errorcount = 0;
 
-    tls->bufferspace = calloc(TAGGER_BUFFER_SIZE, sizeof(uint8_t));
-    tls->bufferused = 0;
-    tls->buffersize = TAGGER_BUFFER_SIZE;
+    tls->buf = NULL;
 
     if (tls->tagger == NULL) {
         corsaro_log(glob->logger,
@@ -225,14 +247,16 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     return tls;
 }
 
+
+
 static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local) {
 
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
     corsaro_packet_local_t *tls = (corsaro_packet_local_t *)local;
 
-    if (tls->bufferused > 0) {
-        zmq_send(tls->pubsock, tls->bufferspace, tls->bufferused, 0);
+    if (tls->buf->used > 0) {
+        ENQUEUE_BUFFER(tls);
     }
     zmq_send(tls->pubsock, NULL, 0, 0);
 }
@@ -261,7 +285,9 @@ static void destroy_local_tagger_state(corsaro_tagger_global_t *glob,
     }
     zmq_close(tls->pullsock);
 
-    free(tls->bufferspace);
+    if (tls->buf) {
+        free_tls_buffer(tls->buf);
+    }
 }
 
 static void destroy_local_packet_state(corsaro_tagger_global_t *glob,
@@ -272,8 +298,11 @@ static void destroy_local_packet_state(corsaro_tagger_global_t *glob,
         zmq_setsockopt(tls->pubsock, ZMQ_LINGER, &linger, sizeof(linger));
     }
     zmq_close(tls->pubsock);
+    
+    if (tls->buf) {
+        free_tls_buffer(tls->buf);
+    }
 
-    free(tls->bufferspace);
 }
 
 /** Create a tagged packet message and publishes it to the tagger proxy
@@ -306,21 +335,18 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
 
     bufsize = sizeof(corsaro_tagged_packet_header_t) + rem;
 
-    assert(tls->bufferused <= tls->buffersize);
-    if (tls->buffersize - tls->bufferused < bufsize) {
-        /* Put a copy of our buffer on the queue */
-        if (zmq_send(tls->pubsock, tls->bufferspace, tls->bufferused, 0) < 0) {
-            corsaro_log(glob->logger,
-                    "error while publishing tagged packet: %s",
-                    strerror(errno));
+    assert(tls->buf->used <= tls->buf->size);
+    if (tls->buf->size - tls->buf->used < bufsize) {
+        ENQUEUE_BUFFER(tls);
+        tls->buf = create_tls_buffer();
+        if (tls->buf == NULL) {
+            corsaro_log(glob->logger, "OOM while tagging packets");
             return -1;
         }
-        tls->bufferused = 0;
     }
 
-
     hdr = (corsaro_tagged_packet_header_t *)
-            (tls->bufferspace + tls->bufferused);
+            (tls->buf->space + tls->buf->used);
 
     hdr->filterbits = 0;
     hdr->ts_sec = tv.tv_sec;
@@ -328,12 +354,12 @@ static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     hdr->pktlen = rem;
     memset(&(hdr->tags), 0, sizeof(corsaro_packet_tags_t));
 
-    tls->bufferused += sizeof(corsaro_tagged_packet_header_t);
+    tls->buf->used += sizeof(corsaro_tagged_packet_header_t);
     /* Put the packet itself in the buffer (minus the capture and
      * meta-data headers -- we don't need them).
      */
-    memcpy(tls->bufferspace + tls->bufferused, pktcontents, rem);
-    tls->bufferused += rem;
+    memcpy(tls->buf->space + tls->buf->used, pktcontents, rem);
+    tls->buf->used += rem;
 
     return 0;
 }
@@ -357,6 +383,15 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_packet_local_t *tls = (corsaro_packet_local_t *)local;
 
     if (tls->stopped) {
+        return packet;
+    }
+
+    if (tls->buf == NULL) {
+        tls->buf = create_tls_buffer();
+    }
+    if (tls->buf == NULL) {
+        corsaro_log(glob->logger, "OOM while tagging packets");
+        tls->stopped = 1;
         return packet;
     }
 
@@ -400,16 +435,18 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
 
     free(stats);
 
-    if (tls->bufferused > 0) {
-        zmq_send(tls->pubsock, tls->bufferspace, tls->bufferused, 0);
-        tls->bufferused = 0;
+    if (tls->buf->used > 0) {
+	ENQUEUE_BUFFER(tls);
+        tls->buf = create_tls_buffer();
     }
 }
 
 static void *start_tagger_thread(void *data) {
     corsaro_tagger_local_t *tls = (corsaro_tagger_local_t *)data;
-    int r, processed;
+    int r;
+    uint32_t processed;
     int onesec = 1000;
+    uint8_t recvbuf[TAGGER_BUFFER_SIZE];
 
     if (zmq_setsockopt(tls->pullsock, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
         corsaro_log(tls->glob->logger,
@@ -418,9 +455,13 @@ static void *start_tagger_thread(void *data) {
         pthread_exit(NULL);
     }
 
-    while (!corsaro_halted) {
+    memset(recvbuf, 0, TAGGER_BUFFER_SIZE);
 
-        r = zmq_recv(tls->pullsock, tls->bufferspace, tls->buffersize, 0);
+    while (!corsaro_halted) {
+	corsaro_tagger_buffer_t **recvd = NULL;
+
+        assert(tls->buf == NULL);
+        r = zmq_recv(tls->pullsock, recvbuf, TAGGER_BUFFER_SIZE, 0);
         if (r < 0) {
             if (errno == EAGAIN) {
                 continue;
@@ -432,32 +473,35 @@ static void *start_tagger_thread(void *data) {
             break;
         }
 
-        tls->bufferused = r;
+	assert(r == sizeof(corsaro_tagger_buffer_t *));
+	recvd = (corsaro_tagger_buffer_t **)recvbuf;
+	tls->buf = *recvd;
+
         processed = 0;
 
-        while (processed < tls->bufferused) {
+        while (processed < tls->buf->used) {
             corsaro_tagged_packet_header_t *hdr;
             libtrace_ip_t *ip;
             void *l2, *next;
             uint32_t rem;
             uint16_t ethertype;
 
-            hdr = (corsaro_tagged_packet_header_t *)(tls->bufferspace + processed);
+            hdr = (corsaro_tagged_packet_header_t *)(tls->buf->space + processed);
 
-            if (tls->bufferused - processed < sizeof(corsaro_tagged_packet_header_t)) {
+            if (tls->buf->used - processed < sizeof(corsaro_tagged_packet_header_t)) {
                 corsaro_log(tls->glob->logger,
                         "error: not enough buffer content for a complete header...");
                 exit(2);
             }
 
             processed += sizeof(corsaro_tagged_packet_header_t);
-            if (tls->bufferused - processed < hdr->pktlen) {
+            if (tls->buf->used - processed < hdr->pktlen) {
                 corsaro_log(tls->glob->logger,
                         "error: missing packet contents in tagger thread...");
                 exit(2);
             }
 
-            l2 = tls->bufferspace + processed;
+            l2 = tls->buf->space + processed;
             rem = hdr->pktlen;
 
             next = trace_get_payload_from_layer2(l2, TRACE_TYPE_ETH, &ethertype, &rem);
@@ -495,7 +539,8 @@ static void *start_tagger_thread(void *data) {
         if (corsaro_halted) {
             break;
         }
-        zmq_send(tls->pubsock, tls->bufferspace, tls->bufferused, 0);
+	ENQUEUE_BUFFER(tls);
+	tls->buf = NULL;
     }
 
     pthread_exit(NULL);
@@ -517,8 +562,9 @@ static void *start_zmq_proxy_thread(void *data) {
 
     void *proxy_recv = zmq_socket(glob->zmq_ctxt, proxy->recvtype);
     void *proxy_fwd = zmq_socket(glob->zmq_ctxt, proxy->pushtype);
-    int zero = 0;
+    int zero = 0, tosend = 0;
     int onesec = 1000;
+    uint8_t recvbuf[TAGGER_BUFFER_SIZE];	
 
     if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
         corsaro_log(glob->logger,
@@ -577,33 +623,56 @@ static void *start_zmq_proxy_thread(void *data) {
         goto proxyexit;
     }
 
+    tosend = 0;
     while (!corsaro_halted) {
-        uint8_t recvspace[TAGGER_BUFFER_SIZE];
         int r;
         corsaro_tagged_packet_header_t *hdr;
 
-        /* Try read a tagged packet from one of our publishers */
-        if ((r = zmq_recv(proxy_recv, recvspace, TAGGER_BUFFER_SIZE, 0)) < 0) {
+        if (tosend == 0) {
+            /* Try read a tagged packet from one of our publishers */
+            if ((r = zmq_recv(proxy_recv, recvbuf, TAGGER_BUFFER_SIZE, 0)) < 0) {
+                if (errno == EAGAIN) {
+                    /* Nothing available for now, check if we need to halt
+                     * then try again.
+                     */
+                    continue;
+                }
+                break;
+            }
+
+            tosend = r;
+            if (corsaro_halted) {
+                break;
+            }
+            assert(r == sizeof(corsaro_tagger_buffer_t *));
+        }
+
+        /* Got something, publish it to our clients */
+        if (proxy->pushtype != ZMQ_PUB) {
+	    r = zmq_send(proxy_fwd, recvbuf, tosend, ZMQ_DONTWAIT);
+        } else {
+            corsaro_tagger_buffer_t **recvd, *buf;
+            zmq_msg_t msg;
+
+            recvd = (corsaro_tagger_buffer_t **)recvbuf;
+            buf = *recvd;
+            zmq_msg_init_data(&msg, buf->space, buf->size, freebuf, NULL);
+            
+            r = zmq_msg_send(&msg, proxy_fwd, ZMQ_DONTWAIT);
+            if (r >= 0) {
+                free(buf);
+            }
+            zmq_msg_close(&msg);
+        }
+
+        if (r < 0) {
             if (errno == EAGAIN) {
-                /* Nothing available for now, check if we need to halt
-                 * then try again.
-                 */
                 continue;
             }
             break;
         }
-
-        if (corsaro_halted) {
-            break;
-        }
-
-        hdr = (corsaro_tagged_packet_header_t *)recvspace;
-        /* Got something, publish it to our clients */
-        if (r < TAGGER_BUFFER_SIZE) {
-            zmq_send(proxy_fwd, recvspace, r, 0);
-        } else {
-            zmq_send(proxy_fwd, recvspace, TAGGER_BUFFER_SIZE, 0);
-        }
+        tosend = 0;
+        
     }
 
 proxyexit:

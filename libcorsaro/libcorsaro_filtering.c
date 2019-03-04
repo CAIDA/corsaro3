@@ -364,19 +364,25 @@ static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
 
     /* TODO return different positive values for filter quality analysis */
 
-    /* 0.0.0.0/8 */
-    if ((srcip & 0xff000000) == 0x00000000) {
-        return 1;
-    }
+    /* Optimization: if first bit of srcip is not set, then we only need
+     * to check ranges where the first octet <= 127
+     */
+    if ((srcip & 0x80000000) == 0) {
+        /* 0.0.0.0/8 */
+        if ((srcip & 0xff000000) == 0x00000000) {
+            return 1;
+        }
 
-    /* 10.0.0.0/8 */
-    if ((srcip & 0xff000000) == 0x0a000000) {
-        return 1;
-    }
+        /* 10.0.0.0/8 */
+        if ((srcip & 0xff000000) == 0x0a000000) {
+            return 1;
+        }
 
-    /* 127.0.0.0/8 */
-    if ((srcip & 0xff000000) == 0x7f000000) {
-        return 1;
+        /* 127.0.0.0/8 */
+        if ((srcip & 0xff000000) == 0x7f000000) {
+            return 1;
+        }
+        return 0;
     }
 
     /* 169.254.0.0/16 */
@@ -389,24 +395,26 @@ static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
         return 1;
     }
 
-    /* 192.0.0.0/24 */
-    if ((srcip & 0xffffff00) == 0xc0000000) {
-        return 1;
-    }
+    if ((srcip & 0xff000000) == 0xc0000000) {
+        /* 192.0.0.0/24 */
+        if ((srcip & 0x00ffff00) == 0x00000000) {
+            return 1;
+        }
 
-    /* 192.0.2.0/24 */
-    if ((srcip & 0xffffff00) == 0xc0000200) {
-        return 1;
-    }
+        /* 192.0.2.0/24 */
+        if ((srcip & 0x00ffff00) == 0x00000200) {
+           return 1;
+        }
 
-    /* 192.88.99.0/24 */
-    if ((srcip & 0xffffff00) == 0xc0586300) {
-        return 1;
-    }
+        /* 192.88.99.0/24 */
+        if ((srcip & 0x00ffff00) == 0x00586300) {
+            return 1;
+        }
 
-    /* 192.168.0.0/16 */
-    if ((srcip & 0xffff0000) == 0xc0a80000) {
-        return 1;
+        /* 192.168.0.0/16 */
+        if ((srcip & 0x00ff0000) == 0x00a80000) {
+            return 1;
+        }
     }
 
     /* 198.18.0.0/15 */
@@ -424,13 +432,8 @@ static inline int _apply_rfc5735_filter(corsaro_logger_t *logger,
         return 1;
     }
 
-    /* 224.0.0.0/4 */
-    if ((srcip & 0xf0000000) == 0xe0000000) {
-        return 1;
-    }
-
-    /* 240.0.0.0/4 */
-    if ((srcip & 0xf0000000) == 0xf0000000) {
+    /* 224.0.0.0/4 and 240.0.0.0/4 */
+    if ((srcip & 0xf0000000) >= 0xe0000000) {
         return 1;
     }
 
@@ -714,10 +717,10 @@ static int _apply_spoofing_filter(corsaro_logger_t *logger,
 }
 
 static int _apply_erratic_filter(corsaro_logger_t *logger,
-        filter_params_t *fparams) {
+        filter_params_t *fparams, bool spoofedstateunknown) {
 
     /* All spoofed packets are automatically erratic */
-    if (_apply_spoofing_filter(logger, fparams) > 0) {
+    if (spoofedstateunknown && _apply_spoofing_filter(logger, fparams) > 0) {
         return 1;
     }
 
@@ -772,7 +775,7 @@ static inline int _apply_routable_filter(corsaro_logger_t *logger,
 int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
     PREPROCESS_PACKET
-    return _apply_erratic_filter(logger, &fparams);
+    return _apply_erratic_filter(logger, &fparams, 1);
 }
 
 int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
@@ -988,7 +991,7 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
     int i;
     uint32_t rem = iprem;
     filter_params_t fparams;
-    uint8_t proto = 0, alreadyspoofed = 0;
+    uint8_t proto = 0, spoofedstate = -1;
     void *transport = trace_get_payload_from_ip(ip, &proto, &rem);
 
     memset(&fparams, 0, sizeof(filter_params_t));
@@ -1026,14 +1029,17 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
             case CORSARO_FILTERID_SPOOFED:
                 torun[i].result = _apply_spoofing_filter(logger, &fparams);
                 if (torun[i].result) {
-                    alreadyspoofed = 1;
-                }
+                    spoofedstate = 1;
+                } else {
+	            spoofedstate = 0;
+		}
                 break;
             case CORSARO_FILTERID_ERRATIC:
-                if (alreadyspoofed) {
+                if (spoofedstate == 1) {
                     torun[i].result = 1;
                 } else {
-                    torun[i].result = _apply_erratic_filter(logger, &fparams);
+                    torun[i].result = _apply_erratic_filter(logger, &fparams,
+                        (spoofedstate < 0));
                 }
                 break;
             case CORSARO_FILTERID_ROUTED:
@@ -1119,7 +1125,7 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
         case CORSARO_FILTERID_SPOOFED:
             return _apply_spoofing_filter(logger, &fparams);
         case CORSARO_FILTERID_ERRATIC:
-            return _apply_erratic_filter(logger, &fparams);
+            return _apply_erratic_filter(logger, &fparams, 1);
         case CORSARO_FILTERID_ROUTED:
             return _apply_routable_filter(logger, fparams.ip);
         case CORSARO_FILTERID_ABNORMAL_PROTOCOL:

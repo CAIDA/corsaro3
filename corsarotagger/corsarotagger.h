@@ -136,6 +136,14 @@ typedef struct corsaro_tagger_glob {
     corsaro_packet_local_t *packetdata;
 } corsaro_tagger_global_t;
 
+typedef struct corsaro_tagger_buffer {
+    uint8_t *space;
+
+    uint32_t size;
+
+    uint32_t used;
+} corsaro_tagger_buffer_t;
+
 /** Structure for storing thread-local state for a single processing thread */
 struct corsaro_tagger_local {
 
@@ -160,12 +168,7 @@ struct corsaro_tagger_local {
      */
     uint64_t errorcount;
 
-    uint8_t *bufferspace;
-
-    uint32_t buffersize;
-
-    uint32_t bufferused;
-
+    corsaro_tagger_buffer_t *buf;
 };
 
 
@@ -179,14 +182,9 @@ struct corsaro_packet_local {
     /** Cumulative number of packets that have been accepted by this thread */
     uint64_t lastaccepted;
 
-    uint8_t *bufferspace;
-
-    uint32_t buffersize;
-
-    uint32_t bufferused;
-
     /** A zeromq socket to publish tagged packets onto */
     void *pubsock;
+    corsaro_tagger_buffer_t *buf;
 };
 
 /** Initialises the global state for a corsarotagger instance, based on
