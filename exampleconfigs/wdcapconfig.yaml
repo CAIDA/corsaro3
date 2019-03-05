@@ -1,0 +1,41 @@
+# Example configuration file for corsarowdcap
+
+# Formatting to use when creating trace file names
+# %N is substituted with our monitorid, all other fields are as per strftime()
+outtemplate: "/traces/%N-%y%m%d-%H%M%S.pcap"
+
+# Location to write our log file to, if run with log mode set to 'file'
+logfilename: "/var/log/corsarowdcap.log"
+
+# Libtrace URI describing where our packets are going to be read from
+# In this case, we're receiving packets via the nDAG protocol on interface
+# ens4 by joining a multicast group 225.255.0.1:44000
+inputuri: "ndag:ens4,225.225.0.1,44000"
+
+# All of our captured packets are standard Ethernet with no extra meta-data
+# and come from an ERF-based source (e.g. Endace DAG)
+# so we can get tell corsarowdcap to assume a constant ERF framing size of 18.
+# This offers some performance improvements at high packet rates.
+# Comment out this option if you are not using an ERF-based source or think
+# that your ERF framing size is unlikely to be a constant value.
+consterfframing: 18
+
+# A unique identifier for this capture location.
+monitorid: wdcapexample
+
+# The file rotation frequency, in seconds.
+interval: 300
+
+# The number of packet processing threads to use.
+threads: 8
+
+# The capture format to use when writing trace files.
+fileformat: pcapfile
+
+# If set to 'yes', any VLAN tags will be stripped from the captured packets
+# before they are written to disk. Leave this as 'no', if your captured
+# packets will never contain VLAN tags.
+stripvlans: no
+
+# Dump optional extra statistics about capture process to a file
+writestats: no
