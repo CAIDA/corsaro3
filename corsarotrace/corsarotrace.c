@@ -352,6 +352,7 @@ static void *start_worker(void *tdata) {
     }
 
 endworker:
+#if 0
     if (tls->pkts_outstanding > 0) {
         final_result = corsaro_push_end_plugins(tls->plugins,
                 tls->current_interval.number, tls->last_ts);
@@ -367,9 +368,9 @@ endworker:
                     tls->current_interval.number);
         }
     }
+#endif
 
     push_stop_merging(tls);
-
     if (tls->plugins && corsaro_stop_plugins(tls->plugins) == -1) {
         corsaro_log(tls->glob->logger, "error while stopping plugins.");
     }
