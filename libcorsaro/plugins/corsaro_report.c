@@ -1261,7 +1261,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         /* If there are any outstanding updates, send those first */
         if (state->nextmsg[i].bodycount > 0) {
 
-            if (zmq_send(conf->iptrackers[i].incoming,
+            if (zmq_send(conf->tracker_queues[i],
                     (void *)(&(state->nextmsg[i])),
                     sizeof(corsaro_report_ip_message_t), 0) < 0) {
                 corsaro_log(p->logger,
@@ -1276,7 +1276,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
 
         }
         /* Send the halt message */
-        if (zmq_send(conf->iptrackers[i].incoming,
+        if (zmq_send(conf->tracker_queues[i],
                 (void *)(&msg), sizeof(corsaro_report_ip_message_t), 0) < 0) {
             corsaro_log(p->logger,
                     "error while pushing halt to tracker thread %d: %s",
@@ -1402,7 +1402,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
 
     for (i = 0; i < conf->tracker_count; i++) {
         if (state->nextmsg[i].bodycount > 0) {
-            if (zmq_send(conf->iptrackers[i].incoming,
+            if (zmq_send(conf->tracker_queues[i],
                     (void *)(&(state->nextmsg[i])),
                     sizeof(corsaro_report_ip_message_t), 0) < 0) {
                 corsaro_log(p->logger,
@@ -1411,7 +1411,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
             }
             reset_nextmsg(state, &(state->nextmsg[i]));
         }
-        if (zmq_send(conf->iptrackers[i].incoming,
+        if (zmq_send(conf->tracker_queues[i],
                 (void *)(&msg), sizeof(corsaro_report_ip_message_t), 0) < 0) {
             corsaro_log(p->logger,
                     "error while pushing end-interval to tracker thread %d: %s",
@@ -1722,7 +1722,7 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
         return;
     }
 
-    if (zmq_send(conf->iptrackers[trackerhash].incoming, msg,
+    if (zmq_send(conf->tracker_queues[trackerhash], msg,
                 sizeof(corsaro_report_ip_message_t), 0) < 0) {
         corsaro_log(logger,
                 "error while pushing result to tracker thread %d: %s",
