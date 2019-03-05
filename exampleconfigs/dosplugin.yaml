@@ -1,0 +1,69 @@
+# Example configuration file for corsarotrace with the dos plugin
+
+# Formatting to use when creating avro output file names
+# %N is substituted with our monitorid.
+# %P is substituted with the plugin name
+# all other fields are as per strftime()
+outtemplate: "/avrooutput/%N-%y%m%d-%H%M%S.%P"
+
+# Location to write our log file to, if run with log mode set to 'file'
+logfilename: "/var/log/corsaro-dos.log"
+
+# A unique identifier for this capture location.
+monitorid: example
+
+# The interval length, in seconds. At the end of each interval, details of
+# observed attacks are written to the output.
+interval: 60
+
+# When writing output files, the file will be rotated after this number
+# of intervals.
+rotatefreq: 5
+
+# Number of threads to use to process incoming tagged packets.
+threads: 4
+
+# Name of the ZeroMQ queue where the corsarotagger instance is writing the
+# tagged packets that will act as our input
+subqueuename: "ipc:///tmp/corsarotagger"
+
+# Ignore all packets with a timestamp earlier than this Unix timestamp
+startboundaryts: 0
+
+# Ignore all packets with a timestamp after this Unix timestamp. Set to 0
+# to disable this option.
+endboundaryts: 0
+
+# Set to 'yes' to ignore all packets tagged as 'spoofed'
+removespoofed: no
+
+# Set to 'yes' to ignore all packets tagged as 'erratic'
+removederratic: no
+
+# Set to 'yes' to ignore all packets with source addresses that are not
+# RFC 5735.
+removerouted: no
+
+# List of analysis plugins to run and their plugin-specific config options.
+# Multiple plugins may be specified here.
+plugins:
+
+  # Run the dos detection plugin
+  - dos:
+       # Ignore all attacks that consist of less than this number of packets 	
+       min_attack_packets: 25
+
+       # Ignore all attacks that are over in less than this amount of seconds
+       min_attack_duration: 60
+
+       # Ignore all attacks where the number of packets observed in each rate
+       # window is always below this amount
+       min_attack_packet_rate: 30
+
+       # Size of the rate window (in seconds)
+       rate_window_size: 60
+
+       # Frequency (in seconds) at which the rate window should be moved
+       # forward and the packet rate for the window recalculated
+       rate_window_slide: 10
+
