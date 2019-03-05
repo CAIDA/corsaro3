@@ -1278,7 +1278,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         /* If there are any outstanding updates, send those first */
         if (state->nextmsg[i].bodycount > 0) {
 
-            if (zmq_send(conf->tracker_queues[i],
+            if (zmq_send(state->tracker_queues[i],
                     (void *)(&(state->nextmsg[i])),
                     sizeof(corsaro_report_ip_message_t), 0) < 0) {
                 corsaro_log(p->logger,
@@ -1293,7 +1293,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
 
         }
         /* Send the halt message */
-        if (zmq_send(conf->tracker_queues[i],
+        if (zmq_send(state->tracker_queues[i],
                 (void *)(&msg), sizeof(corsaro_report_ip_message_t), 0) < 0) {
             corsaro_log(p->logger,
                     "error while pushing halt to tracker thread %d: %s",
