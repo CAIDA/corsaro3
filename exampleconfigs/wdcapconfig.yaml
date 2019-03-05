@@ -2,7 +2,7 @@
 
 # Formatting to use when creating trace file names
 # %N is substituted with our monitorid, all other fields are as per strftime()
-outtemplate: "/traces/%N-%y%m%d-%H%M%S.pcap"
+outtemplate: "/traces/%N-%y%m%d-%H%M%S"
 
 # Location to write our log file to, if run with log mode set to 'file'
 logfilename: "/var/log/corsarowdcap.log"
