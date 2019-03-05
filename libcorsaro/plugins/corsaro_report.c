@@ -374,6 +374,8 @@ typedef struct corsaro_report_state {
      *  performance evaluation.
      */
     int queueblocks;
+
+    void **tracker_queues;
 } corsaro_report_state_t;
 
 /** Merge thread state for the report plugin */
@@ -1022,7 +1024,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_report_config_t *conf;
-    int i, ret = 0, rto=10;
+    int i, j, ret = 0, rto=10;
     char sockname[40];
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -1053,7 +1055,8 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
      */
     conf->iptrackers = (corsaro_report_iptracker_t *)calloc(
             conf->tracker_count, sizeof(corsaro_report_iptracker_t));
-    conf->tracker_queues = calloc(conf->tracker_count, sizeof(void *));
+    conf->tracker_queues = calloc(conf->tracker_count * conf->basic.procthreads,
+		sizeof(void *));
 
     for (i = 0; i < conf->tracker_count; i++) {
 
@@ -1086,20 +1089,24 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
 #endif
 
         snprintf(sockname, 40, "inproc://reporttracker%d", i);
-        conf->tracker_queues[i] = zmq_socket(zmq_ctxt, ZMQ_PUSH);
-        if (zmq_bind(conf->tracker_queues[i], sockname) < 0) {
+
+        conf->iptrackers[i].incoming = zmq_socket(zmq_ctxt, ZMQ_PULL);
+        if (zmq_bind(conf->iptrackers[i].incoming, sockname) < 0) {
             corsaro_log(p->logger,
-                    "error while binding ip tracker %d push socket: %s", i,
+                    "error while binding ip tracker %d pull socket: %s", i,
                     strerror(errno));
             ret = -1;
         }
 
-        conf->iptrackers[i].incoming = zmq_socket(zmq_ctxt, ZMQ_PULL);
-        if (zmq_connect(conf->iptrackers[i].incoming, sockname) < 0) {
-            corsaro_log(p->logger,
-                    "error while connecting ip tracker %d pull socket: %s", i,
-                    strerror(errno));
-            ret = -1;
+	for (j = 0; j < conf->basic.procthreads; j++) {
+            int tq_id = i * conf->basic.procthreads + j;
+	    conf->tracker_queues[tq_id] = zmq_socket(zmq_ctxt, ZMQ_PUSH);
+            if (zmq_connect(conf->tracker_queues[tq_id], sockname) < 0) {
+	        corsaro_log(p->logger,
+                    "error while connecting ip tracker %d-%d push socket: %s",
+		    i, j, strerror(errno));
+	        ret = -1;
+	    }
         }
 
         if (zmq_setsockopt(conf->iptrackers[i].incoming, ZMQ_RCVTIMEO, &rto,
@@ -1123,7 +1130,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
  *  @param p    A reference to the running instance of the report plugin
  */
 void corsaro_report_destroy_self(corsaro_plugin_t *p) {
-    int i;
+    int i, j;
     if (p->config) {
         corsaro_report_config_t *conf;
         conf = (corsaro_report_config_t *)(p->config);
@@ -1143,7 +1150,10 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
                 pthread_mutex_destroy(&(conf->iptrackers[i].mutex));
 
                 zmq_close(conf->iptrackers[i].incoming);
-                zmq_close(conf->tracker_queues[i]);
+                for (j = 0; j < conf->basic.procthreads; j++) {
+	                zmq_close(conf->tracker_queues[
+				i * conf->basic.procthreads + j]);
+		}
 
                 libtrace_list_deinit(conf->iptrackers[i].outstanding);
             }
@@ -1203,6 +1213,13 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     state->current_interval = 0;
     state->threadid = threadid;
     state->queueblocks = 0;
+    state->tracker_queues = (void **)calloc(conf->tracker_count,
+            sizeof(void *));
+
+    for (i = 0; i < conf->tracker_count; i++) {
+        state->tracker_queues[i] = conf->tracker_queues[
+                i * conf->basic.procthreads + state->threadid];
+    }
 
 #ifdef HAVE_TCMALLOC
     state->msgbody_handler = NULL;
@@ -1290,6 +1307,10 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
             pthread_join(conf->iptrackers[i].tid, NULL);
             conf->iptrackers[i].tid = 0;
         }
+    }
+
+    if (state->tracker_queues) {
+        free(state->tracker_queues);
     }
 
     if (state->msgbody_handler) {
@@ -1402,7 +1423,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
 
     for (i = 0; i < conf->tracker_count; i++) {
         if (state->nextmsg[i].bodycount > 0) {
-            if (zmq_send(conf->tracker_queues[i],
+            if (zmq_send(state->tracker_queues[i],
                     (void *)(&(state->nextmsg[i])),
                     sizeof(corsaro_report_ip_message_t), 0) < 0) {
                 corsaro_log(p->logger,
@@ -1411,7 +1432,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
             }
             reset_nextmsg(state, &(state->nextmsg[i]));
         }
-        if (zmq_send(conf->tracker_queues[i],
+        if (zmq_send(state->tracker_queues[i],
                 (void *)(&msg), sizeof(corsaro_report_ip_message_t), 0) < 0) {
             corsaro_log(p->logger,
                     "error while pushing end-interval to tracker thread %d: %s",
@@ -1722,7 +1743,7 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
         return;
     }
 
-    if (zmq_send(conf->tracker_queues[trackerhash], msg,
+    if (zmq_send(state->tracker_queues[trackerhash], msg,
                 sizeof(corsaro_report_ip_message_t), 0) < 0) {
         corsaro_log(logger,
                 "error while pushing result to tracker thread %d: %s",
