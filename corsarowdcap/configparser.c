@@ -28,32 +28,10 @@
 #include <errno.h>
 
 #include "libcorsaro_log.h"
+#include "libcorsaro_common.h"
 #include "corsarowdcap.h"
 
 #include <yaml.h>
-
-static int parse_onoff_option(corsaro_wdcap_global_t *glob, char *value,
-        uint8_t *opt, const char *optstr) {
-
-    if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
-            strcmp(value, "on") == 0 || strcmp(value, "enabled") == 0) {
-        *opt = 1;
-    }
-
-    else if (strcmp(value, "no") == 0 || strcmp(value, "false") == 0 ||
-            strcmp(value, "off") == 0 || strcmp(value, "disabled") == 0) {
-        *opt = 0;
-    } else {
-        corsaro_log(glob->logger,
-                "invalid value for '%s' option: '%s'", optstr, value);
-        corsaro_log(glob->logger,
-                "try using 'yes' to enable %s or 'no' to disable it.", optstr);
-        return -1;
-    }
-
-    return 0;
-
-}
 
 static int grab_corsaro_filename_template(corsaro_wdcap_global_t *glob,
         yaml_document_t *doc, yaml_node_t *key, yaml_node_t *value) {
@@ -76,7 +54,7 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
         && !strcmp((char *)key->data.scalar.value, "writestats")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->writestats), "write stats file") < 0) {
             return -1;
         }
@@ -84,7 +62,7 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "stripvlans")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->stripvlans), "strip vlans") < 0) {
             return -1;
         }

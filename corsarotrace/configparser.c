@@ -29,6 +29,7 @@
 
 #include <libtrace/hash_toeplitz.h>
 #include "libcorsaro_log.h"
+#include "libcorsaro_common.h"
 #include "libcorsaro_plugin.h"
 #include "corsarotrace.h"
 
@@ -36,29 +37,6 @@
 #include <zmq.h>
 
 static corsaro_plugin_t *allplugins = NULL;
-
-static int parse_onoff_option(corsaro_trace_global_t *glob, char *value,
-        uint8_t *opt, const char *optstr) {
-
-    if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
-            strcmp(value, "on") == 0 || strcmp(value, "enabled") == 0) {
-        *opt = 1;
-    }
-
-    else if (strcmp(value, "no") == 0 || strcmp(value, "false") == 0 ||
-            strcmp(value, "off") == 0 || strcmp(value, "disabled") == 0) {
-        *opt = 0;
-    } else {
-        corsaro_log(glob->logger,
-                "invalid value for '%s' option: '%s'", optstr, value);
-        corsaro_log(glob->logger,
-                "try using 'yes' to enable %s or 'no' to disable it.", optstr);
-        return -1;
-    }
-
-    return 0;
-
-}
 
 static int parse_plugin_config(corsaro_trace_global_t *glob,
         yaml_document_t *doc, yaml_node_t *pluginlist) {
@@ -138,7 +116,7 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "removespoofed")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->removespoofed), "remove spoofed") < 0) {
             return -1;
         }
@@ -146,7 +124,7 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "removeerratic")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->removeerratic), "remove erratic") < 0) {
             return -1;
         }
@@ -154,7 +132,7 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "removerouted")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->removerouted), "remove routed") < 0) {
             return -1;
         }

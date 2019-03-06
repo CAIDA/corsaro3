@@ -35,6 +35,8 @@ include_HEADERS = libcorsaro_log.h libcorsaro.h
 libcorsaro_la_SOURCES = 	\
 	libcorsaro_log.c 		\
 	libcorsaro_log.h 		\
+	libcorsaro_common.c 		\
+	libcorsaro_common.h 		\
 	libcorsaro_plugin.c 	        \
 	libcorsaro_plugin.h            \
         libcorsaro_avro.c              \
