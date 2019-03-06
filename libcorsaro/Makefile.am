@@ -49,7 +49,9 @@ libcorsaro_la_SOURCES = 	\
         libcorsaro_tagging.h           \
         libcorsaro_memhandler.c        \
         libcorsaro_memhandler.h        \
-        pqueue.c pqueue.h               \
+        libcorsaro_libtimeseries.c     \
+        libcorsaro_libtimeseries.h     \
+        pqueue.c pqueue.h              \
         libcorsaro.h
 
 libcorsaro_la_LIBADD = $(top_builddir)/common/libcccommon.la \
