@@ -290,6 +290,9 @@ typedef struct corsaro_report_config {
     /** Number of IP tracker threads to create */
     int tracker_count;
 
+    /** Output format */
+    corsaro_output_format_t outformat;
+
     /** Array of operational IP tracker threads -- included in here because
      *  the merge thread needs to be able to access the thread structures and
      *  this was a relatively easy place to put them.
@@ -517,6 +520,7 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
 
     CORSARO_INIT_PLUGIN_PROC_OPTS(conf->basic);
     conf->outlabel = NULL;
+    conf->outformat = CORSARO_OUTPUT_AVRO;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -542,6 +546,21 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 free(conf->outlabel);
             }
             conf->outlabel = strdup(val);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value,
+                    "output_format") == 0) {
+           if (strcmp((char *)value->data.scalar.value, "avro") == 0) {
+                conf->outformat = CORSARO_OUTPUT_AVRO;
+           } else if (strcmp((char *)value->data.scalar.value,
+                    "libtimeseries") == 0) {
+                conf->outformat = CORSARO_OUTPUT_LIBTIMESERIES;
+           } else {
+                corsaro_log(p->logger, "output format '%s' is not supported by the report plugin.",
+                        (char *)value->data.scalar.value);
+                corsaro_log(p->logger, "falling back to avro output.");
+                conf->outformat = CORSARO_OUTPUT_AVRO;
+           }
         }
     }
 
@@ -1039,6 +1058,17 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
     corsaro_log(p->logger,
             "report plugin: labeling all output rows with '%s'",
             conf->outlabel);
+
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        corsaro_log(p->logger,
+                "report plugin: writing output to avro files");
+    } else if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
+        corsaro_log(p->logger,
+                "report plugin: writing output using libtimeseries");
+    } else {
+        corsaro_log(p->logger,
+                "report plugin: invalid value for output format (?)");
+    }
 
     /* TODO add config option for this */
     conf->tracker_count = 4;
@@ -1978,7 +2008,7 @@ static int write_single_metric(corsaro_logger_t *logger,
  *  @return 0 if successful, -1 if an error occurred.
  */
 
-static int write_all_metrics(corsaro_logger_t *logger,
+static int write_all_metrics_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
         corsaro_memhandler_t *handler) {
 
@@ -2116,6 +2146,33 @@ static void update_tracker_results(Pvoid_t *results,
     tracker->lastresult = NULL;
 }
 
+static int report_write_avro_output(corsaro_plugin_t *p,
+        corsaro_report_merge_state_t *m, uint32_t timestamp,
+        Pvoid_t *results) {
+
+    char *outname;
+
+    /* Make sure we've got a valid Avro writer ready to go */
+    if (!corsaro_is_avro_writer_active(m->writer)) {
+        outname = p->derive_output_name(p, m, timestamp, -1);
+        if (outname == NULL) {
+            return -1;
+        }
+        if (corsaro_start_avro_writer(m->writer, outname) == -1) {
+            free(outname);
+            return -1;
+        }
+        free(outname);
+    }
+
+    if (write_all_metrics_avro(p->logger, m->writer, results, m->res_handler)
+        < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
 /** Merge the metric tallies for a given interval into a single combined
  *  result and write it to our Avro output file.
  *
@@ -2132,7 +2189,6 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     corsaro_report_config_t *conf, *procconf;
     corsaro_report_merge_state_t *m;
     int i, ret;
-    char *outname;
     Pvoid_t results = NULL;
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
@@ -2204,26 +2260,13 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
         return 0;
     }
 
-    /* Make sure we've got a valid Avro writer ready to go */
-    if (!corsaro_is_avro_writer_active(m->writer)) {
-        outname = p->derive_output_name(p, local, fin->timestamp, -1);
-        if (outname == NULL) {
-            return -1;
-        }
-        if (corsaro_start_avro_writer(m->writer, outname) == -1) {
-            free(outname);
-            return -1;
-        }
-        free(outname);
-    }
-
     /* All trackers have reported tallies for this interval and they've
      * been merged into a single result -- write it out!
      */
-    ret = 0;
-    if (write_all_metrics(p->logger, m->writer, &results, m->res_handler) < 0)
-    {
-        return -1;
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        if (report_write_avro_output(p, m, fin->timestamp, &results) < 0) {
+            return -1;
+        }
     }
 
     for (i = 0; i < fin->threads_ended; i++) {
@@ -2241,19 +2284,24 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
 int corsaro_report_rotate_output(corsaro_plugin_t *p, void *local) {
 
     corsaro_report_merge_state_t *m;
+    corsaro_report_config_t *conf;
 
+    conf = (corsaro_report_config_t *)(p->config);
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
         return -1;
     }
 
-    /* Nothing complicated here, just close the current Avro writer. We'll
-     * create a new one (along with a new output file) the next time we have
-     * a complete set of results for an interval that needs to be written.
-     */
-    if (m->writer == NULL || corsaro_close_avro_writer(m->writer) < 0) {
-        return -1;
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        /* Nothing complicated here, just close the current Avro writer. We'll
+         * create a new one (along with a new output file) the next time we have
+         * a complete set of results for an interval that needs to be written.
+         */
+        if (m->writer == NULL || corsaro_close_avro_writer(m->writer) < 0) {
+            return -1;
+        }
     }
+
     return 0;
 }
 

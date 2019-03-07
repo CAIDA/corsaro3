@@ -88,7 +88,8 @@ typedef enum {
 
 typedef enum {
     CORSARO_OUTPUT_AVRO,
-    CORSARO_OUTPUT_PLUGIN,
+    CORSARO_OUTPUT_LIBTIMESERIES,
+    CORSARO_OUTPUT_KAFKA,
     CORSARO_OUTPUT_TRACE
 } corsaro_output_format_t;
 
