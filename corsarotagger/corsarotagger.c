@@ -458,7 +458,7 @@ static void *start_tagger_thread(void *data) {
     memset(recvbuf, 0, TAGGER_BUFFER_SIZE);
 
     while (!corsaro_halted) {
-	corsaro_tagger_buffer_t **recvd = NULL;
+        corsaro_tagger_buffer_t **recvd = NULL;
 
         assert(tls->buf == NULL);
         r = zmq_recv(tls->pullsock, recvbuf, TAGGER_BUFFER_SIZE, 0);
@@ -473,9 +473,9 @@ static void *start_tagger_thread(void *data) {
             break;
         }
 
-	assert(r == sizeof(corsaro_tagger_buffer_t *));
-	recvd = (corsaro_tagger_buffer_t **)recvbuf;
-	tls->buf = *recvd;
+        assert(r == sizeof(corsaro_tagger_buffer_t *));
+        recvd = (corsaro_tagger_buffer_t **)recvbuf;
+        tls->buf = *recvd;
 
         processed = 0;
 
@@ -539,8 +539,8 @@ static void *start_tagger_thread(void *data) {
         if (corsaro_halted) {
             break;
         }
-	ENQUEUE_BUFFER(tls);
-	tls->buf = NULL;
+        ENQUEUE_BUFFER(tls);
+        tls->buf = NULL;
     }
 
     pthread_exit(NULL);
@@ -649,7 +649,7 @@ static void *start_zmq_proxy_thread(void *data) {
 
         /* Got something, publish it to our clients */
         if (proxy->pushtype != ZMQ_PUB) {
-	    r = zmq_send(proxy_fwd, recvbuf, tosend, ZMQ_DONTWAIT);
+            r = zmq_send(proxy_fwd, recvbuf, tosend, ZMQ_DONTWAIT);
         } else {
             corsaro_tagger_buffer_t **recvd, *buf;
             zmq_msg_t msg;
@@ -657,7 +657,7 @@ static void *start_zmq_proxy_thread(void *data) {
             recvd = (corsaro_tagger_buffer_t **)recvbuf;
             buf = *recvd;
             zmq_msg_init_data(&msg, buf->space, buf->used, freebuf, NULL);
-            
+
             r = zmq_msg_send(&msg, proxy_fwd, ZMQ_DONTWAIT);
             if (r >= 0) {
                 free(buf);
@@ -672,7 +672,7 @@ static void *start_zmq_proxy_thread(void *data) {
             break;
         }
         tosend = 0;
-        
+
     }
 
 proxyexit:
