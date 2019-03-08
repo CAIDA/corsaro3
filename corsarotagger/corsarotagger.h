@@ -144,10 +144,18 @@ typedef struct corsaro_tagger_buffer {
     uint32_t used;
 } corsaro_tagger_buffer_t;
 
+typedef struct corsaro_tagger_packet {
+    uint8_t taggedby;
+    size_t pqueue_pos;
+    corsaro_tagged_packet_header_t hdr;     /* Always have this LAST! */
+} PACKED corsaro_tagger_packet_t;
+
 /** Structure for storing thread-local state for a single processing thread */
 struct corsaro_tagger_local {
 
     pthread_t ptid;
+
+    int threadid;
 
     corsaro_tagger_global_t *glob;
 
@@ -167,8 +175,6 @@ struct corsaro_tagger_local {
      *  thread.
      */
     uint64_t errorcount;
-
-    corsaro_tagger_buffer_t *buf;
 };
 
 
@@ -185,6 +191,7 @@ struct corsaro_packet_local {
     /** A zeromq socket to publish tagged packets onto */
     void *pubsock;
     corsaro_tagger_buffer_t *buf;
+    uint16_t tickcounter;
 };
 
 /** Initialises the global state for a corsarotagger instance, based on
