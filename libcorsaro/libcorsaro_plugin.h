@@ -34,6 +34,7 @@
 #include "libcorsaro_tagging.h"
 #include "libcorsaro.h"
 #include "libcorsaro_log.h"
+#include "libcorsaro_libtimeseries.h"
 
 /** Convenience macros that define all the function prototypes for the corsaro
  * plugin API
@@ -82,6 +83,10 @@ typedef struct corsaro_plugin_result corsaro_plugin_result_t;
 
 typedef struct corsaro_plugin_proc_options {
     char *template;
+    libts_ascii_backend_t *libtsascii;
+    libts_kafka_backend_t *libtskafka;
+    libts_dbats_backend_t *libtsdbats;
+    libts_tsmq_backend_t *libtstsmq;
     char *monitorid;
     uint8_t procthreads;
 } corsaro_plugin_proc_options_t;
@@ -199,7 +204,11 @@ int corsaro_is_backscatter_packet(libtrace_packet_t *packet);
 
 #define CORSARO_INIT_PLUGIN_PROC_OPTS(opts) \
   opts.template = NULL; \
-  opts.monitorid = NULL; 
+  opts.libtsascii = NULL; \
+  opts.libtsdbats = NULL; \
+  opts.libtskafka = NULL; \
+  opts.libtstsmq = NULL; \
+  opts.monitorid = NULL;
 
 #define CORSARO_PLUGIN_GENERATE_BASE_PTRS(plugin)               \
   plugin##_parse_config,              \

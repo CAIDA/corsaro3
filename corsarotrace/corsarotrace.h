@@ -37,6 +37,7 @@
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_filtering.h"
 #include "libcorsaro_tagging.h"
+#include "libcorsaro_libtimeseries.h"
 
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
@@ -70,6 +71,11 @@ typedef struct corsaro_trace_glob {
     char *subqueuename;
     char *filterstring;
     char *monitorid;
+
+    libts_ascii_backend_t libtsascii;
+    libts_kafka_backend_t libtskafka;
+    libts_dbats_backend_t libtsdbats;
+    libts_tsmq_backend_t libtstsmq;
 
     uint32_t first_pkt_ts;
     uint32_t boundstartts;

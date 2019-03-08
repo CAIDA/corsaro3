@@ -54,6 +54,39 @@ void init_libts_tsmq_backend(libts_tsmq_backend_t *back) {
     back->settimeout = 2 * 60 * 1000;
 }
 
+void clone_libts_ascii_backend(libts_ascii_backend_t *orig,
+        libts_ascii_backend_t *clone) {
+
+    clone->filename = strdup(orig->filename);
+    clone->compresslevel = orig->compresslevel;
+}
+
+void clone_libts_kafka_backend(libts_kafka_backend_t *orig,
+        libts_kafka_backend_t *clone) {
+
+    clone->channelname = strdup(orig->channelname);
+    clone->brokeruri = strdup(orig->brokeruri);
+    clone->compresscodec = strdup(orig->compresscodec);
+    clone->topicprefix = strdup(orig->topicprefix);
+}
+
+void clone_libts_dbats_backend(libts_dbats_backend_t *orig,
+        libts_dbats_backend_t *clone) {
+
+    clone->path = strdup(orig->path);
+    clone->flags = orig->flags;
+}
+
+void clone_libts_tsmq_backend(libts_tsmq_backend_t *orig,
+        libts_tsmq_backend_t *clone) {
+
+    clone->brokeruri = strdup(orig->brokeruri);
+    clone->retries = orig->retries;
+    clone->acktimeout = orig->acktimeout;
+    clone->lookuptimeout = orig->lookuptimeout;
+    clone->settimeout = orig->settimeout;
+}
+
 void destroy_libts_ascii_backend(libts_ascii_backend_t *back) {
     if (back->filename) {
         free(back->filename);
@@ -178,6 +211,19 @@ int configure_libts_kafka_backend(corsaro_logger_t *logger,
             back->topicprefix = strdup(val);
         }
     }
+
+    if (back->brokeruri) {
+        if (back->channelname == NULL) {
+            back->channelname = strdup("default");
+        }
+        if (back->compresscodec == NULL) {
+            back->compresscodec = strdup("snappy");
+        }
+        if (back->topicprefix == NULL) {
+            back->topicprefix = strdup("");
+        }
+    }
+
     return 0;
 }
 
@@ -215,7 +261,7 @@ int configure_libts_dbats_backend(corsaro_logger_t *logger,
             if (parse_onoff_option(logger, val, &onoffopt, "compression")
                     == 0) {
                 if (onoffopt == 0) {
-                    back->flags |= DBATS_FLAGS_UNCOMPRESSED;
+                    back->flags |= (1 << DBATS_FLAGS_UNCOMPRESSED);
                 }
             }
         }
@@ -225,7 +271,7 @@ int configure_libts_dbats_backend(corsaro_logger_t *logger,
             if (parse_onoff_option(logger, val, &onoffopt, "exclusive")
                     == 0) {
                 if (onoffopt == 1) {
-                    back->flags |= DBATS_FLAGS_EXCLUSIVE;
+                    back->flags |= (1 << DBATS_FLAGS_EXCLUSIVE);
                 }
             }
         }
@@ -235,7 +281,7 @@ int configure_libts_dbats_backend(corsaro_logger_t *logger,
             if (parse_onoff_option(logger, val, &onoffopt, "transactions")
                     == 0) {
                 if (onoffopt == 0) {
-                    back->flags |= DBATS_FLAGS_NOTXN;
+                    back->flags |= (1 << DBATS_FLAGS_NOTXN);
                 }
             }
         }
@@ -245,7 +291,7 @@ int configure_libts_dbats_backend(corsaro_logger_t *logger,
             if (parse_onoff_option(logger, val, &onoffopt, "updatable")
                     == 1) {
                 if (onoffopt == 0) {
-                    back->flags |= DBATS_FLAGS_UPDATABLE;
+                    back->flags |= (1 << DBATS_FLAGS_UPDATABLE);
                 }
             }
         }
@@ -431,19 +477,19 @@ char *create_libts_dbats_option_string(corsaro_logger_t *logger,
 
     ADD_TO_STRING(ptr, opt, limit, "DBATS");
 
-    if (back->flags & DBATS_FLAGS_UNCOMPRESSED) {
+    if (back->flags & (1 << DBATS_FLAGS_UNCOMPRESSED)) {
         ADD_TO_STRING(ptr, "-f FLAG_UNCOMRESSED ", limit, "DBATS");
     }
 
-    if (back->flags & DBATS_FLAGS_EXCLUSIVE) {
+    if (back->flags & (1 << DBATS_FLAGS_EXCLUSIVE)) {
         ADD_TO_STRING(ptr, "-f FLAG_EXCLUSIVE ", limit, "DBATS");
     }
 
-    if (back->flags & DBATS_FLAGS_NOTXN) {
+    if (back->flags & (1 << DBATS_FLAGS_NOTXN)) {
         ADD_TO_STRING(ptr, "-f FLAG_NO_TXN ", limit, "DBATS");
     }
 
-    if (back->flags & DBATS_FLAGS_UPDATABLE) {
+    if (back->flags & (1 << DBATS_FLAGS_UPDATABLE)) {
         ADD_TO_STRING(ptr, "-f FLAG_UPDATABLE ", limit, "DBATS");
     }
     return strdup(tmpbuf);

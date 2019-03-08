@@ -83,6 +83,15 @@ int configure_libts_tsmq_backend(corsaro_logger_t *logger,
         libts_tsmq_backend_t *back,
         yaml_document_t *doc, yaml_node_t *node);
 
+void clone_libts_ascii_backend(libts_ascii_backend_t *orig,
+        libts_ascii_backend_t *clone);
+void clone_libts_kafka_backend(libts_kafka_backend_t *orig,
+        libts_kafka_backend_t *clone);
+void clone_libts_dbats_backend(libts_dbats_backend_t *orig,
+        libts_dbats_backend_t *clone);
+void clone_libts_tsmq_backend(libts_tsmq_backend_t *orig,
+        libts_tsmq_backend_t *clone);
+
 void destroy_libts_ascii_backend(libts_ascii_backend_t *back);
 void destroy_libts_kafka_backend(libts_kafka_backend_t *back);
 void destroy_libts_dbats_backend(libts_dbats_backend_t *back);
