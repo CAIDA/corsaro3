@@ -239,7 +239,7 @@ static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
     }
 
     snprintf(pubname, 1024, "%s-%d", TAGGER_PUB_QUEUE, threadid);
-    if (zmq_connect(tls->pubsock, pubname) != 0) {
+    if (zmq_bind(tls->pubsock, pubname) != 0) {
         corsaro_log(glob->logger,
                 "error while connecting zeromq publisher socket in tagger thread %d:%s",
                 threadid, strerror(errno));
@@ -682,7 +682,7 @@ static void *start_zmq_output_thread(void *data) {
             goto proxyexit;
         }
 
-        if (zmq_bind(proxy_recv[i], sockname) < 0) {
+        if (zmq_connect(proxy_recv[i], sockname) < 0) {
             corsaro_log(glob->logger,
                     "unable to create tagger output recv socket %s: %s",
                     sockname, strerror(errno));
@@ -698,20 +698,25 @@ static void *start_zmq_output_thread(void *data) {
         }
 
         /* Read the first packet produced by each tagger thread */
-        r = zmq_recv(proxy_recv[i], recvbufs[i], TAGGER_BUFFER_SIZE, 0);
-        if (r < 0) {
-            corsaro_log(glob->logger,
-                    "error while reading first packet from tagger thread %d: %s",
-                    i, strerror(errno));
-            goto proxyexit;
-        }
+        while (1) {
+            r = zmq_recv(proxy_recv[i], recvbufs[i], TAGGER_BUFFER_SIZE, 0);
+            if (r < 0) {
+                if (errno == EAGAIN) {
+                    continue;
+                }
+                corsaro_log(glob->logger,
+                        "error while reading first packet from tagger thread %d: %s",
+                        i, strerror(errno));
+                goto proxyexit;
+            }
 
-        if (r < sizeof(corsaro_tagger_packet_t)) {
-            corsaro_log(glob->logger,
-                    "first packet from tagger thread %d is too small?", i);
-            goto proxyexit;
+            if (r < sizeof(corsaro_tagger_packet_t)) {
+                corsaro_log(glob->logger,
+                        "first packet from tagger thread %d is too small?", i);
+                goto proxyexit;
+            }
+            break;
         }
-
         packet = (corsaro_tagger_packet_t *)recvbufs[i];
         recvbufsizes[i] = r;
         pqueue_insert(pq, recvbufs[i]);
@@ -732,21 +737,27 @@ static void *start_zmq_output_thread(void *data) {
         zmq_send(proxy_fwd, &(packet->hdr),
                 sizeof(packet->hdr) + packet->hdr.pktlen, 0);
 
-        r = zmq_recv(proxy_recv[workind], recvbufs[workind],
-                TAGGER_BUFFER_SIZE, 0);
+        while (!corsaro_halted) {
+            r = zmq_recv(proxy_recv[workind], recvbufs[workind],
+                    TAGGER_BUFFER_SIZE, ZMQ_DONTWAIT);
 
-        if (r < 0) {
-            corsaro_log(glob->logger,
-                    "error while reading subsequent packet from tagger thread %d: %s",
-                    workind, strerror(errno));
-            goto proxyexit;
-        }
+            if (r < 0) {
+                if (errno == EAGAIN) {
+                    continue;
+                }
+                corsaro_log(glob->logger,
+                        "error while reading subsequent packet from tagger thread %d: %s",
+                        workind, strerror(errno));
+                goto proxyexit;
+            }
 
-        if (r < sizeof(corsaro_tagger_packet_t)) {
-            corsaro_log(glob->logger,
-                    "first packet from tagger thread %d is too small?",
-                    workind);
-            goto proxyexit;
+            if (r < sizeof(corsaro_tagger_packet_t)) {
+                corsaro_log(glob->logger,
+                        "first packet from tagger thread %d is too small?",
+                        workind);
+                goto proxyexit;
+            }
+            break;
         }
 
         recvbufsizes[workind] = r;
