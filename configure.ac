@@ -138,6 +138,9 @@ AC_SEARCH_LIBS([avro_generic_value_new], [avro], ,[AC_MSG_ERROR(
 		 )])
 AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
+
+# TODO libtimeseries is not strictly required, so make this optional
+AC_SEARCH_LIBS([timeseries_kp_flush], [timeseries], , [AC_MSG_ERROR([libtimeseries required])])
 AC_CHECK_LIB([Judy], [JudyLGet],, [AC_MSG_ERROR([libJudy required])])
 
 AC_SEARCH_LIBS([tc_version], [tcmalloc tcmalloc_minimal],

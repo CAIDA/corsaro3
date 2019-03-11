@@ -32,6 +32,7 @@
 #include "libcorsaro_log.h"
 #include <inttypes.h>
 #include <yaml.h>
+#include <timeseries.h>
 
 enum {
     DBATS_FLAGS_UNCOMPRESSED,
@@ -91,6 +92,15 @@ void clone_libts_dbats_backend(libts_dbats_backend_t *orig,
         libts_dbats_backend_t *clone);
 void clone_libts_tsmq_backend(libts_tsmq_backend_t *orig,
         libts_tsmq_backend_t *clone);
+
+int enable_libts_ascii_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_ascii_backend_t *ascii);
+int enable_libts_kafka_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_kafka_backend_t *kafka);
+int enable_libts_dbats_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_dbats_backend_t *dbats);
+int enable_libts_tsmq_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_tsmq_backend_t *tsmq);
 
 void destroy_libts_ascii_backend(libts_ascii_backend_t *back);
 void destroy_libts_kafka_backend(libts_kafka_backend_t *back);

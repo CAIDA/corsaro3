@@ -87,6 +87,102 @@ void clone_libts_tsmq_backend(libts_tsmq_backend_t *orig,
     clone->settimeout = orig->settimeout;
 }
 
+static inline int enable_libts_common(corsaro_logger_t *logger,
+        timeseries_t *ts, char *backend_name, char *backend_args) {
+
+    timeseries_backend_t *backend = NULL;
+
+    backend = timeseries_get_backend_by_name(ts, backend_name);
+    if (backend == NULL) {
+        corsaro_log(logger, "%s backend is not supported by libtimeseries?",
+                backend_name);
+        return 1;
+    }
+
+    if (timeseries_enable_backend(backend, backend_args) != 0) {
+        corsaro_log(logger, "unable to enable %s backend with args '%s'",
+                backend_name, backend_args);
+        return 1;
+    }
+    return 0;
+}
+
+int enable_libts_ascii_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_ascii_backend_t *ascii) {
+    char *args = NULL;
+    int ret;
+
+    if (ascii->filename == NULL) {
+        return 0;
+    }
+
+    args = create_libts_ascii_option_string(logger, ascii);
+    if (args == NULL) {
+        return 1;
+    }
+
+    ret = enable_libts_common(logger, ts, "ascii", args);
+    free(args);
+    return ret;
+}
+
+int enable_libts_kafka_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_kafka_backend_t *kafka) {
+    char *args = NULL;
+    int ret;
+
+    if (kafka->brokeruri == NULL) {
+        return 0;
+    }
+
+    args = create_libts_kafka_option_string(logger, kafka);
+    if (args == NULL) {
+        return 1;
+    }
+
+    ret = enable_libts_common(logger, ts, "kafka", args);
+    free(args);
+    return ret;
+}
+
+int enable_libts_dbats_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_dbats_backend_t *dbats) {
+    char *args = NULL;
+    int ret;
+
+    if (dbats->path == NULL) {
+        return 0;
+    }
+
+    args = create_libts_dbats_option_string(logger, dbats);
+    if (args == NULL) {
+        return 1;
+    }
+
+    ret = enable_libts_common(logger, ts, "dbats", args);
+    free(args);
+    return ret;
+}
+
+int enable_libts_tsmq_backend(corsaro_logger_t *logger,
+        timeseries_t *ts, libts_tsmq_backend_t *tsmq) {
+    char *args = NULL;
+    int ret;
+
+    if (tsmq->brokeruri == NULL) {
+        return 0;
+    }
+
+    args = create_libts_tsmq_option_string(logger, tsmq);
+    if (args == NULL) {
+        return 1;
+    }
+
+    ret = enable_libts_common(logger, ts, "tsmq", args);
+    free(args);
+    return ret;
+}
+
 void destroy_libts_ascii_backend(libts_ascii_backend_t *back) {
     if (back->filename) {
         free(back->filename);
