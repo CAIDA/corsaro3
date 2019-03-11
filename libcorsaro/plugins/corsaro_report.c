@@ -2082,7 +2082,7 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
             res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_ICMP_CODE:
-            res->metrictype = "traffic,icmp.code";
+            res->metrictype = "traffic.icmp.code";
             snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
             res->metricval = valspace;
             break;
