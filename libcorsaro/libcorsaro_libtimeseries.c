@@ -486,6 +486,7 @@ char *create_libts_ascii_option_string(corsaro_logger_t *logger,
     char *ptr = tmpbuf;
     char *limit = tmpbuf + 4096 - 1;
 
+    tmpbuf[0] = '\0';
     if (back->filename == NULL) {
         return NULL;
     }
@@ -520,6 +521,7 @@ char *create_libts_kafka_option_string(corsaro_logger_t *logger,
         return NULL;
     }
 
+    tmpbuf[0] = '\0';
     if (snprintf(opt, 1024, "-b %s ", back->brokeruri) >= 1024) {
         corsaro_log(logger, "Overly large broker URI for libtimeseries Kafka backend");
         corsaro_log(logger, " -- disabling Kafka backend");
@@ -566,6 +568,7 @@ char *create_libts_dbats_option_string(corsaro_logger_t *logger,
         return NULL;
     }
 
+    tmpbuf[0] = '\0';
     if (snprintf(opt, 1024, "-p %s ", back->path) >= 1024) {
         corsaro_log(logger, "Overly large path for libtimeseries DBATS backend - disabling DBATS backend");
         return NULL;
@@ -603,6 +606,7 @@ char *create_libts_tsmq_option_string(corsaro_logger_t *logger,
         return NULL;
     }
 
+    tmpbuf[0] = '\0';
     if (snprintf(opt, 1024, "-b %s ", back->brokeruri) >= 1024) {
         corsaro_log(logger, "Overly large broker URI for libtimeseries TSMQ backend -- disabling TSMQ backend");
         return NULL;
