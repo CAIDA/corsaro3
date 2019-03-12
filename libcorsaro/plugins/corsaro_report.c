@@ -2112,25 +2112,25 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
             res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_CONTINENT:
-            res->metrictype = "geo.maxmind";
+            res->metrictype = "geo.maxmind.continent";
             snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
-            res->metrictype = "geo.maxmind";
+            res->metrictype = "geo.maxmind.country";
             snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
-            res->metrictype = "geo.netacuity";
+            res->metrictype = "geo.netacuity.continent";
             snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
-            res->metrictype = "geo.netacuity";
+            res->metrictype = "geo.netacuity.country";
             snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             res->metricval = valspace;
