@@ -1,0 +1,102 @@
+# Example configuration file for corsarotrace with the report plugin
+
+# Formatting to use when creating avro output file names
+# %N is substituted with our monitorid.
+# %P is substituted with the plugin name
+# all other fields are as per strftime()
+outtemplate: "/avrooutput/%N-%y%m%d-%H%M%S.%P"
+
+# Location to write our log file to, if run with log mode set to 'file'
+logfilename: "/var/log/corsaro-report.log"
+
+# A unique identifier for this capture location.
+monitorid: example
+
+# The interval length, in seconds. At the end of each interval, statistics
+# for each metric are written to the output.
+interval: 60
+
+# When writing output files, the file will be rotated after this number
+# of intervals.
+rotatefreq: 5
+
+# Number of threads to use to process incoming tagged packets.
+threads: 4
+
+# Name of the ZeroMQ queue where the corsarotagger instance is writing the
+# tagged packets that will act as our input
+subqueuename: "ipc:///tmp/corsarotagger"
+
+# Ignore all packets with a timestamp earlier than this Unix timestamp
+startboundaryts: 0
+
+# Ignore all packets with a timestamp after this Unix timestamp. Set to 0
+# to disable this option.
+endboundaryts: 0
+
+# Set to 'yes' to ignore all packets tagged as 'spoofed'
+removespoofed: no
+
+# Set to 'yes' to ignore all packets tagged as 'erratic'
+removederratic: no
+
+# Set to 'yes' to ignore all packets with source addresses that are not
+# RFC 5735.
+removerouted: no
+
+# If using libtimeseries output, write output using the following backends:
+libtimeseriesbackends:
+
+ # ASCII backend -- simply write to a file on disk
+ - ascii:
+     # The path to the output file to write to
+     file: /path/to/output/file
+
+     # If not 0, gzip compress the output at this compression level.
+     # Must be an integer between 0 and 9 inclusive.
+     compress: 1
+
+ # Stream output into Apache Kafka
+ - kafka:
+     # The host and port that the Kafka broker is running on
+     brokeruri: "localhost:9092"
+
+     # The name of the channel to publish to
+     channelname: "channelname"
+
+     # Compression codec to use, e.g. "snappy", "lz4", "gzip", "uncompressed"
+     compresscodec: "snappy"
+
+     # The topic to publish to
+     topicprefix: "corsaroreport"
+
+ # Stream output directly into DBATS
+ - dbats:
+     compression: yes
+     exclusive: no
+     transactions: yes
+     updatable: no
+     path: "/path/to/dbats/instance"
+
+ # Stream output into TSMQ (all timeouts are in ms)
+ - tsmq:
+     brokeruri: "localhost:10001"
+     retries: 3
+     acktimeout: 5000
+     lookuptimeout: 5000
+     settimeout: 10000
+
+
+# List of analysis plugins to run and their plugin-specific config options.
+# Multiple plugins may be specified here.
+plugins:
+
+  # Run the report timeseries plugin
+  - report:
+      # Specifies the desired output format, either 'avro' or 'libtimeseries'
+      output_format: "libtimeseries"
+
+      # Attach this label to every time series data point produced.
+      # For avro output, this will appear in the 'source_label' field.
+      # For libtimeseries output, this will be prepended to the 'key'. 
+      output_row_label: "report.example"

@@ -323,9 +323,69 @@ The full set of supported global config options is:
 			routable address (i.e. not an RFC5735 address).
 			Defaults to 'no'.
 
+  libtimeseriesbackends If a plugin is going to use libtimeseries to stream
+                        output into a data platform, this sequence will list
+                        the backend(s) to use and their configuration options
+                        (see below for more details).
+
   plugins               A sequence that specifies which plugins to use for
                         packet processing, as well as any plugin-specific
                         configuration options (see below for more details).
+
+
+
+Libtimeseries Backends and their Configuration Options
+======================================================
+Backends must be specified as a YAML sequence within the 'libtimeseriesbackends'
+configuration option. Multiple backends may be included in this sequence, but
+they will only be used if corsarotrace is running at least one plugin that
+is configured to write output using libtimeseries. Otherwise, any configuration
+of libtimeseries backends will be ignored.
+
+There are four backends currently supported by corsarotrace:
+
+**ascii:** Write the output into a file on disk, mostly useful for debugging.
+
+Supported options:
+
+  file                  The path to the output file to write into.
+  compress              The gzip compression level for the output file.
+                        0 = uncompressed, 1-9 = increasingly compressed.
+
+
+**kafka:** Write the output into a Kafka broker.
+
+Supported options:
+
+  brokeruri             The host:port that the broker is running on.
+  channelname           The name of the channel to write the output into.
+  topicprefix           The name of the topic to write the output to.
+  compresscodec         The compression method to apply to records -- one of
+                        "snappy", "gzip", "lz4" and "uncompressed".
+
+**dbats:** Write the output into a DBATS instance.
+*Someone with experience with DBATS should update this section with an
+explanation of what the options really mean...*
+
+Supported options:
+
+  compression
+  exclusive
+  transactions
+  updatable
+  path                  The path to the DBATS instance.
+
+
+**tsmq:** Write the output into a TSMQ instance.
+*Someone with experience with TSMQ should update this section with an
+explanation of what the options really mean...*
+
+Supported options:
+  brokeruri
+  retries
+  acktimeout
+  lookuptimeout
+  settimeout
 
 
 Supported Plugins and their Configuration Options
@@ -416,13 +476,20 @@ For instance, the report plugin will generate time series for each of the
 TCP / UDP ports, IP protocols, source ASNs, geo-location continents / countries
 and ICMP codes / types that appear in the packet tags.
 
-The report plugin only supports one configuration option:
+The report plugin supports the following configuration options:
 
   output_row_label	A label to apply to each time series entry generated
 			by this instance of corsarotrace. Defaults to
-			'unlabeled'.
+			'unlabeled'. For avro output, this will appear in
+                        the 'source_label' field. For libtimeseries output,
+                        this will be prepended to the 'key' string.
 
-Report output is written to an avro file, which is named according to
-the 'outtemplate' option specified at the global config level.
+  output_format         The format to use when writing output, either 'avro'
+                        or 'libtimeseries'. If set to 'avro', report output is
+                        written to avro files, which are rotated and named
+                        according to the 'rotatefreq' and 'outtemplate' options
+                        specified at the global config level. If set to
+                        'libtimeseries', the output is written to all backends
+                        specified using the 'libtimeseriesbackends' sequence.
 
 
