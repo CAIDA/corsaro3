@@ -364,15 +364,17 @@ Supported options:
                         "snappy", "gzip", "lz4" and "uncompressed".
 
 **dbats:** Write the output into a DBATS instance.
-*Someone with experience with DBATS should update this section with an
-explanation of what the options really mean...*
 
 Supported options:
 
-  compression
-  exclusive
-  transactions
-  updatable
+  compression           If set to 'no, the created database will _not_
+                        use compression. (This is ignored if the database
+                        already exists.)
+  exclusive             If set to 'yes', get an exclusive lock on the
+                        database. (Possibly improves performance slightly.)
+  transactions          If set to 'no', disable transactions. Don't do this.
+  updatable             If set to 'yes', allow updates to existing
+                        values. Always set this.
   path                  The path to the DBATS instance.
 
 

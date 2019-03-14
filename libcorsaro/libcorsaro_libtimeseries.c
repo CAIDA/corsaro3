@@ -402,7 +402,7 @@ int configure_libts_dbats_backend(corsaro_logger_t *logger,
                 && strcmp((char *)key->data.scalar.value, "updatable") == 0) {
             if (parse_onoff_option(logger, val, &onoffopt, "updatable")
                     == 1) {
-                if (onoffopt == 0) {
+                if (onoffopt == 1) {
                     back->flags |= (1 << DBATS_FLAGS_UPDATABLE);
                 }
             }
