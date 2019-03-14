@@ -149,6 +149,18 @@ void display_libts_tsmq_options(corsaro_logger_t *logger,
             prepend, tsmq->settimeout);
 }
 
+/** Backend-enabling code that is common to all backend formats
+ *
+ *  @param logger       An instance of a corsaro logger to use for reporting
+ *                      errors.
+ *  @param ts           The libtimeseries instance for which the backend is to
+ *                      be enabled.
+ *  @param backend_name The name of the backend format, e.g. "ascii" or "kafka"
+ *  @param backend_args A getopt-style string containing the configuration
+ *                      arguments for the backend.
+ *
+ *  @return 1 if an error occurs, 0 if the backend is successfully enabled
+ */
 static inline int enable_libts_common(corsaro_logger_t *logger,
         timeseries_t *ts, char *backend_name, char *backend_args) {
 
@@ -174,6 +186,7 @@ int enable_libts_ascii_backend(corsaro_logger_t *logger,
     char *args = NULL;
     int ret;
 
+    /* Simply return success if the config says this backend is inactive */
     if (ascii->filename == NULL) {
         return 0;
     }
@@ -193,6 +206,7 @@ int enable_libts_kafka_backend(corsaro_logger_t *logger,
     char *args = NULL;
     int ret;
 
+    /* Simply return success if the config says this backend is inactive */
     if (kafka->brokeruri == NULL) {
         return 0;
     }
@@ -212,6 +226,7 @@ int enable_libts_dbats_backend(corsaro_logger_t *logger,
     char *args = NULL;
     int ret;
 
+    /* Simply return success if the config says this backend is inactive */
     if (dbats->path == NULL) {
         return 0;
     }
@@ -231,6 +246,7 @@ int enable_libts_tsmq_backend(corsaro_logger_t *logger,
     char *args = NULL;
     int ret;
 
+    /* Simply return success if the config says this backend is inactive */
     if (tsmq->brokeruri == NULL) {
         return 0;
     }
