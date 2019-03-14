@@ -29,35 +29,59 @@
 
 #include <libtrace/hash_toeplitz.h>
 #include "libcorsaro_log.h"
+#include "libcorsaro_common.h"
 #include "libcorsaro_plugin.h"
 #include "corsarotrace.h"
+#include "libcorsaro_libtimeseries.h"
 
 #include <yaml.h>
 #include <zmq.h>
 
 static corsaro_plugin_t *allplugins = NULL;
 
-static int parse_onoff_option(corsaro_trace_global_t *glob, char *value,
-        uint8_t *opt, const char *optstr) {
+static int parse_libtimeseries_config(corsaro_trace_global_t *glob,
+        yaml_document_t *doc, yaml_node_t *backendlist) {
 
-    if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
-            strcmp(value, "on") == 0 || strcmp(value, "enabled") == 0) {
-        *opt = 1;
+    yaml_node_item_t *item;
+
+    for (item = backendlist->data.sequence.items.start;
+            item != backendlist->data.sequence.items.top; item ++) {
+
+        yaml_node_t *node = yaml_document_get_node(doc, *item);
+        yaml_node_pair_t *pair;
+
+        for (pair = node->data.mapping.pairs.start;
+                pair < node->data.mapping.pairs.top; pair ++) {
+            yaml_node_t *key, *value;
+            char *backend_type = NULL;
+
+            key = yaml_document_get_node(doc, pair->key);
+            value = yaml_document_get_node(doc, pair->value);
+
+            /* key = backend name */
+            /* value = map of backend options */
+
+            backend_type = (char *)key->data.scalar.value;
+
+            if (strcasecmp(backend_type, "ascii") == 0) {
+                configure_libts_ascii_backend(glob->logger,
+                        &(glob->libtsascii), doc, value);
+            } else if (strcasecmp(backend_type, "kafka") == 0) {
+                configure_libts_kafka_backend(glob->logger,
+                        &(glob->libtskafka), doc, value);
+            } else if (strcasecmp(backend_type, "dbats") == 0) {
+                configure_libts_dbats_backend(glob->logger,
+                        &(glob->libtsdbats), doc, value);
+            } else if (strcasecmp(backend_type, "tsmq") == 0) {
+                configure_libts_tsmq_backend(glob->logger,
+                        &(glob->libtstsmq), doc, value);
+            } else {
+                corsaro_log(glob->logger, "unknown libtimeseries backend '%s'",
+                        backend_type);
+                corsaro_log(glob->logger, "valid backends are 'ascii', 'kafka', 'dbats', or 'tsmq'");
+            }
+        }
     }
-
-    else if (strcmp(value, "no") == 0 || strcmp(value, "false") == 0 ||
-            strcmp(value, "off") == 0 || strcmp(value, "disabled") == 0) {
-        *opt = 0;
-    } else {
-        corsaro_log(glob->logger,
-                "invalid value for '%s' option: '%s'", optstr, value);
-        corsaro_log(glob->logger,
-                "try using 'yes' to enable %s or 'no' to disable it.", optstr);
-        return -1;
-    }
-
-    return 0;
-
 }
 
 static int parse_plugin_config(corsaro_trace_global_t *glob,
@@ -138,7 +162,7 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "removespoofed")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->removespoofed), "remove spoofed") < 0) {
             return -1;
         }
@@ -146,7 +170,7 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "removeerratic")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->removeerratic), "remove erratic") < 0) {
             return -1;
         }
@@ -154,7 +178,7 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "removerouted")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->removerouted), "remove routed") < 0) {
             return -1;
         }
@@ -201,6 +225,12 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
         if (glob->plugincount == 0) {
             return -1;
         }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
+            && !strcmp((char *)key->data.scalar.value,
+                        "libtimeseriesbackends")) {
+        parse_libtimeseries_config(glob, doc, value);
     }
 
     return 1;
@@ -340,6 +370,11 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->zmq_subsock = NULL;
     glob->zmq_workersocks = NULL;
 
+    init_libts_ascii_backend(&(glob->libtsascii));
+    init_libts_dbats_backend(&(glob->libtsdbats));
+    init_libts_kafka_backend(&(glob->libtskafka));
+    init_libts_tsmq_backend(&(glob->libtstsmq));
+
     /* Need to grab the template first, in case we need it for logging.
      * This will mean we read the config file twice... :(
      */
@@ -421,6 +456,10 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     stdopts.template = glob->template;
     stdopts.monitorid = glob->monitorid;
     stdopts.procthreads = glob->threads;
+    stdopts.libtsascii = &(glob->libtsascii);
+    stdopts.libtskafka = &(glob->libtskafka);
+    stdopts.libtsdbats = &(glob->libtsdbats);
+    stdopts.libtstsmq = &(glob->libtstsmq);
 
     if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts,
             glob->zmq_ctxt) < 0) {
@@ -443,6 +482,10 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
 
     corsaro_cleanse_plugin_list(glob->active_plugins);
 
+    destroy_libts_ascii_backend(&(glob->libtsascii));
+    destroy_libts_kafka_backend(&(glob->libtskafka));
+    destroy_libts_dbats_backend(&(glob->libtsdbats));
+    destroy_libts_tsmq_backend(&(glob->libtstsmq));
 
     if (glob->monitorid) {
         free(glob->monitorid);

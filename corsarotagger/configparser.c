@@ -29,33 +29,11 @@
 
 #include <libtrace/hash_toeplitz.h>
 #include "libcorsaro_log.h"
+#include "libcorsaro_common.h"
 #include "corsarotagger.h"
 
 #include <zmq.h>
 #include <yaml.h>
-
-static int parse_onoff_option(corsaro_tagger_global_t *glob, char *value,
-        uint8_t *opt, const char *optstr) {
-
-    if (strcmp(value, "yes") == 0 || strcmp(value, "true") == 0 ||
-            strcmp(value, "on") == 0 || strcmp(value, "enabled") == 0) {
-        *opt = 1;
-    }
-
-    else if (strcmp(value, "no") == 0 || strcmp(value, "false") == 0 ||
-            strcmp(value, "off") == 0 || strcmp(value, "disabled") == 0) {
-        *opt = 0;
-    } else {
-        corsaro_log(glob->logger,
-                "invalid value for '%s' option: '%s'", optstr, value);
-        corsaro_log(glob->logger,
-                "try using 'yes' to enable %s or 'no' to disable it.", optstr);
-        return -1;
-    }
-
-    return 0;
-
-}
 
 static int parse_netacq_tag_options(corsaro_logger_t *logger,
         netacq_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
@@ -314,7 +292,7 @@ static int parse_config(corsaro_tagger_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "promisc")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->promisc), "promiscuous mode") < 0) {
             return -1;
         }
@@ -322,7 +300,7 @@ static int parse_config(corsaro_tagger_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "dohashing")) {
-        if (parse_onoff_option(glob, (char *)value->data.scalar.value,
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->hasher_required), "hashing") < 0) {
             return -1;
         }

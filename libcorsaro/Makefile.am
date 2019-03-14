@@ -35,6 +35,8 @@ include_HEADERS = libcorsaro_log.h libcorsaro.h
 libcorsaro_la_SOURCES = 	\
 	libcorsaro_log.c 		\
 	libcorsaro_log.h 		\
+	libcorsaro_common.c 		\
+	libcorsaro_common.h 		\
 	libcorsaro_plugin.c 	        \
 	libcorsaro_plugin.h            \
         libcorsaro_avro.c              \
@@ -47,7 +49,9 @@ libcorsaro_la_SOURCES = 	\
         libcorsaro_tagging.h           \
         libcorsaro_memhandler.c        \
         libcorsaro_memhandler.h        \
-        pqueue.c pqueue.h               \
+        libcorsaro_libtimeseries.c     \
+        libcorsaro_libtimeseries.h     \
+        pqueue.c pqueue.h              \
         libcorsaro.h
 
 libcorsaro_la_LIBADD = $(top_builddir)/common/libcccommon.la \

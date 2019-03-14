@@ -46,6 +46,7 @@
 #include "libcorsaro_memhandler.h"
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_avro.h"
+#include "libcorsaro_libtimeseries.h"
 #include "corsaro_report.h"
 #include "utils.h"
 
@@ -118,6 +119,53 @@
 #define METRIC_ICMP_MAX (256)
 /** An upper bound on the number of post-IP protocols */
 #define METRIC_IPPROTOS_MAX (256)
+
+/** Maximum number of IP tracker threads allowed */
+#define CORSARO_REPORT_MAX_IPTRACKERS (8)
+
+/* Note: these pre-defined alpha-2 codes are used to bootstrap the
+ * results data so that we can reliably report 0 values for countries
+ * that do not appear in a given interval, even if we've never seen that
+ * country code before.
+ * The list does not have to be exhaustive -- country codes that appear
+ * but are not in the list below will begin to be reported as soon as they
+ * are observed and all subsequent intervals should include results for
+ * the 'new' code even if the packet count was zero. It is only intervals
+ * prior to the country code being observed by the running instance of the
+ * report plugin that will have missing values (in that case).
+ */
+
+/* Pre-defined alpha-2 codes for continents */
+#define CORSAROTRACE_NUM_CONTINENTS (8)
+const char *alpha2_continents[] = {
+    "??", "AF", "AN", "AS", "EU", "NA", "OC", "SA",
+};
+
+/* Pre-defined alpha-2 codes for countries */
+#define CORSAROTRACE_NUM_COUNTRIES (250)
+const char *alpha2_countries[] = {
+    "??", "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS",
+    "AT", "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH",
+    "BI", "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS", "BT", "BV", "BW",
+    "BY", "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM",
+    "CN", "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK",
+    "DM", "DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FJ",
+    "FK", "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI",
+    "GL", "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK",
+    "HM", "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ",
+    "IR", "IS", "IT", "JE", "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM",
+    "KN", "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR",
+    "LS", "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH",
+    "MK", "ML", "MM", "MN", "MO", "MP", "MQ" ,"MR", "MS", "MT", "MU", "MV",
+    "MW", "MX", "MY", "MZ", "NA", "NC" ,"NE", "NF", "NG", "NI", "NL", "NO",
+    "NP", "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL",
+    "PM", "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU",
+    "RW", "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL",
+    "SM", "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ", "TC", "TD",
+    "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV",
+    "TW", "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG",
+    "VI", "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+};
 
 /** Common plugin information and function callbacks */
 static corsaro_plugin_t corsaro_report_plugin = {
@@ -286,9 +334,11 @@ typedef struct corsaro_report_config {
      *  distinguishing between different inputs, for instance */
     char *outlabel;
 
-    /* XXX currently not configurable, but mainly just due to laziness */
     /** Number of IP tracker threads to create */
     int tracker_count;
+
+    /** Output format */
+    corsaro_output_format_t outformat;
 
     /** Array of operational IP tracker threads -- included in here because
      *  the merge thread needs to be able to access the thread structures and
@@ -296,6 +346,9 @@ typedef struct corsaro_report_config {
      */
     corsaro_report_iptracker_t *iptrackers;
 
+    /** ZeroMQ queues that are used to communicate between processing threads
+     *  and IP tracker threads.
+     */
     void **tracker_queues;
 } corsaro_report_config_t;
 
@@ -375,6 +428,9 @@ typedef struct corsaro_report_state {
      */
     int queueblocks;
 
+    /** ZeroMQ queues that link this processing thread with the IP tracker
+     *  threads -- one queue per tracker thread.
+     */
     void **tracker_queues;
 } corsaro_report_state_t;
 
@@ -386,6 +442,17 @@ typedef struct corsaro_report_merge_state {
 
     /** Corsaro custom memory allocator for report result structures */
     corsaro_memhandler_t *res_handler;
+
+    /** Libtimeseries state variable */
+    timeseries_t *timeseries;
+
+    /** Libtimeseries key package for writing output as time series */
+    timeseries_kp_t *kp;
+
+    /** Judy array containing all of the keys that we have added to our
+     *  libtimeseries instance.
+     */
+    Pvoid_t metrickp_keys;
 } corsaro_report_merge_state_t;
 
 
@@ -517,6 +584,8 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
 
     CORSARO_INIT_PLUGIN_PROC_OPTS(conf->basic);
     conf->outlabel = NULL;
+    conf->outformat = CORSARO_OUTPUT_AVRO;
+    conf->tracker_count = 4;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -542,6 +611,37 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 free(conf->outlabel);
             }
             conf->outlabel = strdup(val);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                    "iptracker_threads") == 0) {
+
+            conf->tracker_count = strtol((char *)value->data.scalar.value,
+                    NULL, 0);
+            if (conf->tracker_count < 1) {
+                conf->tracker_count = 1;
+            }
+            if (conf->tracker_count > CORSARO_REPORT_MAX_IPTRACKERS) {
+                corsaro_log(p->logger, "report plugin: iptracker thread count is currently capped at %d", CORSARO_REPORT_MAX_IPTRACKERS);
+                conf->tracker_count = CORSARO_REPORT_MAX_IPTRACKERS;
+            }
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value,
+                    "output_format") == 0) {
+           if (strcmp((char *)value->data.scalar.value, "avro") == 0) {
+                conf->outformat = CORSARO_OUTPUT_AVRO;
+           } else if (strcmp((char *)value->data.scalar.value,
+                    "libtimeseries") == 0) {
+                conf->outformat = CORSARO_OUTPUT_LIBTIMESERIES;
+           } else {
+                corsaro_log(p->logger, "output format '%s' is not supported by the report plugin.",
+                        (char *)value->data.scalar.value);
+                corsaro_log(p->logger, "falling back to avro output.");
+                conf->outformat = CORSARO_OUTPUT_AVRO;
+           }
         }
     }
 
@@ -569,6 +669,7 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
 
     JLG(pval, *knownips, (Word_t)ipaddr);
     if (pval == NULL) {
+        /* New IP, so create a new entry in our map */
         if (track->ip_handler) {
             iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
                     track->ip_handler, &memsrc);
@@ -583,6 +684,7 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
         JLI(pval, *knownips, (Word_t)ipaddr);
         *pval = (Word_t)(iphash);
     } else {
+        /* IP exists in the map, return the existing entry */
         iphash = (corsaro_ip_hash_t *)(*pval);
     }
 
@@ -1031,6 +1133,10 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
     conf->basic.template = stdopts->template;
     conf->basic.monitorid = stdopts->monitorid;
     conf->basic.procthreads = stdopts->procthreads;
+    conf->basic.libtsascii = stdopts->libtsascii;
+    conf->basic.libtskafka = stdopts->libtskafka;
+    conf->basic.libtsdbats = stdopts->libtsdbats;
+    conf->basic.libtstsmq = stdopts->libtstsmq;
 
     if (conf->outlabel == NULL) {
         conf->outlabel = strdup("unlabeled");
@@ -1040,8 +1146,24 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
             "report plugin: labeling all output rows with '%s'",
             conf->outlabel);
 
-    /* TODO add config option for this */
-    conf->tracker_count = 4;
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        corsaro_log(p->logger,
+                "report plugin: writing output to avro files");
+    } else if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
+        corsaro_log(p->logger,
+                "report plugin: writing output using libtimeseries");
+        display_libts_ascii_options(p->logger, conf->basic.libtsascii,
+                "report plugin");
+        display_libts_kafka_options(p->logger, conf->basic.libtskafka,
+                "report plugin");
+        display_libts_dbats_options(p->logger, conf->basic.libtsdbats,
+                "report plugin");
+        display_libts_tsmq_options(p->logger, conf->basic.libtstsmq,
+                "report plugin");
+    } else {
+        corsaro_log(p->logger,
+                "report plugin: invalid value for output format (?)");
+    }
 
     corsaro_log(p->logger,
             "report plugin: starting %d IP tracker threads",
@@ -1807,6 +1929,9 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
 void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
 
     corsaro_report_merge_state_t *m;
+    corsaro_report_config_t *conf;
+
+    conf = (corsaro_report_config_t *)(p->config);
 
     m = (corsaro_report_merge_state_t *)calloc(1,
             sizeof(corsaro_report_merge_state_t));
@@ -1816,13 +1941,59 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
         return NULL;
     }
 
-    m->writer = corsaro_create_avro_writer(p->logger, REPORT_RESULT_SCHEMA);
-    if (m->writer == NULL) {
-        corsaro_log(p->logger,
-                "error while creating avro writer for report plugin!");
-        free(m);
-        return NULL;
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        m->writer = corsaro_create_avro_writer(p->logger, REPORT_RESULT_SCHEMA);
+        if (m->writer == NULL) {
+            corsaro_log(p->logger,
+                    "error while creating avro writer for report plugin!");
+            free(m);
+            return NULL;
+        }
+    } else {
+        m->writer == NULL;
     }
+
+    if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
+        m->timeseries = timeseries_init();
+        if (m->timeseries == NULL) {
+            corsaro_log(p->logger,
+                    "unable to initialize libtimeseries");
+            free(m);
+            return NULL;
+        }
+
+        if (enable_libts_ascii_backend(p->logger, m->timeseries,
+                conf->basic.libtsascii)) {
+            corsaro_log(p->logger, "skipping libtimeseries ascii output");
+        }
+        if (enable_libts_kafka_backend(p->logger, m->timeseries,
+                conf->basic.libtskafka)) {
+            corsaro_log(p->logger, "skipping libtimeseries kafka output");
+        }
+        if (enable_libts_dbats_backend(p->logger, m->timeseries,
+                conf->basic.libtsdbats)) {
+            corsaro_log(p->logger, "skipping libtimeseries DBATS output");
+        }
+        if (enable_libts_tsmq_backend(p->logger, m->timeseries,
+                conf->basic.libtstsmq)) {
+            corsaro_log(p->logger, "skipping libtimeseries TSMQ output");
+        }
+
+        m->kp = timeseries_kp_init(m->timeseries, TIMESERIES_KP_RESET);
+        if (m->kp == NULL) {
+            corsaro_log(p->logger,
+                    "unable to initialize libtimeseries key package");
+            timeseries_free(&(m->timeseries));
+            free(m);
+            return NULL;
+        }
+
+    } else {
+        m->timeseries = NULL;
+        m->kp = NULL;
+    }
+
+    m->metrickp_keys = (Pvoid_t) NULL;
 
 #ifdef HAVE_TCMALLOC
     m->res_handler = NULL;
@@ -1845,6 +2016,7 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
  */
 int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
     corsaro_report_merge_state_t *m;
+    Word_t judyret;
 
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
@@ -1855,15 +2027,146 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
         corsaro_destroy_avro_writer(m->writer);
     }
 
+    if (m->kp) {
+        timeseries_kp_free(&(m->kp));
+    }
+
+    if (m->timeseries) {
+        timeseries_free(&(m->timeseries));
+    }
+
     if (m->res_handler) {
         destroy_corsaro_memhandler(m->res_handler);
     }
+
+    JLFA(judyret, m->metrickp_keys);
+
     free(m);
     return 0;
 }
 
 #define AVRO_CONVERSION_FAILURE -1
 #define AVRO_WRITE_FAILURE -2
+
+static inline void metric_to_strings(corsaro_report_result_t *res) {
+    char valspace[2048];
+
+    /* Convert the 64 bit metric ID into printable strings that we can
+     * put in our result output.
+     *
+     * Hopefully, these will match the strings that were used by
+     * previous instances of this plugin...
+     */
+    switch(res->metricid >> 32) {
+        case CORSARO_METRIC_CLASS_COMBINED:
+            res->metrictype = "overall";
+            res->metricval = "";
+            break;
+        case CORSARO_METRIC_CLASS_IP_PROTOCOL:
+            res->metrictype = "traffic.protocol";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_ICMP_CODE:
+            res->metrictype = "traffic.icmp.code";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_ICMP_TYPE:
+            res->metrictype = "traffic.icmp.type";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
+            res->metrictype = "traffic.port.tcp.src_port";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_TCP_DEST_PORT:
+            res->metrictype = "traffic.port.tcp.dst_port";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_UDP_SOURCE_PORT:
+            res->metrictype = "traffic.port.udp.src_port";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_UDP_DEST_PORT:
+            res->metrictype = "traffic.port.udp.dst_port";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_MAXMIND_CONTINENT:
+            res->metrictype = "geo.maxmind.continent";
+            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+                    (int)((res->metricid >> 8) & 0xff));
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
+            res->metrictype = "geo.maxmind.country";
+            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+                    (int)((res->metricid >> 8) & 0xff));
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
+            res->metrictype = "geo.netacuity.continent";
+            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+                    (int)((res->metricid >> 8) & 0xff));
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
+            res->metrictype = "geo.netacuity.country";
+            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+                    (int)((res->metricid >> 8) & 0xff));
+            res->metricval = valspace;
+            break;
+        case CORSARO_METRIC_CLASS_PREFIX_ASN:
+            res->metrictype = "routing.asn";
+            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
+            res->metricval = valspace;
+            break;
+    }
+}
+
+/** Given a report result, determines the base name for the corresponding
+ *  libtimeseries key for lookup in our "known keys" map.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param keyspace     A string buffer that we can write the key name into
+ *  @param keylen       The size of the keyspace buffer
+ *  @param res          A single report plugin result which we need the key
+ *                      name for.
+ *
+ *  @return the length of the resulting key string.
+ */
+static inline int derive_libts_keyname(corsaro_plugin_t *p,
+        char *keyspace, int keylen, corsaro_report_result_t *res) {
+
+    int ret;
+    corsaro_report_config_t *config = (corsaro_report_config_t *)p->config;
+
+    metric_to_strings(res);
+    /* 'overall' metrics have no suitable metric value, so we need to
+     * account for this case.
+     */
+    if (strlen(res->metricval) > 0) {
+        ret = snprintf(keyspace, keylen, "%s.%s.%s",
+                config->outlabel, res->metrictype, res->metricval);
+    } else {
+        ret = snprintf(keyspace, keylen, "%s.%s",
+                config->outlabel, res->metrictype);
+    }
+
+    if (ret >= keylen) {
+        corsaro_log(p->logger,
+                "truncated libtimeseries key basename to '%s', output_row_label is too long",
+                keyspace);
+        ret = keylen - 1;
+    }
+
+    return ret;
+}
 
 /** Convert a report result into an Avro record and write it to the Avro
  *  output file.
@@ -1873,86 +2176,12 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
  *  @param res          The report plugin result to be written.
  *  @return 0 if the write is successful, -1 if an error occurs.
  */
-static int write_single_metric(corsaro_logger_t *logger,
+static int write_single_metric_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, corsaro_report_result_t *res) {
 
     avro_value_t *avro;
-    char valspace[2048];
 
-    /* Convert the 64 bit metric ID into printable strings that we can
-     * put in our Avro result.
-     */
-    switch(res->metricid >> 32) {
-        case CORSARO_METRIC_CLASS_COMBINED:
-            res->metrictype = "combined";
-            res->metricval = "all";
-            break;
-        case CORSARO_METRIC_CLASS_IP_PROTOCOL:
-            res->metrictype = "ipprotocol";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_ICMP_CODE:
-            res->metrictype = "icmp-code";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_ICMP_TYPE:
-            res->metrictype = "icmp-type";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
-            res->metrictype = "tcpsourceport";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_TCP_DEST_PORT:
-            res->metrictype = "tcpdestport";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_UDP_SOURCE_PORT:
-            res->metrictype = "udpsourceport";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_UDP_DEST_PORT:
-            res->metrictype = "udpdestport";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_MAXMIND_CONTINENT:
-            res->metrictype = "maxmind-continent";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
-                    (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
-            res->metrictype = "maxmind-country";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
-                    (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
-            res->metrictype = "netacq-continent";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
-                    (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
-            res->metrictype = "netacq-country";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
-                    (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
-            break;
-        case CORSARO_METRIC_CLASS_PREFIX_ASN:
-            res->metrictype = "pfx2asn";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
-            break;
-    }
-
+    metric_to_strings(res);
     avro = corsaro_populate_avro_item(writer, res, report_result_to_avro);
     if (avro == NULL) {
         corsaro_log(logger,
@@ -1978,7 +2207,7 @@ static int write_single_metric(corsaro_logger_t *logger,
  *  @return 0 if successful, -1 if an error occurred.
  */
 
-static int write_all_metrics(corsaro_logger_t *logger,
+static int write_all_metrics_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
         corsaro_memhandler_t *handler) {
 
@@ -1997,7 +2226,7 @@ static int write_all_metrics(corsaro_logger_t *logger,
          * anymore.
          */
         if (!stopwriting) {
-            writeret = write_single_metric(logger, writer, r);
+            writeret = write_single_metric_avro(logger, writer, r);
             if (writeret == AVRO_WRITE_FAILURE) {
                 stopwriting = 1;
             }
@@ -2017,6 +2246,85 @@ static int write_all_metrics(corsaro_logger_t *logger,
     JLFA(judyret, *resultmap);
     return haderror;
 
+}
+
+#define ADD_TIMESERIES_KEY(metric) \
+    snprintf(fullkeyname, 5000, "%s.%s", keyname, metric); \
+    keyid = timeseries_kp_add_key(m->kp, fullkeyname); \
+    if (keyid == -1) { \
+        corsaro_log(p->logger, \
+                "error adding %s to timeseries key package", fullkeyname); \
+        return -1; \
+    }
+
+
+/** Writes the combined tallies for each metric using libtimeseries.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param m            The merge thread state for this plugin
+ *  @param timestamp    The timestamp for the interval that the tallies
+ *                      correspond to
+ *  @param results      A Judy array containing the tallies
+ *
+ *  @return -1 if an error occurs, 0 if successful
+ */
+static int report_write_libtimeseries(corsaro_plugin_t *p,
+        corsaro_report_merge_state_t *m, uint32_t timestamp, Pvoid_t *results)
+{
+    corsaro_report_result_t *r;
+    Word_t index = 0, judyret;
+    PWord_t pval;
+
+    JLF(pval, *results, index);
+
+    /* Iterate over all of the metrics in our array */
+    while (pval) {
+        r = (corsaro_report_result_t *)(*pval);
+
+        JLG(pval, m->metrickp_keys, r->metricid);
+        if (pval == NULL) {
+            /* This is a metric ID that we haven't seen before so we need
+             * to create a new 'key' in libtimeseries for it.
+             */
+            char keyname[4096];
+            char fullkeyname[5000];
+            int keyid = -1;
+
+            if (derive_libts_keyname(p, keyname, 4096, r) <= 0) {
+                corsaro_log(p->logger,
+                        "error deriving suitable keyname from metricid %lu",
+                        r->metricid);
+                return -1;
+            }
+
+            /* We'll need a separate key for each of our tallies */
+            ADD_TIMESERIES_KEY("uniq_src_ip");
+
+            /* Do the JLI here, as we only want to add the first of the
+             * four keys to our metrickp_keys array */
+            JLI(pval, m->metrickp_keys, r->metricid);
+            *pval = (Word_t)keyid;
+
+            ADD_TIMESERIES_KEY("uniq_dst_ip");
+            ADD_TIMESERIES_KEY("pkt_cnt");
+            ADD_TIMESERIES_KEY("ip_len");
+        }
+
+        /* *pval contains the key ID for uniq_src_ip, but keys are
+         * assigned sequentially so we can use that to derive the key IDs
+         * for the other tallies. */
+        timeseries_kp_set(m->kp, *pval, r->uniq_src_ips);
+        timeseries_kp_set(m->kp, (*pval) + 1, r->uniq_dst_ips);
+        timeseries_kp_set(m->kp, (*pval) + 2, r->pkt_cnt);
+        timeseries_kp_set(m->kp, (*pval) + 3, r->bytes);
+
+        JLN(pval, *results, index);
+    }
+
+    /* Flush all of our results for this interval to the backends */
+    timeseries_kp_flush(m->kp, timestamp);
+    JLFA(judyret, *results);
+    return 0;
 }
 
 /** Allocate and initialise a new report plugin result.
@@ -2116,6 +2424,117 @@ static void update_tracker_results(Pvoid_t *results,
     tracker->lastresult = NULL;
 }
 
+/** Writes the combined tallies for each metric using a corsaro avro writer.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param m            The merge thread state for this plugin
+ *  @param timestamp    The timestamp for the interval that the tallies
+ *                      correspond to
+ *  @param results      A Judy array containing the tallies
+ *
+ *  @return -1 if an error occurs, 0 if successful
+ */
+static int report_write_avro_output(corsaro_plugin_t *p,
+        corsaro_report_merge_state_t *m, uint32_t timestamp,
+        Pvoid_t *results) {
+
+    char *outname;
+
+    /* Make sure we've got a valid Avro writer ready to go */
+    if (!corsaro_is_avro_writer_active(m->writer)) {
+        outname = p->derive_output_name(p, m, timestamp, -1);
+        if (outname == NULL) {
+            return -1;
+        }
+        if (corsaro_start_avro_writer(m->writer, outname) == -1) {
+            free(outname);
+            return -1;
+        }
+        free(outname);
+    }
+
+    if (write_all_metrics_avro(p->logger, m->writer, results, m->res_handler)
+        < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+#define ADD_EMPTY_RESULT(metricclass, metricval) \
+    metricid = GEN_METRICID(metricclass, metricval); \
+    r = new_result(metricid, res_handler, conf->outlabel, ts); \
+    JLI(pval, *results, (Word_t)metricid); \
+    *pval = (Word_t)r;
+
+
+/** Initialises a results array with zeroes for as many metrics as
+ *  we can, so we are still able to write a valid value even if the metric
+ *  is not observed within an interval.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param results      The Judy array that will be used to store the tallies
+ *  @param res_handler  A corsaro memory handler to use for allocating result
+ *                      structures
+ *  @param ts           The timestamp for the current interval
+ *
+ *  @return -1 if an error occurs, 0 otherwise.
+ */
+static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
+        corsaro_memhandler_t *res_handler, uint32_t ts) {
+
+    uint64_t metricid, i;
+    Word_t *pval;
+    corsaro_report_result_t *r;
+    corsaro_report_config_t *conf;
+    int mm_country_count;
+    const char **mm_country_list;
+
+    conf = (corsaro_report_config_t *)(p->config);
+
+    ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_COMBINED, 0);
+
+    /* IP protocols, ICMP codes and types */
+    for (i = 0; i < METRIC_ICMP_MAX; i++) {
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_IP_PROTOCOL, i);
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_CODE, i);
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPE, i);
+    }
+
+    /* TCP and UDP ports */
+    for (i = 0; i < METRIC_PORT_MAX; i++) {
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT, i);
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_DEST_PORT, i);
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
+    }
+
+    /* ASNs are too sparse? */
+
+    /* Continents */
+    for (i = 0; i < CORSAROTRACE_NUM_CONTINENTS; i++) {
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
+                (((uint64_t)alpha2_continents[i][0]) |
+                 ((uint64_t)alpha2_continents[i][1]) << 8));
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
+                (((uint64_t)alpha2_continents[i][0]) |
+                 ((uint64_t)alpha2_continents[i][1]) << 8));
+    }
+
+    /* Countries */
+    for (i = 0; i < CORSAROTRACE_NUM_COUNTRIES; i++) {
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
+                (((uint64_t)alpha2_countries[i][0]) |
+                 ((uint64_t)alpha2_countries[i][1]) << 8));
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
+                (((uint64_t)alpha2_countries[i][0]) |
+                 ((uint64_t)alpha2_countries[i][1]) << 8));
+    }
+
+
+    return 0;
+}
+
 /** Merge the metric tallies for a given interval into a single combined
  *  result and write it to our Avro output file.
  *
@@ -2132,7 +2551,6 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     corsaro_report_config_t *conf, *procconf;
     corsaro_report_merge_state_t *m;
     int i, ret;
-    char *outname;
     Pvoid_t results = NULL;
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
@@ -2154,6 +2572,10 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     corsaro_log(p->logger, "waiting for IP tracker results.....%u", fin->timestamp);
     trackers_done = (uint8_t *)calloc(procconf->tracker_count, sizeof(uint8_t));
+
+    if (initialise_results(p, &results, m->res_handler, fin->timestamp) < 0) {
+        return -1;
+    }
 
     do {
         /* The IP tracker threads may not have finished processing all of their
@@ -2204,26 +2626,19 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
         return 0;
     }
 
-    /* Make sure we've got a valid Avro writer ready to go */
-    if (!corsaro_is_avro_writer_active(m->writer)) {
-        outname = p->derive_output_name(p, local, fin->timestamp, -1);
-        if (outname == NULL) {
-            return -1;
-        }
-        if (corsaro_start_avro_writer(m->writer, outname) == -1) {
-            free(outname);
-            return -1;
-        }
-        free(outname);
-    }
-
     /* All trackers have reported tallies for this interval and they've
      * been merged into a single result -- write it out!
      */
-    ret = 0;
-    if (write_all_metrics(p->logger, m->writer, &results, m->res_handler) < 0)
-    {
-        return -1;
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        if (report_write_avro_output(p, m, fin->timestamp, &results) < 0) {
+            return -1;
+        }
+    }
+
+    if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
+        if (report_write_libtimeseries(p, m, fin->timestamp, &results) < 0) {
+            return -1;
+        }
     }
 
     for (i = 0; i < fin->threads_ended; i++) {
@@ -2241,19 +2656,24 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
 int corsaro_report_rotate_output(corsaro_plugin_t *p, void *local) {
 
     corsaro_report_merge_state_t *m;
+    corsaro_report_config_t *conf;
 
+    conf = (corsaro_report_config_t *)(p->config);
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
         return -1;
     }
 
-    /* Nothing complicated here, just close the current Avro writer. We'll
-     * create a new one (along with a new output file) the next time we have
-     * a complete set of results for an interval that needs to be written.
-     */
-    if (m->writer == NULL || corsaro_close_avro_writer(m->writer) < 0) {
-        return -1;
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        /* Nothing complicated here, just close the current Avro writer. We'll
+         * create a new one (along with a new output file) the next time we have
+         * a complete set of results for an interval that needs to be written.
+         */
+        if (m->writer == NULL || corsaro_close_avro_writer(m->writer) < 0) {
+            return -1;
+        }
     }
+
     return 0;
 }
 
