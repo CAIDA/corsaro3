@@ -154,10 +154,6 @@ else
         TCMALLOC_FLAGS=""
 fi
 
-# needed to keep cc-common happy -- at some point we should change
-# cc-common to have its own configure script:
-AM_CONDITIONAL([WITH_WANDIO], [test "xyes" == xno])
-
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h inttypes.h limits.h math.h stdlib.h string.h \
 			      time.h sys/time.h])

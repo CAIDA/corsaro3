@@ -55,7 +55,7 @@ IncludeCategories:
     Priority:        2
   - Regex:           '^"config'
     Priority:        3
-  - Regex:           '^(<|")(utils|wandio_util|khash)'
+  - Regex:           '^(<|")(utils|khash)'
     Priority:        4
   - Regex:           '^"'
     Priority:        5
