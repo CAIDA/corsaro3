@@ -1123,57 +1123,14 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
     } else if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
         corsaro_log(p->logger,
                 "report plugin: writing output using libtimeseries");
-        if (conf->basic.libtsascii->filename) {
-            corsaro_log(p->logger,
-                    "report plugin: using ASCII backend to write to %s",
-                    conf->basic.libtsascii->filename);
-            corsaro_log(p->logger,
-                    "report plugin: ASCII compression level: %d",
-                    conf->basic.libtsascii->compresslevel);
-        }
-
-        if (conf->basic.libtskafka->brokeruri) {
-            corsaro_log(p->logger,
-                    "report plugin: using Kafka backend to write to %s",
-                    conf->basic.libtskafka->brokeruri);
-            corsaro_log(p->logger,
-                    "report plugin: channel=%s, topicprefix=%s, compresscodec=%s",
-                    conf->basic.libtskafka->channelname,
-                    conf->basic.libtskafka->topicprefix,
-                    conf->basic.libtskafka->compresscodec);
-        }
-
-        if (conf->basic.libtsdbats->path) {
-            corsaro_log(p->logger,
-                    "report plugin: using DBATS backend with path %s",
-                    conf->basic.libtsdbats->path);
-            corsaro_log(p->logger,
-                    "report plugin: DBATS flags are %s %s %s %s",
-                    (conf->basic.libtsdbats->flags & (1 << DBATS_FLAGS_UNCOMPRESSED)) ? "uncompressed" : "compressed",
-                    (conf->basic.libtsdbats->flags & (1 << DBATS_FLAGS_EXCLUSIVE)) ? "exclusive" : "inclusive",
-                    (conf->basic.libtsdbats->flags & (1 << DBATS_FLAGS_NOTXN)) ? "no-txn" : "txn",
-                    (conf->basic.libtsdbats->flags & (1 << DBATS_FLAGS_UPDATABLE)) ? "updatable" : "not-updatable"
-                    );
-        }
-
-        if (conf->basic.libtstsmq->brokeruri) {
-            corsaro_log(p->logger,
-                    "report plugin: using TSMQ backend to write to %s",
-                    conf->basic.libtstsmq->brokeruri);
-            corsaro_log(p->logger,
-                    "report pluging: TSMQ retries set to %d",
-                    conf->basic.libtstsmq->retries);
-            corsaro_log(p->logger,
-                    "report pluging: TSMQ ACK timeout value set to %d",
-                    conf->basic.libtstsmq->acktimeout);
-            corsaro_log(p->logger,
-                    "report pluging: TSMQ lookup timeout set to %d",
-                    conf->basic.libtstsmq->lookuptimeout);
-            corsaro_log(p->logger,
-                    "report pluging: TSMQ set timeout set to %d",
-                    conf->basic.libtstsmq->settimeout);
-        }
-
+        display_libts_ascii_options(p->logger, conf->basic.libtsascii,
+                "report plugin");
+        display_libts_kafka_options(p->logger, conf->basic.libtskafka,
+                "report plugin");
+        display_libts_dbats_options(p->logger, conf->basic.libtsdbats,
+                "report plugin");
+        display_libts_tsmq_options(p->logger, conf->basic.libtstsmq,
+                "report plugin");
     } else {
         corsaro_log(p->logger,
                 "report plugin: invalid value for output format (?)");

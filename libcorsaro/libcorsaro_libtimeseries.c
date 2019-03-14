@@ -87,6 +87,68 @@ void clone_libts_tsmq_backend(libts_tsmq_backend_t *orig,
     clone->settimeout = orig->settimeout;
 }
 
+void display_libts_ascii_options(corsaro_logger_t *logger,
+        libts_ascii_backend_t *ascii, char *prepend) {
+
+    if (ascii->filename == NULL) {
+        return;
+    }
+
+    corsaro_log(logger, "%s: using ASCII backend to write to %s",
+            prepend, ascii->filename);
+    corsaro_log(logger, "%s: ASCII compression level: %d",
+            prepend, ascii->compresslevel);
+
+}
+
+void display_libts_kafka_options(corsaro_logger_t *logger,
+        libts_kafka_backend_t *kafka, char *prepend) {
+
+    if (kafka->brokeruri == NULL) {
+        return;
+    }
+
+    corsaro_log(logger, "%s: using Kafka backend to write to %s",
+            prepend, kafka->brokeruri);
+    corsaro_log(logger, "%s: Kafka channel=%s, topicprefix=%s, compresscodec=%s",
+            prepend, kafka->channelname, kafka->topicprefix,
+            kafka->compresscodec);
+}
+
+void display_libts_dbats_options(corsaro_logger_t *logger,
+        libts_dbats_backend_t *dbats, char *prepend) {
+
+    if (dbats->path == NULL) {
+        return;
+    }
+
+    corsaro_log(logger, "%s: using DBATS backend with path %s",
+            prepend, dbats->path);
+    corsaro_log(logger, "%s: DBATS flags are %s %s %s %s", prepend,
+            dbats->flags & (1 << DBATS_FLAGS_UNCOMPRESSED) ? "uncompressed": "compressed",
+            dbats->flags & (1 << DBATS_FLAGS_EXCLUSIVE) ? "exclusive": "inclusive",
+            dbats->flags & (1 << DBATS_FLAGS_NOTXN) ? "no-txn": "txn",
+            dbats->flags & (1 << DBATS_FLAGS_UPDATABLE) ? "updatable": "not-updatable");
+}
+
+void display_libts_tsmq_options(corsaro_logger_t *logger,
+        libts_tsmq_backend_t *tsmq, char *prepend) {
+
+    if (tsmq->brokeruri == NULL) {
+        return;
+    }
+    corsaro_log(logger, "%s: using TSMQ backend to write to %s",
+            prepend, tsmq->brokeruri);
+    corsaro_log(logger, "%s: TSMQ retries set to %d",
+            prepend, tsmq->retries);
+    corsaro_log(logger, "%s: TSMQ ACK timeout set to %d",
+            prepend, tsmq->acktimeout);
+    corsaro_log(logger, "%s: TSMQ lookup timeout set to %d",
+            prepend, tsmq->lookuptimeout);
+    corsaro_log(logger, "%s: TSMQ set timeout set to %d",
+            prepend, tsmq->settimeout);
+}
+
 static inline int enable_libts_common(corsaro_logger_t *logger,
         timeseries_t *ts, char *backend_name, char *backend_args) {
 
