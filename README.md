@@ -492,4 +492,7 @@ The report plugin supports the following configuration options:
                         'libtimeseries', the output is written to all backends
                         specified using the 'libtimeseriesbackends' sequence.
 
-
+  iptracker_threads     The number of threads to dedicate to tracking the
+                        number of unique source and destination IPs seen
+                        sending or receiving a packet matching each metric.
+                        Defaults to 4.

@@ -120,6 +120,8 @@
 /** An upper bound on the number of post-IP protocols */
 #define METRIC_IPPROTOS_MAX (256)
 
+/** Maximum number of IP tracker threads allowed */
+#define CORSARO_REPORT_MAX_IPTRACKERS (8)
 
 /* Note: these pre-defined alpha-2 codes are used to bootstrap the
  * results data so that we can reliably report 0 values for countries
@@ -332,7 +334,6 @@ typedef struct corsaro_report_config {
      *  distinguishing between different inputs, for instance */
     char *outlabel;
 
-    /* XXX currently not configurable, but mainly just due to laziness */
     /** Number of IP tracker threads to create */
     int tracker_count;
 
@@ -584,6 +585,7 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     CORSARO_INIT_PLUGIN_PROC_OPTS(conf->basic);
     conf->outlabel = NULL;
     conf->outformat = CORSARO_OUTPUT_AVRO;
+    conf->tracker_count = 4;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -609,6 +611,21 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 free(conf->outlabel);
             }
             conf->outlabel = strdup(val);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                    "iptracker_threads") == 0) {
+
+            conf->tracker_count = strtol((char *)value->data.scalar.value,
+                    NULL, 0);
+            if (conf->tracker_count < 1) {
+                conf->tracker_count = 1;
+            }
+            if (conf->tracker_count > CORSARO_REPORT_MAX_IPTRACKERS) {
+                corsaro_log(p->logger, "report plugin: iptracker thread count is currently capped at %d", CORSARO_REPORT_MAX_IPTRACKERS);
+                conf->tracker_count = CORSARO_REPORT_MAX_IPTRACKERS;
+            }
         }
 
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -1147,9 +1164,6 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_log(p->logger,
                 "report plugin: invalid value for output format (?)");
     }
-
-    /* TODO add config option for this */
-    conf->tracker_count = 4;
 
     corsaro_log(p->logger,
             "report plugin: starting %d IP tracker threads",

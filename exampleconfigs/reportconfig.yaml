@@ -100,3 +100,7 @@ plugins:
       # For avro output, this will appear in the 'source_label' field.
       # For libtimeseries output, this will be prepended to the 'key'. 
       output_row_label: "report.example"
+
+      # Use this number of threads for tracking unique source and destination
+      # IPs for each metric.
+      iptracker_threads: 4
