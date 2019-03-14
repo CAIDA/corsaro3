@@ -67,15 +67,6 @@ typedef struct libts_dbats_backend {
                              * the DBATS_FLAGS_* values  */
 } libts_dbats_backend_t;
 
-/** Configuration options supported by the TSMQ backend */
-typedef struct libts_tsmq_backend {
-    char *brokeruri;        /* NULL if inactive */
-    int retries;
-    int acktimeout;         /* in milliseconds */
-    int lookuptimeout;      /* in milliseconds */
-    int settimeout;         /* in milliseconds */
-} libts_tsmq_backend_t;
-
 /** Initialises a set of configuration options for an ASCII backend.
  *
  *  An initialised backend is inactive until appropriately configured.
@@ -85,7 +76,6 @@ typedef struct libts_tsmq_backend {
 void init_libts_ascii_backend(libts_ascii_backend_t *back);
 void init_libts_kafka_backend(libts_kafka_backend_t *back);
 void init_libts_dbats_backend(libts_dbats_backend_t *back);
-void init_libts_tsmq_backend(libts_tsmq_backend_t *back);
 
 /** Parses YAML config for an ASCII backend and updates the backend
  *  configuration accordingly.
@@ -108,9 +98,6 @@ int configure_libts_kafka_backend(corsaro_logger_t *logger,
 int configure_libts_dbats_backend(corsaro_logger_t *logger,
         libts_dbats_backend_t *back,
         yaml_document_t *doc, yaml_node_t *node);
-int configure_libts_tsmq_backend(corsaro_logger_t *logger,
-        libts_tsmq_backend_t *back,
-        yaml_document_t *doc, yaml_node_t *node);
 
 /** Logs the current configuration options for an ASCII backend.
  *
@@ -126,8 +113,6 @@ void display_libts_kafka_options(corsaro_logger_t *logger,
         libts_kafka_backend_t *kafka, char *prepend);
 void display_libts_dbats_options(corsaro_logger_t *logger,
         libts_dbats_backend_t *dbats, char *prepend);
-void display_libts_tsmq_options(corsaro_logger_t *logger,
-        libts_tsmq_backend_t *tsmq, char *prepend);
 
 /** Performs a deep copy of an existing ASCII backend configuration.
  *
@@ -143,8 +128,6 @@ void clone_libts_kafka_backend(libts_kafka_backend_t *orig,
         libts_kafka_backend_t *clone);
 void clone_libts_dbats_backend(libts_dbats_backend_t *orig,
         libts_dbats_backend_t *clone);
-void clone_libts_tsmq_backend(libts_tsmq_backend_t *orig,
-        libts_tsmq_backend_t *clone);
 
 /** Enables the ASCII backend within libtimeseries, using the configuration
  *  provided.
@@ -168,8 +151,6 @@ int enable_libts_kafka_backend(corsaro_logger_t *logger,
         timeseries_t *ts, libts_kafka_backend_t *kafka);
 int enable_libts_dbats_backend(corsaro_logger_t *logger,
         timeseries_t *ts, libts_dbats_backend_t *dbats);
-int enable_libts_tsmq_backend(corsaro_logger_t *logger,
-        timeseries_t *ts, libts_tsmq_backend_t *tsmq);
 
 /** Destroys an ASCII backend configuration, freeing any associated memory.
  *
@@ -178,7 +159,6 @@ int enable_libts_tsmq_backend(corsaro_logger_t *logger,
 void destroy_libts_ascii_backend(libts_ascii_backend_t *back);
 void destroy_libts_kafka_backend(libts_kafka_backend_t *back);
 void destroy_libts_dbats_backend(libts_dbats_backend_t *back);
-void destroy_libts_tsmq_backend(libts_tsmq_backend_t *back);
 
 /** Constructs a getopt-style argument string from an ASCII backend
  *  configuration that can be used to enable the backend via the
@@ -199,8 +179,6 @@ char *create_libts_kafka_option_string(corsaro_logger_t *logger,
         libts_kafka_backend_t *back);
 char *create_libts_dbats_option_string(corsaro_logger_t *logger,
         libts_dbats_backend_t *back);
-char *create_libts_tsmq_option_string(corsaro_logger_t *logger,
-        libts_tsmq_backend_t *back);
 
 #endif
 

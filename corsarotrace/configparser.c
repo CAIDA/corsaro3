@@ -72,13 +72,10 @@ static int parse_libtimeseries_config(corsaro_trace_global_t *glob,
             } else if (strcasecmp(backend_type, "dbats") == 0) {
                 configure_libts_dbats_backend(glob->logger,
                         &(glob->libtsdbats), doc, value);
-            } else if (strcasecmp(backend_type, "tsmq") == 0) {
-                configure_libts_tsmq_backend(glob->logger,
-                        &(glob->libtstsmq), doc, value);
             } else {
                 corsaro_log(glob->logger, "unknown libtimeseries backend '%s'",
                         backend_type);
-                corsaro_log(glob->logger, "valid backends are 'ascii', 'kafka', 'dbats', or 'tsmq'");
+                corsaro_log(glob->logger, "valid backends are 'ascii', 'kafka', or 'dbats'");
             }
         }
     }
@@ -373,7 +370,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     init_libts_ascii_backend(&(glob->libtsascii));
     init_libts_dbats_backend(&(glob->libtsdbats));
     init_libts_kafka_backend(&(glob->libtskafka));
-    init_libts_tsmq_backend(&(glob->libtstsmq));
 
     /* Need to grab the template first, in case we need it for logging.
      * This will mean we read the config file twice... :(
@@ -459,7 +455,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     stdopts.libtsascii = &(glob->libtsascii);
     stdopts.libtskafka = &(glob->libtskafka);
     stdopts.libtsdbats = &(glob->libtsdbats);
-    stdopts.libtstsmq = &(glob->libtstsmq);
 
     if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts,
             glob->zmq_ctxt) < 0) {
@@ -485,7 +480,6 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
     destroy_libts_ascii_backend(&(glob->libtsascii));
     destroy_libts_kafka_backend(&(glob->libtskafka));
     destroy_libts_dbats_backend(&(glob->libtsdbats));
-    destroy_libts_tsmq_backend(&(glob->libtstsmq));
 
     if (glob->monitorid) {
         free(glob->monitorid);

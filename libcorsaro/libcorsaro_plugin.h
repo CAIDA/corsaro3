@@ -86,7 +86,6 @@ typedef struct corsaro_plugin_proc_options {
     libts_ascii_backend_t *libtsascii;
     libts_kafka_backend_t *libtskafka;
     libts_dbats_backend_t *libtsdbats;
-    libts_tsmq_backend_t *libtstsmq;
     char *monitorid;
     uint8_t procthreads;
 } corsaro_plugin_proc_options_t;
@@ -207,7 +206,6 @@ int corsaro_is_backscatter_packet(libtrace_packet_t *packet);
   opts.libtsascii = NULL; \
   opts.libtsdbats = NULL; \
   opts.libtskafka = NULL; \
-  opts.libtstsmq = NULL; \
   opts.monitorid = NULL;
 
 #define CORSARO_PLUGIN_GENERATE_BASE_PTRS(plugin)               \

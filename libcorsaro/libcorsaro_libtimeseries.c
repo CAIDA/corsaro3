@@ -46,14 +46,6 @@ void init_libts_dbats_backend(libts_dbats_backend_t *back) {
     back->flags = 0;
 }
 
-void init_libts_tsmq_backend(libts_tsmq_backend_t *back) {
-    back->brokeruri = NULL;
-    back->retries = 3;
-    back->acktimeout = 60000;
-    back->lookuptimeout = 30 * 60 * 1000;
-    back->settimeout = 2 * 60 * 1000;
-}
-
 void clone_libts_ascii_backend(libts_ascii_backend_t *orig,
         libts_ascii_backend_t *clone) {
 
@@ -75,16 +67,6 @@ void clone_libts_dbats_backend(libts_dbats_backend_t *orig,
 
     clone->path = strdup(orig->path);
     clone->flags = orig->flags;
-}
-
-void clone_libts_tsmq_backend(libts_tsmq_backend_t *orig,
-        libts_tsmq_backend_t *clone) {
-
-    clone->brokeruri = strdup(orig->brokeruri);
-    clone->retries = orig->retries;
-    clone->acktimeout = orig->acktimeout;
-    clone->lookuptimeout = orig->lookuptimeout;
-    clone->settimeout = orig->settimeout;
 }
 
 void display_libts_ascii_options(corsaro_logger_t *logger,
@@ -129,24 +111,6 @@ void display_libts_dbats_options(corsaro_logger_t *logger,
             dbats->flags & (1 << DBATS_FLAGS_EXCLUSIVE) ? "exclusive": "inclusive",
             dbats->flags & (1 << DBATS_FLAGS_NOTXN) ? "no-txn": "txn",
             dbats->flags & (1 << DBATS_FLAGS_UPDATABLE) ? "updatable": "not-updatable");
-}
-
-void display_libts_tsmq_options(corsaro_logger_t *logger,
-        libts_tsmq_backend_t *tsmq, char *prepend) {
-
-    if (tsmq->brokeruri == NULL) {
-        return;
-    }
-    corsaro_log(logger, "%s: using TSMQ backend to write to %s",
-            prepend, tsmq->brokeruri);
-    corsaro_log(logger, "%s: TSMQ retries set to %d",
-            prepend, tsmq->retries);
-    corsaro_log(logger, "%s: TSMQ ACK timeout set to %d",
-            prepend, tsmq->acktimeout);
-    corsaro_log(logger, "%s: TSMQ lookup timeout set to %d",
-            prepend, tsmq->lookuptimeout);
-    corsaro_log(logger, "%s: TSMQ set timeout set to %d",
-            prepend, tsmq->settimeout);
 }
 
 /** Backend-enabling code that is common to all backend formats
@@ -241,26 +205,6 @@ int enable_libts_dbats_backend(corsaro_logger_t *logger,
     return ret;
 }
 
-int enable_libts_tsmq_backend(corsaro_logger_t *logger,
-        timeseries_t *ts, libts_tsmq_backend_t *tsmq) {
-    char *args = NULL;
-    int ret;
-
-    /* Simply return success if the config says this backend is inactive */
-    if (tsmq->brokeruri == NULL) {
-        return 0;
-    }
-
-    args = create_libts_tsmq_option_string(logger, tsmq);
-    if (args == NULL) {
-        return 1;
-    }
-
-    ret = enable_libts_common(logger, ts, "tsmq", args);
-    free(args);
-    return ret;
-}
-
 void destroy_libts_ascii_backend(libts_ascii_backend_t *back) {
     if (back->filename) {
         free(back->filename);
@@ -285,12 +229,6 @@ void destroy_libts_kafka_backend(libts_kafka_backend_t *back) {
 void destroy_libts_dbats_backend(libts_dbats_backend_t *back) {
     if (back->path) {
         free(back->path);
-    }
-}
-
-void destroy_libts_tsmq_backend(libts_tsmq_backend_t *back) {
-    if (back->brokeruri) {
-        free(back->brokeruri);
     }
 }
 
@@ -473,80 +411,6 @@ int configure_libts_dbats_backend(corsaro_logger_t *logger,
     return 0;
 }
 
-int configure_libts_tsmq_backend(corsaro_logger_t *logger,
-        libts_tsmq_backend_t *back, yaml_document_t *doc, yaml_node_t *node) {
-
-    yaml_node_t *key, *value;
-    yaml_node_pair_t *pair;
-
-    if (node->type != YAML_MAPPING_NODE) {
-        corsaro_log(logger, "Libtimeseries TSMQ backend config should be a map.");
-        return -1;
-    }
-
-    for (pair = node->data.mapping.pairs.start;
-            pair < node->data.mapping.pairs.top; pair ++) {
-
-        char *val;
-        key = yaml_document_get_node(doc, pair->key);
-        value = yaml_document_get_node(doc, pair->value);
-
-        val = (char *)value->data.scalar.value;
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "brokeruri") == 0) {
-            if (back->brokeruri) {
-                free(back->brokeruri);
-            }
-            back->brokeruri = strdup(val);
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "retries") == 0) {
-            back->retries = atoi(val);
-            if (back->retries < 0) {
-                corsaro_log(logger, "Libtimeseries TSMQ backend: retries value of %d is invalid", back->retries);
-                corsaro_log(logger, "(must be non-negative");
-                corsaro_log(logger, "setting retries value to 3 instead");
-                back->retries = 3;
-            }
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "acktimeout") == 0) {
-            back->acktimeout = atoi(val);
-            if (back->acktimeout < 0) {
-                corsaro_log(logger, "Libtimeseries TSMQ backend: ACK timeout value of %d is invalid", back->acktimeout);
-                corsaro_log(logger, "(must be non-negative");
-                corsaro_log(logger, "setting ACK timeout value to 5 sec instead");
-                back->acktimeout = 5000;
-            }
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "lookuptimeout") == 0) {
-            back->lookuptimeout = atoi(val);
-            if (back->lookuptimeout < 0) {
-                corsaro_log(logger, "Libtimeseries TSMQ backend: lookup timeout of %d is invalid", back->lookuptimeout);
-                corsaro_log(logger, "(must be non-negative");
-                corsaro_log(logger, "setting lookup timeout to 60 sec instead");
-                back->lookuptimeout = 60 * 1000;
-            }
-        }
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "settimeout") == 0) {
-            back->settimeout = atoi(val);
-            if (back->settimeout < 0) {
-                corsaro_log(logger, "Libtimeseries TSMQ backend: set timeout of %d is invalid", back->settimeout);
-                corsaro_log(logger, "(must be non-negative");
-                corsaro_log(logger, "setting set timeout to 30 sec instead");
-                back->settimeout = 30 * 1000;
-            }
-        }
-    }
-    return 0;
-}
-
 #define ADD_TO_STRING(ptr, opt, limit, backend) \
     if (strlen(opt) > limit - ptr) { \
         corsaro_log(logger, "Libtimeseries %s backend: arguments exceed 4096 bytes in total?", backend); \
@@ -669,57 +533,6 @@ char *create_libts_dbats_option_string(corsaro_logger_t *logger,
     if (back->flags & (1 << DBATS_FLAGS_UPDATABLE)) {
         ADD_TO_STRING(ptr, "-f FLAG_UPDATABLE ", limit, "DBATS");
     }
-    return strdup(tmpbuf);
-}
-
-char *create_libts_tsmq_option_string(corsaro_logger_t *logger,
-        libts_tsmq_backend_t *back) {
-
-    char tmpbuf[4096];
-    char opt[1024];
-    char *ptr = tmpbuf;
-    char *limit = tmpbuf + 4096 - 1;
-
-    if (back->brokeruri == NULL) {
-        return NULL;
-    }
-
-    tmpbuf[0] = '\0';
-    if (snprintf(opt, 1024, "-b %s ", back->brokeruri) >= 1024) {
-        corsaro_log(logger, "Overly large broker URI for libtimeseries TSMQ backend -- disabling TSMQ backend");
-        return NULL;
-    }
-
-    ADD_TO_STRING(ptr, opt, limit, "TSMQ");
-
-    if (snprintf(opt, 1024, "-r %d ", back->retries) >= 1024) {
-        corsaro_log(logger, "Overly large numeric option for libtimeseries TSMQ backend (retries)");
-        corsaro_log(logger, " -- disabling TSMQ backend");
-        return NULL;
-    }
-    ADD_TO_STRING(ptr, opt, limit, "TSMQ");
-
-    if (snprintf(opt, 1024, "-a %d ", back->acktimeout) >= 1024) {
-        corsaro_log(logger, "Overly large numeric option for libtimeseries TSMQ backend (acktimeout)");
-        corsaro_log(logger, " -- disabling TSMQ backend");
-        return NULL;
-    }
-    ADD_TO_STRING(ptr, opt, limit, "TSMQ");
-
-    if (snprintf(opt, 1024, "-l %d ", back->lookuptimeout) >= 1024) {
-        corsaro_log(logger, "Overly large numeric option for libtimeseries TSMQ backend (lookuptimeout)");
-        corsaro_log(logger, " -- disabling TSMQ backend");
-        return NULL;
-    }
-    ADD_TO_STRING(ptr, opt, limit, "TSMQ");
-
-    if (snprintf(opt, 1024, "-s %d ", back->settimeout) >= 1024) {
-        corsaro_log(logger, "Overly large numeric option for libtimeseries TSMQ backend (settimeout)");
-        corsaro_log(logger, " -- disabling TSMQ backend");
-        return NULL;
-    }
-    ADD_TO_STRING(ptr, opt, limit, "TSMQ");
-
     return strdup(tmpbuf);
 }
 

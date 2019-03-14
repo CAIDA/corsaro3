@@ -75,7 +75,6 @@ typedef struct corsaro_trace_glob {
     libts_ascii_backend_t libtsascii;
     libts_kafka_backend_t libtskafka;
     libts_dbats_backend_t libtsdbats;
-    libts_tsmq_backend_t libtstsmq;
 
     uint32_t first_pkt_ts;
     uint32_t boundstartts;

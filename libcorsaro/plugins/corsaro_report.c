@@ -1136,7 +1136,6 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
     conf->basic.libtsascii = stdopts->libtsascii;
     conf->basic.libtskafka = stdopts->libtskafka;
     conf->basic.libtsdbats = stdopts->libtsdbats;
-    conf->basic.libtstsmq = stdopts->libtstsmq;
 
     if (conf->outlabel == NULL) {
         conf->outlabel = strdup("unlabeled");
@@ -1157,8 +1156,6 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         display_libts_kafka_options(p->logger, conf->basic.libtskafka,
                 "report plugin");
         display_libts_dbats_options(p->logger, conf->basic.libtsdbats,
-                "report plugin");
-        display_libts_tsmq_options(p->logger, conf->basic.libtstsmq,
                 "report plugin");
     } else {
         corsaro_log(p->logger,
@@ -1973,10 +1970,6 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
         if (enable_libts_dbats_backend(p->logger, m->timeseries,
                 conf->basic.libtsdbats)) {
             corsaro_log(p->logger, "skipping libtimeseries DBATS output");
-        }
-        if (enable_libts_tsmq_backend(p->logger, m->timeseries,
-                conf->basic.libtstsmq)) {
-            corsaro_log(p->logger, "skipping libtimeseries TSMQ output");
         }
 
         m->kp = timeseries_kp_init(m->timeseries, TIMESERIES_KP_RESET);

@@ -376,18 +376,6 @@ Supported options:
   path                  The path to the DBATS instance.
 
 
-**tsmq:** Write the output into a TSMQ instance.
-*Someone with experience with TSMQ should update this section with an
-explanation of what the options really mean...*
-
-Supported options:
-  brokeruri
-  retries
-  acktimeout
-  lookuptimeout
-  settimeout
-
-
 Supported Plugins and their Configuration Options
 =================================================
 

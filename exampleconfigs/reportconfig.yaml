@@ -38,7 +38,7 @@ endboundaryts: 0
 removespoofed: no
 
 # Set to 'yes' to ignore all packets tagged as 'erratic'
-removederratic: no
+removeerratic: no
 
 # Set to 'yes' to ignore all packets with source addresses that are not
 # RFC 5735.
@@ -77,15 +77,6 @@ libtimeseriesbackends:
      transactions: yes
      updatable: no
      path: "/path/to/dbats/instance"
-
- # Stream output into TSMQ (all timeouts are in ms)
- - tsmq:
-     brokeruri: "localhost:10001"
-     retries: 3
-     acktimeout: 5000
-     lookuptimeout: 5000
-     settimeout: 10000
-
 
 # List of analysis plugins to run and their plugin-specific config options.
 # Multiple plugins may be specified here.
