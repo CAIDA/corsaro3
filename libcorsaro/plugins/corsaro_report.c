@@ -1947,7 +1947,7 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
             return NULL;
         }
     } else {
-        m->writer == NULL;
+        m->writer = NULL;
     }
 
     if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
@@ -2543,7 +2543,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     corsaro_report_config_t *conf, *procconf;
     corsaro_report_merge_state_t *m;
-    int i, ret;
+    int i;
     Pvoid_t results = NULL;
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
@@ -2637,7 +2637,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     for (i = 0; i < fin->threads_ended; i++) {
         free(tomerge[i]);
     }
-    return ret;
+    return 0;
 }
 
 /** Rotates the output file for the report plugin.

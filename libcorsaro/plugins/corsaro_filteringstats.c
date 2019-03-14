@@ -205,6 +205,7 @@ int corsaro_filteringstats_halt_processing(corsaro_plugin_t *p, void *local) {
         corsaro_destroy_filters(state->customfilters);
     }
     free(state);
+    return 0;
 }
 
 

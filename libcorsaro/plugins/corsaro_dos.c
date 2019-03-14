@@ -1362,6 +1362,8 @@ static int write_iat_bins(corsaro_logger_t *logger, libtrace_list_t *tslist,
         lastts = thists;
         n = n->next;
     }
+
+    return 0;
 }
 
 static int write_attack_vectors(corsaro_logger_t *logger,

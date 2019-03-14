@@ -39,7 +39,7 @@
 
 static corsaro_plugin_t *allplugins = NULL;
 
-static int parse_libtimeseries_config(corsaro_trace_global_t *glob,
+static void parse_libtimeseries_config(corsaro_trace_global_t *glob,
         yaml_document_t *doc, yaml_node_t *backendlist) {
 
     yaml_node_item_t *item;
