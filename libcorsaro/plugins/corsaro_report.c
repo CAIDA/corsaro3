@@ -345,6 +345,9 @@ typedef struct corsaro_report_config {
      */
     corsaro_report_iptracker_t *iptrackers;
 
+    /** ZeroMQ queues that are used to communicate between processing threads
+     *  and IP tracker threads.
+     */
     void **tracker_queues;
 } corsaro_report_config_t;
 
@@ -424,6 +427,9 @@ typedef struct corsaro_report_state {
      */
     int queueblocks;
 
+    /** ZeroMQ queues that link this processing thread with the IP tracker
+     *  threads -- one queue per tracker thread.
+     */
     void **tracker_queues;
 } corsaro_report_state_t;
 
@@ -442,6 +448,9 @@ typedef struct corsaro_report_merge_state {
     /** Libtimeseries key package for writing output as time series */
     timeseries_kp_t *kp;
 
+    /** Judy array containing all of the keys that we have added to our
+     *  libtimeseries instance.
+     */
     Pvoid_t metrickp_keys;
 } corsaro_report_merge_state_t;
 
@@ -601,6 +610,7 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
             }
             conf->outlabel = strdup(val);
         }
+
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                 && strcmp((char *)key->data.scalar.value,
                     "output_format") == 0) {
@@ -642,6 +652,7 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
 
     JLG(pval, *knownips, (Word_t)ipaddr);
     if (pval == NULL) {
+        /* New IP, so create a new entry in our map */
         if (track->ip_handler) {
             iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
                     track->ip_handler, &memsrc);
@@ -656,6 +667,7 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
         JLI(pval, *knownips, (Word_t)ipaddr);
         *pval = (Word_t)(iphash);
     } else {
+        /* IP exists in the map, return the existing entry */
         iphash = (corsaro_ip_hash_t *)(*pval);
     }
 
@@ -2026,7 +2038,10 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
     char valspace[2048];
 
     /* Convert the 64 bit metric ID into printable strings that we can
-     * put in our Avro result.
+     * put in our result output.
+     *
+     * Hopefully, these will match the strings that were used by
+     * previous instances of this plugin...
      */
     switch(res->metricid >> 32) {
         case CORSARO_METRIC_CLASS_COMBINED:
@@ -2064,7 +2079,7 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
             res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_UDP_DEST_PORT:
-            res->metrictype = "traffic,port.udp.dst_port";
+            res->metrictype = "traffic.port.udp.dst_port";
             snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
             res->metricval = valspace;
             break;
@@ -2100,6 +2115,17 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
     }
 }
 
+/** Given a report result, determines the base name for the corresponding
+ *  libtimeseries key for lookup in our "known keys" map.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param keyspace     A string buffer that we can write the key name into
+ *  @param keylen       The size of the keyspace buffer
+ *  @param res          A single report plugin result which we need the key
+ *                      name for.
+ *
+ *  @return the length of the resulting key string.
+ */
 static inline int derive_libts_keyname(corsaro_plugin_t *p,
         char *keyspace, int keylen, corsaro_report_result_t *res) {
 
@@ -2107,6 +2133,9 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
     corsaro_report_config_t *config = (corsaro_report_config_t *)p->config;
 
     metric_to_strings(res);
+    /* 'overall' metrics have no suitable metric value, so we need to
+     * account for this case.
+     */
     if (strlen(res->metricval) > 0) {
         ret = snprintf(keyspace, keylen, "%s.%s.%s",
                 config->outlabel, res->metrictype, res->metricval);
@@ -2119,6 +2148,7 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
         corsaro_log(p->logger,
                 "truncated libtimeseries key basename to '%s', output_row_label is too long",
                 keyspace);
+        ret = keylen - 1;
     }
 
     return ret;
@@ -2132,7 +2162,7 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
  *  @param res          The report plugin result to be written.
  *  @return 0 if the write is successful, -1 if an error occurs.
  */
-static int write_single_metric(corsaro_logger_t *logger,
+static int write_single_metric_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, corsaro_report_result_t *res) {
 
     avro_value_t *avro;
@@ -2182,7 +2212,7 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
          * anymore.
          */
         if (!stopwriting) {
-            writeret = write_single_metric(logger, writer, r);
+            writeret = write_single_metric_avro(logger, writer, r);
             if (writeret == AVRO_WRITE_FAILURE) {
                 stopwriting = 1;
             }
@@ -2214,6 +2244,16 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
     }
 
 
+/** Writes the combined tallies for each metric using libtimeseries.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param m            The merge thread state for this plugin
+ *  @param timestamp    The timestamp for the interval that the tallies
+ *                      correspond to
+ *  @param results      A Judy array containing the tallies
+ *
+ *  @return -1 if an error occurs, 0 if successful
+ */
 static int report_write_libtimeseries(corsaro_plugin_t *p,
         corsaro_report_merge_state_t *m, uint32_t timestamp, Pvoid_t *results)
 {
@@ -2222,22 +2262,28 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
     PWord_t pval;
 
     JLF(pval, *results, index);
+
+    /* Iterate over all of the metrics in our array */
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
 
         JLG(pval, m->metrickp_keys, r->metricid);
         if (pval == NULL) {
+            /* This is a metric ID that we haven't seen before so we need
+             * to create a new 'key' in libtimeseries for it.
+             */
             char keyname[4096];
             char fullkeyname[5000];
             int keyid = -1;
 
-            if (derive_libts_keyname(p, keyname, 4096, r) < 0) {
+            if (derive_libts_keyname(p, keyname, 4096, r) <= 0) {
                 corsaro_log(p->logger,
                         "error deriving suitable keyname from metricid %lu",
                         r->metricid);
                 return -1;
             }
 
+            /* We'll need a separate key for each of our tallies */
             ADD_TIMESERIES_KEY("uniq_src_ip");
 
             /* Do the JLI here, as we only want to add the first of the
@@ -2250,6 +2296,9 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
             ADD_TIMESERIES_KEY("ip_len");
         }
 
+        /* *pval contains the key ID for uniq_src_ip, but keys are
+         * assigned sequentially so we can use that to derive the key IDs
+         * for the other tallies. */
         timeseries_kp_set(m->kp, *pval, r->uniq_src_ips);
         timeseries_kp_set(m->kp, (*pval) + 1, r->uniq_dst_ips);
         timeseries_kp_set(m->kp, (*pval) + 2, r->pkt_cnt);
@@ -2258,6 +2307,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
         JLN(pval, *results, index);
     }
 
+    /* Flush all of our results for this interval to the backends */
     timeseries_kp_flush(m->kp, timestamp);
     JLFA(judyret, *results);
     return 0;
@@ -2360,6 +2410,16 @@ static void update_tracker_results(Pvoid_t *results,
     tracker->lastresult = NULL;
 }
 
+/** Writes the combined tallies for each metric using a corsaro avro writer.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param m            The merge thread state for this plugin
+ *  @param timestamp    The timestamp for the interval that the tallies
+ *                      correspond to
+ *  @param results      A Judy array containing the tallies
+ *
+ *  @return -1 if an error occurs, 0 if successful
+ */
 static int report_write_avro_output(corsaro_plugin_t *p,
         corsaro_report_merge_state_t *m, uint32_t timestamp,
         Pvoid_t *results) {
@@ -2394,6 +2454,18 @@ static int report_write_avro_output(corsaro_plugin_t *p,
     *pval = (Word_t)r;
 
 
+/** Initialises a results array with zeroes for as many metrics as
+ *  we can, so we are still able to write a valid value even if the metric
+ *  is not observed within an interval.
+ *
+ *  @param p            A reference to the running instance of the report plugin
+ *  @param results      The Judy array that will be used to store the tallies
+ *  @param res_handler  A corsaro memory handler to use for allocating result
+ *                      structures
+ *  @param ts           The timestamp for the current interval
+ *
+ *  @return -1 if an error occurs, 0 otherwise.
+ */
 static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
         corsaro_memhandler_t *res_handler, uint32_t ts) {
 
