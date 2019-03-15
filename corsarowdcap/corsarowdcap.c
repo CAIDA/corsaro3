@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #include <zmq.h>
 #include <libtrace.h>
@@ -121,6 +122,8 @@
 
 libtrace_callback_set_t *processing = NULL;
 volatile int corsaro_halted = 0;
+volatile int corsaro_restart = 0;
+volatile int corsaro_last_restart = 0;
 
 /** Signal handler for SIGTERM and SIGINT
  *
@@ -132,6 +135,17 @@ volatile int corsaro_halted = 0;
 static void cleanup_signal(int sig) {
     (void)sig;
     corsaro_halted = 1;
+}
+
+static void restart_signal(int sig) {
+    struct timespec tv;
+    (void)sig;
+    clock_gettime(CLOCK_MONOTONIC, &tv);
+
+    if (tv.tv_sec > corsaro_last_restart) {
+        corsaro_restart = 1;
+        corsaro_last_restart = tv.tv_sec;
+    }
 }
 
 /** Provides usage guidance for this program.
@@ -334,6 +348,8 @@ static inline void init_wdcap_thread_data(corsaro_wdcap_local_t *tls,
 	tls->current_interval.time = 0;
     tls->zmq_pushsock = NULL;
 
+    tls->ending = 0;
+
 }
 
 /** Destroys the internal members of a processing thread's local state.
@@ -471,6 +487,10 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_wdcap_message_t mergemsg;
     int ret;
 
+    if (tls->ending) {
+        return packet;
+    }
+
 	if (tls->current_interval.time == 0) {
         /* This is the first packet we've seen, so we need to initialise
          * our first interval.
@@ -501,14 +521,14 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 			return packet;
 		}
 
-        tls->current_interval.time = firsttv->tv_sec -
-                (firsttv->tv_sec % glob->interval);
-        tls->next_report = tls->current_interval.time + glob->interval;
+        tls->current_interval.time = firsttv->tv_sec;
+        tls->next_report = firsttv->tv_sec - (firsttv->tv_sec % glob->interval) + glob->interval;
     }
 
     ptv = trace_get_timeval(packet);
 
-    while (tls->next_report && ptv.tv_sec >= tls->next_report) {
+    while (corsaro_restart ||
+            (tls->next_report && ptv.tv_sec >= tls->next_report)) {
         /* Tell merger that we've reached the end of the interval */
         mergemsg.threadid = trace_get_perpkt_thread_id(t);
         mergemsg.type = CORSARO_WDCAP_MSG_INTERVAL_DONE;
@@ -552,6 +572,21 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 		tls->current_interval.number ++;
 		tls->current_interval.time = tls->next_report;
 		tls->next_report += glob->interval;
+
+        if (corsaro_restart) {
+            tls->ending = 1;
+
+            pthread_mutex_lock(&(tls->glob->globmutex));
+            tls->glob->threads_ended ++;
+            if (tls->glob->threads_ended >= tls->glob->threads) {
+                corsaro_halted = 1;
+            }
+            pthread_mutex_unlock(&(tls->glob->globmutex));
+
+            corsaro_log(glob->logger, "marked proc thread %d as ending",
+                    trace_get_perpkt_thread_id(t));
+            return packet;
+        }
     }
 
     if (tls->interimfilename == NULL) {
@@ -1068,8 +1103,10 @@ int main(int argc, char *argv[]) {
 	struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
 	int i, zero=0, mergestarted = 0;
+    int forked = 0;
 	pthread_t mergetid;
     corsaro_wdcap_message_t haltmsg;
+    FILE *pidf = NULL;
 
     /* Disable threaded I/O in libwandio, in situations where wandio is
      * used -- we only do uncompressed output so the threading is just
@@ -1078,6 +1115,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "corsarowdcap: unable to set libwandio environment\n");
         return -1;
     }
+
+    corsaro_halted = 0;
+    corsaro_restart = 0;
+    fprintf(stderr, "starting up corsarowdcap!\n");
 
 	while (1) {
         int optind;
@@ -1145,6 +1186,13 @@ int main(int argc, char *argv[]) {
 
     sigaction(SIGINT, &sigact, NULL);
     sigaction(SIGTERM, &sigact, NULL);
+
+    sigact.sa_handler = restart_signal;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = SA_RESTART;
+
+    sigaction(SIGHUP, &sigact, NULL);
+
     signal(SIGPIPE, SIG_IGN);
 
     /* Create initial global state based on configuration file content */
@@ -1152,6 +1200,24 @@ int main(int argc, char *argv[]) {
 	if (glob == NULL) {
         return 1;
     }
+
+    /* Create and initialise thread local state for the processing threads */
+	glob->threaddata = calloc(glob->threads, sizeof(corsaro_wdcap_local_t));
+
+    for (i = 0; i < glob->threads; i++) {
+        init_wdcap_thread_data(&(glob->threaddata[i]), i, glob);
+    }
+
+    pidf = fopen(glob->pidfile, "w");
+    if (!pidf) {
+        corsaro_log(glob->logger,
+                "error opening pidfile '%s' for corsarowdcap: %s",
+                glob->pidfile, strerror(errno));
+        goto endwdcap;
+    }
+    fprintf(pidf, "%u\n", getpid());
+    fclose(pidf);
+
 	glob->zmq_ctxt = zmq_ctx_new();
 
     /* Create the zeromq socket that the merge thread will use for
@@ -1203,12 +1269,6 @@ int main(int argc, char *argv[]) {
 		goto endwdcap;
 	}
 
-    /* Create and initialise thread local state for the processing threads */
-	glob->threaddata = calloc(glob->threads, sizeof(corsaro_wdcap_local_t));
-
-    for (i = 0; i < glob->threads; i++) {
-        init_wdcap_thread_data(&(glob->threaddata[i]), i, glob);
-    }
 
     /* Disable signals before starting threads -- this will help ensure that
      * any signals are received by the main thread (and its signal handlers)
@@ -1245,7 +1305,15 @@ int main(int argc, char *argv[]) {
      * to set the halt flag.
      */
 	while (!corsaro_halted) {
-		sleep(1);
+        if (corsaro_restart && !forked) {
+            if (fork() == 0) {
+                int selfexefd = open("/proc/self/exe", O_RDONLY);
+                fexecve(selfexefd, argv, environ);
+            }
+            forked = 1;
+        }
+
+		usleep(100);
 	}
 
     /* Stop reading packets and halt the processing threads */
