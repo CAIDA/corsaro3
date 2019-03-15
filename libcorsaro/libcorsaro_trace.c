@@ -372,15 +372,15 @@ int corsaro_reset_fast_trace_writer(corsaro_logger_t *logger,
 void corsaro_destroy_fast_trace_writer(corsaro_logger_t *logger,
         corsaro_fast_trace_writer_t *writer) {
 
-    int fd;
 
     if (writer->io_fd != -1) {
+        int fd;
         fd = corsaro_reset_fast_trace_writer(logger, writer);
+        /* We're OK to close here because destroying the writer implies that
+         * there is no more work to be done, so blocking won't be a problem.
+         */
+        close(fd);
     }
-    /* We're OK to close here because destroying the writer implies that
-     * there is no more work to be done, so blocking won't be a problem.
-     */
-    close(fd);
     if (writer->localbuf[0]) {
         free(writer->localbuf[0]);
     }
