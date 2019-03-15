@@ -1118,7 +1118,6 @@ int main(int argc, char *argv[]) {
 
     corsaro_halted = 0;
     corsaro_restart = 0;
-    fprintf(stderr, "starting up corsarowdcap!\n");
 
 	while (1) {
         int optind;
