@@ -334,7 +334,7 @@ int corsaro_push_packet_plugins(corsaro_plugin_set_t *pset,
 }
 
 void **corsaro_push_end_plugins(corsaro_plugin_set_t *pset, uint32_t intervalid,
-        uint32_t ts) {
+        uint32_t ts, uint8_t complete) {
     corsaro_interval_t end;
     int index = 0;
     corsaro_plugin_t *p = pset->active_plugins;
@@ -350,7 +350,8 @@ void **corsaro_push_end_plugins(corsaro_plugin_set_t *pset, uint32_t intervalid,
 
     plugin_data = (void **)(calloc(pset->plugincount, sizeof(void *)));
     while (p != NULL) {
-        plugin_data[index] = p->end_interval(p, pset->plugin_state[index], &end);
+        plugin_data[index] = p->end_interval(p, pset->plugin_state[index],
+                &end, complete);
         p = p->next;
         index ++;
     }

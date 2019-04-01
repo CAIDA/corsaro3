@@ -258,10 +258,11 @@ int corsaro_filteringstats_start_interval(corsaro_plugin_t *p, void *local,
 }
 
 void *corsaro_filteringstats_end_interval(corsaro_plugin_t *p, void *local,
-        corsaro_interval_t *int_end) {
+        corsaro_interval_t *int_end, uint8_t complete) {
 
     struct corsaro_filteringstats_state_t *state, *copy;
     int i;
+    Word_t rcret;
 
     state = (struct corsaro_filteringstats_state_t *)local;
     if (state == NULL) {
@@ -270,21 +271,26 @@ void *corsaro_filteringstats_end_interval(corsaro_plugin_t *p, void *local,
         return NULL;
     }
 
-    copy = (struct corsaro_filteringstats_state_t *)malloc(
-            sizeof(struct corsaro_filteringstats_state_t));
+    if (complete) {
+        copy = (struct corsaro_filteringstats_state_t *)malloc(
+                sizeof(struct corsaro_filteringstats_state_t));
 
-    copy->sourceips = state->sourceips;
-    copy->destips = state->destips;
-    memcpy(copy->packets, state->packets,
-            sizeof(uint64_t) * CORSARO_FILTERID_MAX);
-    memcpy(copy->bytes, state->packets,
-            sizeof(uint64_t) * CORSARO_FILTERID_MAX);
+        copy->sourceips = state->sourceips;
+        copy->destips = state->destips;
+        memcpy(copy->packets, state->packets,
+                sizeof(uint64_t) * CORSARO_FILTERID_MAX);
+        memcpy(copy->bytes, state->packets,
+                sizeof(uint64_t) * CORSARO_FILTERID_MAX);
+        copy->customstats = state->customstats;
+    } else {
+        copy = NULL;
+        JLFA(rcret, state->sourceips);
+        JLFA(rcret, state->destips);
+        kh_destroy(cusstats, state->customstats);
+    }
 
     state->sourceips = NULL;
     state->destips = NULL;
-
-    copy->customstats = state->customstats;
-
     state->customstats = kh_init(cusstats);
 
     return (void *)copy;
@@ -547,6 +553,11 @@ int corsaro_filteringstats_merge_interval_results(corsaro_plugin_t *p,
     m = (corsaro_filteringstats_merge_state_t *)(local);
     if (m == NULL) {
         return -1;
+    }
+
+    /* Plugin result data is NULL, must be a partial interval */
+    if (tomerge[0] == NULL) {
+        return 0;
     }
 
     /* Use tomerge[0] as the combined result */

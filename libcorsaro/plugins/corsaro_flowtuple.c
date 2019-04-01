@@ -420,7 +420,7 @@ static void *sort_job(void *tdata) {
 }
 
 void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
-        corsaro_interval_t *int_end) {
+        corsaro_interval_t *int_end, uint8_t complete) {
 
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
@@ -922,7 +922,7 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
             }
 
             interim = (corsaro_flowtuple_interim_t *)(tomerge[i]);
-
+            assert(interim);
             if (pthread_mutex_trylock(&(interim->mutex)) == 0) {
                 if (interim->usable == 0) {
                     pthread_mutex_unlock(&(interim->mutex));
