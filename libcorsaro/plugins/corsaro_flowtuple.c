@@ -469,8 +469,8 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
   PWord_t pval;
 
   /* check if this is in the hash already */
-  JLG(pval, state->st_hash, t->hash_val);
-  if (pval == NULL) {
+  JLI(pval, state->st_hash, t->hash_val);
+  if (*pval == 0) {
 
     /* create a new tuple struct */
     if (state->fthandler) {
@@ -492,7 +492,7 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
     new_6t->packet_cnt = increment;
 
     /* add it to the hash */
-    JLI(pval, state->st_hash, new_6t->hash_val);
+    //JLI(pval, state->st_hash, new_6t->hash_val);
     *pval = (Word_t)new_6t;
   } else {
     /* simply increment the existing one */
