@@ -682,18 +682,18 @@ static void *start_zmq_output_thread(void *data) {
             goto proxyexit;
         }
 
-        if (zmq_connect(proxy_recv[i], sockname) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to create tagger output recv socket %s: %s",
-                    sockname, strerror(errno));
-            goto proxyexit;
-        }
-
         /* Only block for a max of one second when reading published packets */
         if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
             corsaro_log(glob->logger,
                     "unable to configure tagger output recv socket %s: %s",
                     sockname,strerror(errno));
+            goto proxyexit;
+        }
+
+        if (zmq_connect(proxy_recv[i], sockname) < 0) {
+            corsaro_log(glob->logger,
+                    "unable to create tagger output recv socket %s: %s",
+                    sockname, strerror(errno));
             goto proxyexit;
         }
 
@@ -805,18 +805,18 @@ static void *start_zmq_proxy_thread(void *data) {
         goto proxyexit;
     }
 
-    if (zmq_bind(proxy_recv, proxy->insockname) < 0) {
-        corsaro_log(glob->logger,
-                "unable to create tagger proxy recv socket %s: %s",
-                proxy->insockname, strerror(errno));
-        goto proxyexit;
-    }
-
     /* Only block for a max of one second when reading published packets */
     if (zmq_setsockopt(proxy_recv, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
         corsaro_log(glob->logger,
                 "unable to configure tagger proxy recv socket %s: %s",
                 proxy->insockname,strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_bind(proxy_recv, proxy->insockname) < 0) {
+        corsaro_log(glob->logger,
+                "unable to create tagger proxy recv socket %s: %s",
+                proxy->insockname, strerror(errno));
         goto proxyexit;
     }
 

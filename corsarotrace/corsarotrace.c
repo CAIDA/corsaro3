@@ -264,7 +264,7 @@ static void *start_worker(void *tdata) {
     assert(deadtrace && packet);
 
     snprintf(sockname, 30, "inproc://worker%d", tls->workerid);
-    tls->zmq_pullsock = zmq_socket(tls->glob->zmq_ctxt, ZMQ_PULL);
+    tls->zmq_pullsock = zmq_socket(tls->glob->zmq_ctxt, ZMQ_PAIR);
     if (zmq_connect(tls->zmq_pullsock, sockname) < 0) {
         corsaro_log(tls->glob->logger,
                 "error while connecting to worker %d pull socket: %s",
@@ -348,7 +348,10 @@ static void *start_worker(void *tdata) {
             free(incoming.packetcontent);
             break;
         }
-        free(incoming.packetcontent);
+
+        if (incoming.packetcontent) {
+            free(incoming.packetcontent);
+        }
     }
 
 endworker:
@@ -726,19 +729,19 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < glob->threads; i++) {
         char sockname[30];
-        glob->zmq_workersocks[i] = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
+        glob->zmq_workersocks[i] = zmq_socket(glob->zmq_ctxt, ZMQ_PAIR);
         snprintf(sockname, 30, "inproc://worker%d", i);
-        if (zmq_bind(glob->zmq_workersocks[i], sockname) != 0) {
-            corsaro_log(glob->logger,
-                    "unable to bind push socket for worker %d: %s", i,
-                    strerror(errno));
-            return 1;
-        }
-
         if (zmq_setsockopt(glob->zmq_workersocks[i], ZMQ_SNDHWM, &hwm,
                 sizeof(hwm)) < 0) {
             corsaro_log(glob->logger,
                     "unable to set HWM for push socket for worker %d: %s", i,
+                    strerror(errno));
+            return 1;
+        }
+
+        if (zmq_bind(glob->zmq_workersocks[i], sockname) != 0) {
+            corsaro_log(glob->logger,
+                    "unable to bind push socket for worker %d: %s", i,
                     strerror(errno));
             return 1;
         }
@@ -782,17 +785,19 @@ int main(int argc, char *argv[]) {
     }
 
     glob->zmq_subsock = zmq_socket(glob->zmq_ctxt, ZMQ_SUB);
-    if (zmq_connect(glob->zmq_subsock, glob->subqueuename) < 0) {
-        corsaro_log(glob->logger,
-                "unable to bind to socket for receiving tagged packets: %s",
-                strerror(errno));
-        return 1;
-    }
 
     if (zmq_setsockopt(glob->zmq_subsock, ZMQ_LINGER, &linger, sizeof(linger))
             < 0) {
         corsaro_log(glob->logger,
                 "unable to set linger period for subscription socket: %s",
+                strerror(errno));
+        return 1;
+    }
+
+    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, "", 0)
+            < 0) {
+        corsaro_log(glob->logger,
+                "unable to subscribe to all messages on subscription socket: %s",
                 strerror(errno));
         return 1;
     }
@@ -805,6 +810,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    if (zmq_connect(glob->zmq_subsock, glob->subqueuename) < 0) {
+        corsaro_log(glob->logger,
+                "unable to bind to socket for receiving tagged packets: %s",
+                strerror(errno));
+        return 1;
+    }
     /* subscribe to the desired packet streams, based on our filter options */
     if (subscribe_streams(glob) < 0) {
         return 1;
