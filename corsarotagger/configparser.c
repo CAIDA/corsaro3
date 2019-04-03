@@ -314,6 +314,18 @@ static int parse_config(corsaro_tagger_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "outputhashbins")) {
+
+        int hbins = (int)strtol((char *)value->data.scalar.value, NULL, 10);
+        if (hbins <= 0 || hbins >= 255) {
+            corsaro_log(glob->logger, "inappropriate number of outputhashbins specified in configuration file: %d, falling back to 4.", hbins);
+            hbins = 4;
+        }
+
+        glob->output_hashbins = (uint8_t)hbins;
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "basicfilter")) {
         glob->filterstring = strdup((char *)value->data.scalar.value);
     }
@@ -362,8 +374,9 @@ static void log_configuration(corsaro_tagger_global_t *glob) {
                 glob->filterstring);
     }
 
-    corsaro_log(glob->logger, "publishing tagged packets to zeromq at %s",
-            glob->pubqueuename);
+    corsaro_log(glob->logger,
+            "publishing tagged packets to zeromq at %s using %u hash bins",
+            glob->pubqueuename, glob->output_hashbins);
 
     corsaro_log(glob->logger, "listening for new subscribers at %s",
             glob->control_uri);
@@ -482,6 +495,8 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->trace = NULL;
     glob->filter = NULL;
     glob->logger = NULL;
+
+    glob->output_hashbins = 4;
 
     glob->threaddata = NULL;
     glob->hasher = NULL;

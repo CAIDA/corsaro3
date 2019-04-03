@@ -577,7 +577,8 @@ static void *start_tagger_thread(void *data) {
                         "error while tagging IP payload in tagger thread.");
                 tls->errorcount ++;
             }
-            ASSIGN_HASH_BIN(packet->hdr.tags.ft_hash, 4, packet->hdr.hashbin);
+            ASSIGN_HASH_BIN(packet->hdr.tags.ft_hash,
+                    tls->glob->output_hashbins, packet->hdr.hashbin);
             packet->hdr.filterbits = htons(packet->hdr.tags.highlevelfilterbits);
             packet->taggedby = tls->threadid;
             processed += packet->hdr.pktlen;
@@ -1151,7 +1152,7 @@ int main(int argc, char *argv[]) {
                 corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
                 break;
             }
-            reply = 4;
+            reply = glob->output_hashbins;
             if (zmq_send(glob->zmq_control, &reply, sizeof(reply), 0) < 0) {
                 corsaro_log(glob->logger, "error while sending control message: %s", strerror(errno));
                 /* carry on, don't die because of a bad client */

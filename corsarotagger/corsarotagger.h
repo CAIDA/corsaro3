@@ -135,6 +135,9 @@ typedef struct corsaro_tagger_glob {
     /** A zmq socket for managing new subscribers */
     void *zmq_control;
 
+    /* Number of unique labels to use when streaming tagged packets */
+    uint8_t output_hashbins;
+
     /** An array of thread-local state data, one entry for each processing
      *  thread.
      */
