@@ -126,14 +126,20 @@ static int push_stop_merging(corsaro_trace_worker_t *tls) {
 }
 
 static int worker_per_packet(corsaro_trace_worker_t *tls,
-        libtrace_packet_t *packet, corsaro_worker_msg_t *incoming) {
+        libtrace_packet_t *packet, corsaro_tagged_packet_header_t *taghdr) {
 
     void **interval_data;
 
     if (tls->current_interval.time == 0) {
 
-        if (tls->glob->first_pkt_ts == 0) {
-            return 0;
+        if (tls->first_pkt_ts == 0) {
+            tls->first_pkt_ts = taghdr->ts_sec;
+            pthread_mutex_lock(&(tls->glob->mutex));
+            if (tls->first_pkt_ts < tls->glob->first_pkt_ts ||
+                    tls->glob->first_pkt_ts == 0) {
+                tls->glob->first_pkt_ts = tls->first_pkt_ts;
+            }
+            pthread_mutex_unlock(&(tls->glob->mutex));
         }
 
         /* First non-ignored packet */
@@ -144,8 +150,9 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
             return -1;
         }
 
-        tls->current_interval.time = tls->glob->first_pkt_ts -
-                (tls->glob->first_pkt_ts % tls->glob->interval);
+        pthread_mutex_lock(&(tls->glob->mutex));
+        tls->current_interval.time = tls->glob->first_pkt_ts;
+        pthread_mutex_unlock(&(tls->glob->mutex));
         tls->lastrotateinterval.time = tls->current_interval.time -
                 (tls->current_interval.time %
                 (tls->glob->interval * tls->glob->rotatefreq));
@@ -158,12 +165,12 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
                 (tls->glob->interval * tls->glob->rotatefreq);
     }
 
-    if (incoming->header.ts_sec < tls->current_interval.time) {
+    if (taghdr->ts_sec < tls->current_interval.time) {
         return 0;
     }
     /* check if we have passed the end of an interval */
-    while (tls->next_report && incoming->header.ts_sec >= tls->next_report) {
-
+    while (tls->next_report && taghdr->ts_sec >= tls->next_report) {
+        uint8_t complete = 0;
         /* end interval */
         interval_data = corsaro_push_end_plugins(tls->plugins,
                 tls->current_interval.number, tls->next_report);
@@ -176,7 +183,7 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
         }
 
         if (tls->glob->rotatefreq > 0 &&
-                incoming->header.ts_sec >= tls->next_rotate) {
+                taghdr->ts_sec >= tls->next_rotate) {
 
             /* push rotate message */
             if (push_rotate_output(tls, tls->next_report) < 0) {
@@ -196,14 +203,14 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     }
 
     tls->pkts_outstanding ++;
-    tls->last_ts = incoming->header.ts_sec;
-    corsaro_push_packet_plugins(tls->plugins, packet, &(incoming->header.tags));
+    tls->last_ts = taghdr->ts_sec;
+    corsaro_push_packet_plugins(tls->plugins, packet, &(taghdr->tags));
     return 1;
 }
 
 static void fast_construct_packet(libtrace_t *deadtrace,
-        libtrace_packet_t *packet, corsaro_worker_msg_t *tp,
-        uint16_t *packetbufsize)
+        libtrace_packet_t *packet, corsaro_tagged_packet_header_t *taghdr,
+        char *packetcontent, uint16_t *packetbufsize)
 {
 
     /* Clone of trace_construct_packet() but designed to minimise
@@ -211,23 +218,23 @@ static void fast_construct_packet(libtrace_t *deadtrace,
      */
     pcaphdr_t pcaphdr;
 
-    pcaphdr.ts_sec = tp->header.ts_sec;
-    pcaphdr.ts_usec = tp->header.ts_usec;
-    pcaphdr.caplen = tp->header.pktlen;
-    pcaphdr.wirelen = tp->header.pktlen;
+    pcaphdr.ts_sec = taghdr->ts_sec;
+    pcaphdr.ts_usec = taghdr->ts_usec;
+    pcaphdr.caplen = taghdr->pktlen;
+    pcaphdr.wirelen = taghdr->pktlen;
 
     packet->trace = deadtrace;
-    if (*packetbufsize < tp->header.pktlen + sizeof(pcaphdr)) {
+    if (*packetbufsize < taghdr->pktlen + sizeof(pcaphdr)) {
         packet->buffer = realloc(packet->buffer,
-                tp->header.pktlen + sizeof(pcaphdr));
-        *packetbufsize = tp->header.pktlen + sizeof(pcaphdr);
+                taghdr->pktlen + sizeof(pcaphdr));
+        *packetbufsize = taghdr->pktlen + sizeof(pcaphdr);
     }
 
     packet->buf_control = TRACE_CTRL_PACKET;
     packet->header = packet->buffer;
     packet->payload = ((char *)(packet->buffer) + sizeof(pcaphdr));
 
-    memcpy(packet->payload, tp->packetcontent, tp->header.pktlen);
+    memcpy(packet->payload, packetcontent, taghdr->pktlen);
     memcpy(packet->header, &pcaphdr, sizeof(pcaphdr));
     packet->type = TRACE_RT_DATA_DLT + TRACE_DLT_EN10MB;
 
@@ -237,21 +244,85 @@ static void fast_construct_packet(libtrace_t *deadtrace,
     packet->cached.link_type = TRACE_TYPE_ETH;
     packet->cached.l3_ethertype = 0;
     packet->cached.transport_proto = 0;
-    packet->cached.capture_length = tp->header.pktlen;
-    packet->cached.wire_length = tp->header.pktlen;
+    packet->cached.capture_length = taghdr->pktlen;
+    packet->cached.wire_length = taghdr->pktlen;
     packet->cached.payload_length = -1;
-    packet->cached.l2_remaining = tp->header.pktlen;
+    packet->cached.l2_remaining = taghdr->pktlen;
     packet->cached.l3_remaining = 0;
     packet->cached.l4_remaining = 0;
     packet->refcount = 0;
     packet->which_trace_start = 0;
 }
 
+static int subscribe_streams(corsaro_trace_global_t *glob,
+        void *zmqsock, int threadid) {
+
+    char tosub[8];
+    int i, j;
+
+    memset(tosub, 0, sizeof(char) * 8);
+
+    for (i = 0; i < glob->max_hashbins; i++) {
+        if (i % glob->threads != threadid) {
+            continue;
+        }
+
+        if (i < 26) {
+            tosub[0] = 'A' + i;
+        } else if (i < 52) {
+            tosub[0] = 'a' + i;
+        } else {
+            assert(glob->max_hashbins < 52);
+        }
+
+        /* If nothing is removed, then subscribe to everything */
+        if (glob->removespoofed == 0 && glob->removeerratic == 0 &&
+                glob->removerouted == 0) {
+
+            if (zmq_setsockopt(zmqsock, ZMQ_SUBSCRIBE, tosub, 1)
+                    < 0) {
+                corsaro_log(glob->logger,
+                        "unable to subscribe to all streams of tagged packets: %s",
+                        strerror(errno));
+                return -1;
+            }
+            continue;
+        }
+
+        for (j = 0; j < 8; j++) {
+            uint16_t subbytes;
+
+            if ((j & CORSARO_FILTERBIT_ERRATIC) && glob->removeerratic) {
+                continue;
+            }
+            if ((j & CORSARO_FILTERBIT_SPOOFED) && glob->removespoofed) {
+                continue;
+            }
+            if ((j & CORSARO_FILTERBIT_NONROUTABLE) == 0 &&
+                    glob->removerouted) {
+                continue;
+            }
+
+            subbytes = htons((uint16_t)j);
+            memcpy(tosub + 1, &subbytes, sizeof(uint16_t));
+
+            if (zmq_setsockopt(zmqsock, ZMQ_SUBSCRIBE, tosub,
+                    sizeof(subbytes) + 1) < 0) {
+                corsaro_log(glob->logger,
+                        "unable to subscribe to stream of tagged packets: %s",
+                        strerror(errno));
+                return -1;
+            }
+        }
+    }
+    return 0;
+
+}
+
 static void *start_worker(void *tdata) {
 
     corsaro_trace_worker_t *tls = (corsaro_trace_worker_t *)tdata;
-    corsaro_worker_msg_t incoming;
-    char sockname[30];
+    uint8_t rcvspace[TAGGER_MAX_MSGSIZE];
     libtrace_t *deadtrace = NULL;
     libtrace_packet_t *packet = NULL;
     uint64_t packetsseen = 0;
@@ -263,12 +334,16 @@ static void *start_worker(void *tdata) {
 
     assert(deadtrace && packet);
 
-    snprintf(sockname, 30, "inproc://worker%d", tls->workerid);
-    tls->zmq_pullsock = zmq_socket(tls->glob->zmq_ctxt, ZMQ_PAIR);
-    if (zmq_connect(tls->zmq_pullsock, sockname) < 0) {
+    tls->zmq_pullsock = zmq_socket(tls->glob->zmq_ctxt, ZMQ_SUB);
+
+    if (subscribe_streams(tls->glob, tls->zmq_pullsock, tls->workerid) < 0) {
+        goto endworker;
+    }
+
+    if (zmq_connect(tls->zmq_pullsock, tls->glob->subqueuename) != 0) {
         corsaro_log(tls->glob->logger,
-                "error while connecting to worker %d pull socket: %s",
-                tls->workerid, strerror(errno));
+                "unable to connect sub socket for worker %d: %s", tls->workerid,
+                strerror(errno));
         goto endworker;
     }
 
@@ -292,35 +367,35 @@ static void *start_worker(void *tdata) {
         goto endworker;
     }
 
-    while (1) {
-        if (zmq_recv(tls->zmq_pullsock, &incoming, sizeof(incoming), 0) < 0) {
+    while (!corsaro_halted) {
+        corsaro_tagged_packet_header_t *hdr;
+
+        if (zmq_recv(tls->zmq_pullsock, rcvspace, TAGGER_MAX_MSGSIZE,
+                ZMQ_DONTWAIT) < 0) {
+            if (errno == EAGAIN) {
+                usleep(10);
+                continue;
+            }
+
             corsaro_log(tls->glob->logger,
-                    "error receiving message on worker %d pull socket: %s",
+                    "error receiving message on worker %d sub socket: %s",
                     tls->workerid, strerror(errno));
             break;
         }
 
-        if (incoming.type == CORSARO_TRACE_MSG_STOP) {
-            break;
-        }
-
-        if (incoming.type != CORSARO_TRACE_MSG_PACKET) {
-            corsaro_log(tls->glob->logger,
-                    "received invalid message type %d on worker %d pull socket",
-                    incoming.type, tls->workerid);
-            break;
-        }
+        hdr = (corsaro_tagged_packet_header_t *)rcvspace;
         packetsseen ++;
-        fast_construct_packet(deadtrace, packet, &incoming, &pktalloc);
 
-        if (tls->glob->boundstartts && incoming.header.ts_sec <
+        fast_construct_packet(deadtrace, packet, hdr,
+                rcvspace + sizeof(corsaro_tagged_packet_header_t),
+                &pktalloc);
+
+        if (tls->glob->boundstartts && hdr->ts_sec <
                     tls->glob->boundstartts) {
-            free(incoming.packetcontent);
             continue;
         }
 
-        if (tls->glob->boundendts && incoming.header.ts_sec >=
-                tls->glob->boundendts) {
+        if (tls->glob->boundendts && hdr->ts_sec >= tls->glob->boundendts) {
             /* push end interval message for glob->boundendts */
             final_result = corsaro_push_end_plugins(tls->plugins,
                     tls->current_interval.number, tls->glob->boundendts);
@@ -337,20 +412,14 @@ static void *start_worker(void *tdata) {
                         "error while pushing rotate message after final interval %u",
                         tls->current_interval.number);
             }
-            free(incoming.packetcontent);
             break;
         }
 
-        if (worker_per_packet(tls, packet, &incoming) < 0) {
+        if (worker_per_packet(tls, packet, hdr) < 0) {
             corsaro_log(tls->glob->logger,
                     "error while processing received packet in worker %d",
                     tls->workerid);
-            free(incoming.packetcontent);
             break;
-        }
-
-        if (incoming.packetcontent) {
-            free(incoming.packetcontent);
         }
     }
 
@@ -498,10 +567,7 @@ static void *start_merger(void *tdata) {
         } else if (res.type == CORSARO_TRACE_MSG_MERGE) {
             process_mergeable_result(glob, merge, &res);
         }
-
     }
-
-
 endmerger:
     while (merge->finished_intervals) {
         fin = merge->finished_intervals;
@@ -514,59 +580,6 @@ endmerger:
     corsaro_stop_plugins(merge->pluginset);
 
     pthread_exit(NULL);
-}
-
-
-static int receive_tagged_packet(corsaro_trace_global_t *glob) {
-
-    /* receive message, decode it, forward to an appropriate worker */
-    int rcvsize, rcvused;
-    uint8_t rcvspace[TAGGER_MAX_MSGSIZE];
-    corsaro_worker_msg_t jobmsg;
-    int targetworker;
-
-    if ((rcvsize = zmq_recv(glob->zmq_subsock, rcvspace,
-            TAGGER_MAX_MSGSIZE, 0)) < 0) {
-        if (errno == EAGAIN) {
-            return 0;
-        }
-
-        corsaro_log(glob->logger,
-                "error while receiving message from sub socket: %s",
-                strerror(errno));
-        return -1;
-    }
-
-    rcvused = 0;
-    while (rcvused < rcvsize) {
-
-        jobmsg.type = CORSARO_TRACE_MSG_PACKET;
-        memcpy(&jobmsg.header, rcvspace + rcvused,
-                sizeof(corsaro_tagged_packet_header_t));
-        rcvused += sizeof(corsaro_tagged_packet_header_t);
-
-        assert(jobmsg.header.pktlen <= rcvsize - rcvused);
-        jobmsg.packetcontent = malloc(jobmsg.header.pktlen);
-        memcpy(jobmsg.packetcontent,
-                rcvspace + rcvused,
-                jobmsg.header.pktlen);
-
-        rcvused += jobmsg.header.pktlen;
-        if (glob->first_pkt_ts == 0) {
-            glob->first_pkt_ts = jobmsg.header.ts_sec;
-        }
-
-        targetworker = jobmsg.header.tags.ft_hash % glob->threads;
-        if (zmq_send(glob->zmq_workersocks[targetworker], &jobmsg,
-                sizeof(jobmsg), 0) < 0) {
-            corsaro_log(glob->logger,
-                    "error while pushing tagged packet to worker thread %d: %s",
-                    targetworker, strerror(errno));
-            return -1;
-        }
-    }
-
-    return 0;
 }
 
 void usage(char *prog) {
@@ -655,57 +668,10 @@ static corsaro_trace_global_t *configure_corsaro(int argc, char *argv[]) {
     return glob;
 }
 
-static inline int subscribe_streams(corsaro_trace_global_t *glob) {
-
-    uint8_t tosub[8];
-    int i;
-    uint16_t subbytes;
-
-    memset(tosub, 1, sizeof(uint8_t) * 8);
-
-    /* If nothing is removed, then subscribe to everything */
-    if (glob->removespoofed == 0 && glob->removeerratic == 0 &&
-            glob->removerouted == 0) {
-
-        if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, "", 0) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to subscribe to all streams of tagged packets: %s",
-                    strerror(errno));
-            return -1;
-        }
-        return 0;
-    }
-
-    for (i = 0; i < 8; i++) {
-        if ((i & CORSARO_FILTERBIT_ERRATIC) && glob->removeerratic) {
-            tosub[i] = 0;
-        }
-        if ((i & CORSARO_FILTERBIT_SPOOFED) && glob->removespoofed) {
-            tosub[i] = 0;
-        }
-        if ((i & CORSARO_FILTERBIT_NONROUTABLE) == 0 && glob->removerouted) {
-            tosub[i] = 0;
-        }
-
-        if (tosub[i]) {
-            subbytes = htons((uint16_t)i);
-            if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, &subbytes,
-                    sizeof(subbytes)) < 0) {
-                corsaro_log(glob->logger,
-                        "unable to subscribe to stream of tagged packets: %s",
-                        strerror(errno));
-                return -1;
-            }
-        }
-    }
-    return 0;
-
-}
-
 int main(int argc, char *argv[]) {
 
     corsaro_trace_global_t *glob = NULL;
-    int hwm = 100000;
+    int hwm = 0;
     int linger = 1000;
     sigset_t sig_before, sig_block_all;
     int i;
@@ -713,6 +679,8 @@ int main(int argc, char *argv[]) {
     corsaro_trace_worker_t *workers;
     corsaro_trace_merger_t merger;
     libtrace_t *dummy;
+    void *control_sock;
+    uint8_t ctrlmsg;
 
     glob = configure_corsaro(argc, argv);
     if (glob == NULL) {
@@ -724,28 +692,30 @@ int main(int argc, char *argv[]) {
      */
     dummy = trace_create_dead("pcapfile");
 
-    glob->zmq_workersocks = calloc(glob->threads, sizeof(void *));
+    control_sock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+    if (zmq_connect(control_sock, glob->control_uri) < 0) {
+        corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
+        return 1;
+    }
+
+    if (zmq_send(control_sock, "", 0, 0) < 0) {
+        corsaro_log(glob->logger, "unable to send request to corsarotagger via control socket: %s", strerror(errno));
+        return 1;
+    }
+
+    if (zmq_recv(control_sock, &ctrlmsg, sizeof(ctrlmsg), 0) < 0) {
+        corsaro_log(glob->logger, "unable to receive reply from corsarotagger via control socket: %s", strerror(errno));
+        return 1;
+    }
+
+    corsaro_log(glob->logger, "corsarotagger is using %u hashbins",
+            ctrlmsg);
+    glob->max_hashbins = ctrlmsg;
+    zmq_close(control_sock);
+
     workers = calloc(glob->threads, sizeof(corsaro_trace_worker_t));
 
     for (i = 0; i < glob->threads; i++) {
-        char sockname[30];
-        glob->zmq_workersocks[i] = zmq_socket(glob->zmq_ctxt, ZMQ_PAIR);
-        snprintf(sockname, 30, "inproc://worker%d", i);
-        if (zmq_setsockopt(glob->zmq_workersocks[i], ZMQ_SNDHWM, &hwm,
-                sizeof(hwm)) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to set HWM for push socket for worker %d: %s", i,
-                    strerror(errno));
-            return 1;
-        }
-
-        if (zmq_bind(glob->zmq_workersocks[i], sockname) != 0) {
-            corsaro_log(glob->logger,
-                    "unable to bind push socket for worker %d: %s", i,
-                    strerror(errno));
-            return 1;
-        }
-
         workers[i].glob = glob;
         workers[i].workerid = i;
     }
@@ -784,72 +754,17 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    glob->zmq_subsock = zmq_socket(glob->zmq_ctxt, ZMQ_SUB);
-
-    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_LINGER, &linger, sizeof(linger))
-            < 0) {
-        corsaro_log(glob->logger,
-                "unable to set linger period for subscription socket: %s",
-                strerror(errno));
-        return 1;
-    }
-
-    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_SUBSCRIBE, "", 0)
-            < 0) {
-        corsaro_log(glob->logger,
-                "unable to subscribe to all messages on subscription socket: %s",
-                strerror(errno));
-        return 1;
-    }
-
-    if (zmq_setsockopt(glob->zmq_subsock, ZMQ_RCVTIMEO, &linger, sizeof(linger))
-            < 0) {
-        corsaro_log(glob->logger,
-                "unable to set eagain timeout for subscription socket: %s",
-                strerror(errno));
-        return 1;
-    }
-
-    if (zmq_connect(glob->zmq_subsock, glob->subqueuename) < 0) {
-        corsaro_log(glob->logger,
-                "unable to bind to socket for receiving tagged packets: %s",
-                strerror(errno));
-        return 1;
-    }
-    /* subscribe to the desired packet streams, based on our filter options */
-    if (subscribe_streams(glob) < 0) {
-        return 1;
-    }
-
     while (!corsaro_halted) {
-        /* poll our sub socket */
-        if (receive_tagged_packet(glob) < 0) {
-            break;
-        }
+        usleep(100);
     }
-
-    halt.type = CORSARO_TRACE_MSG_STOP;
-    halt.packetcontent = NULL;
 
     for (i = 0; i < glob->threads; i++) {
-
-        if (zmq_send(glob->zmq_workersocks[i], &halt, sizeof(halt), 0) < 0) {
-            corsaro_log(glob->logger, "error sending halt message to worker %d",
-                    i);
-            return 1;
-        }
-
         pthread_join(workers[i].threadid, NULL);
-        zmq_setsockopt(glob->zmq_workersocks[i], ZMQ_LINGER, &linger,
-                sizeof(linger));
-        zmq_close(glob->zmq_workersocks[i]);
     }
 
     pthread_join(merger.threadid, NULL);
     zmq_close(merger.zmq_pullsock);
 
-    zmq_close(glob->zmq_subsock);
-    free(glob->zmq_workersocks);
     free(workers);
 
     corsaro_log(glob->logger, "all threads have joined, exiting.");

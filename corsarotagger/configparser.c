@@ -324,6 +324,11 @@ static int parse_config(corsaro_tagger_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "controlsocketname")) {
+        glob->control_uri = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "pktthreads")) {
         glob->pkt_threads = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
@@ -359,6 +364,9 @@ static void log_configuration(corsaro_tagger_global_t *glob) {
 
     corsaro_log(glob->logger, "publishing tagged packets to zeromq at %s",
             glob->pubqueuename);
+
+    corsaro_log(glob->logger, "listening for new subscribers at %s",
+            glob->control_uri);
 
     if (glob->promisc) {
         corsaro_log(glob->logger, "enabling promiscuous mode on all inputs");
@@ -490,6 +498,8 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->pfxipmeta = NULL;
 
     glob->zmq_ctxt = zmq_ctx_new();
+    glob->zmq_control = NULL;
+    glob->control_uri = NULL;
 
     /* Create global logger */
     if (glob->logmode == GLOBAL_LOGMODE_STDERR) {
@@ -526,6 +536,10 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
 
     if (glob->pubqueuename == NULL) {
         glob->pubqueuename = strdup("ipc:///tmp/corsarotagger");
+    }
+
+    if (glob->control_uri == NULL) {
+        glob->control_uri = strdup(DEFAULT_CONTROL_SOCKET_URI);
     }
 
     log_configuration(glob);
@@ -634,6 +648,14 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
 
     if (glob->ipmeta) {
         ipmeta_free(glob->ipmeta);
+    }
+
+    if (glob->zmq_control) {
+        zmq_close(glob->zmq_control);
+    }
+
+    if (glob->control_uri) {
+        free(glob->control_uri);
     }
 
     if (glob->zmq_ctxt) {

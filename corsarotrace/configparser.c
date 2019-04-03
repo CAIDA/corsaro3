@@ -192,6 +192,11 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "controlsocketname")) {
+        glob->control_uri = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "interval")) {
         glob->interval = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
@@ -242,6 +247,8 @@ static void log_configuration(corsaro_trace_global_t *glob) {
             glob->rotatefreq);
     corsaro_log(glob->logger, "subscribing to tagged packets on zeromq socket: %s",
             glob->subqueuename);
+    corsaro_log(glob->logger, "connecting to corsarotagger control socket: %s",
+            glob->control_uri);
 
     if (glob->boundstartts != 0) {
         corsaro_log(glob->logger, "ignoring all packets before timestamp %u",
@@ -363,9 +370,11 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
     glob->logger = NULL;
     glob->subqueuename = NULL;
+    glob->control_uri = NULL;
     glob->zmq_ctxt = zmq_ctx_new();
     glob->zmq_subsock = NULL;
-    glob->zmq_workersocks = NULL;
+
+    pthread_mutex_init(&(glob->mutex), NULL);
 
     init_libts_ascii_backend(&(glob->libtsascii));
     init_libts_dbats_backend(&(glob->libtsdbats));
@@ -422,6 +431,10 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
     if (glob->subqueuename == NULL) {
         glob->subqueuename = strdup("ipc:///tmp/corsarotagger");
+    }
+
+    if (glob->control_uri == NULL) {
+        glob->control_uri = strdup(DEFAULT_CONTROL_SOCKET_URI);
     }
 
     log_configuration(glob);
@@ -497,10 +510,15 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
         free(glob->subqueuename);
     }
 
+    if (glob->control_uri) {
+        free(glob->control_uri);
+    }
+
     if (glob->zmq_ctxt) {
         zmq_ctx_destroy(glob->zmq_ctxt);
     }
 
+    pthread_mutex_destroy(&(glob->mutex));
     destroy_corsaro_logger(glob->logger);
     free(glob);
 }
