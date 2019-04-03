@@ -144,8 +144,7 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
             return -1;
         }
 
-        tls->current_interval.time = tls->glob->first_pkt_ts -
-                (tls->glob->first_pkt_ts % tls->glob->interval);
+        tls->current_interval.time = tls->glob->first_pkt_ts;
         tls->lastrotateinterval.time = tls->current_interval.time -
                 (tls->current_interval.time %
                 (tls->glob->interval * tls->glob->rotatefreq));
@@ -153,7 +152,9 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
         corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
                 tls->current_interval.time);
 
-        tls->next_report = tls->current_interval.time + tls->glob->interval;
+        tls->next_report = tls->current_interval.time -
+                (tls->current_interval.time % tls->glob->interval) +
+                 tls->glob->interval;
         tls->next_rotate = tls->lastrotateinterval.time +
                 (tls->glob->interval * tls->glob->rotatefreq);
     }
@@ -163,10 +164,16 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     }
     /* check if we have passed the end of an interval */
     while (tls->next_report && incoming->header.ts_sec >= tls->next_report) {
-
+        uint8_t complete = 0;
         /* end interval */
+        if (tls->next_report - tls->current_interval.time ==
+                tls->glob->interval) {
+            complete = 1;
+        } else {
+            complete = 0;
+        }
         interval_data = corsaro_push_end_plugins(tls->plugins,
-                tls->current_interval.number, tls->next_report);
+                tls->current_interval.number, tls->next_report, complete);
 
         if (push_interval_result(tls, interval_data) < 0) {
             corsaro_log(tls->glob->logger,
@@ -185,8 +192,10 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
                         tls->current_interval.number);
                 return -1;
             }
-            tls->next_rotate += (tls->glob->interval * tls->glob->rotatefreq);
+            tls->next_rotate +=
+                    (tls->glob->interval * tls->glob->rotatefreq);
         }
+
         tls->current_interval.number ++;
         tls->current_interval.time = tls->next_report;
         corsaro_push_start_plugins(tls->plugins, tls->current_interval.number,
@@ -323,7 +332,7 @@ static void *start_worker(void *tdata) {
                 tls->glob->boundendts) {
             /* push end interval message for glob->boundendts */
             final_result = corsaro_push_end_plugins(tls->plugins,
-                    tls->current_interval.number, tls->glob->boundendts);
+                    tls->current_interval.number, tls->glob->boundendts, 0);
 
             if (push_interval_result(tls, final_result) < 0) {
                 corsaro_log(tls->glob->logger,
@@ -352,10 +361,10 @@ static void *start_worker(void *tdata) {
     }
 
 endworker:
-#if 0
+    zmq_close(tls->zmq_pullsock);
     if (tls->pkts_outstanding > 0) {
         final_result = corsaro_push_end_plugins(tls->plugins,
-                tls->current_interval.number, tls->last_ts);
+                tls->current_interval.number, tls->last_ts, 0);
         if (push_interval_result(tls, final_result) < 0) {
             corsaro_log(tls->glob->logger,
                     "error while publishing results for final interval %u",
@@ -368,7 +377,6 @@ endworker:
                     tls->current_interval.number);
         }
     }
-#endif
 
     push_stop_merging(tls);
     if (tls->plugins && corsaro_stop_plugins(tls->plugins) == -1) {
@@ -377,7 +385,6 @@ endworker:
 
     trace_destroy_packet(packet);
     trace_destroy_dead(deadtrace);
-    zmq_close(tls->zmq_pullsock);
     zmq_close(tls->zmq_pushsock);
     pthread_exit(NULL);
 }

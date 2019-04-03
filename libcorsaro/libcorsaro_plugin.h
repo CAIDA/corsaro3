@@ -52,7 +52,7 @@
     int plugin##_start_interval(corsaro_plugin_t *p, void *local, \
             corsaro_interval_t *int_start);                 \
     void *plugin##_end_interval(corsaro_plugin_t *p, void *local, \
-            corsaro_interval_t *int_end);                   \
+            corsaro_interval_t *int_end, uint8_t complete);      \
     int plugin##_process_packet(corsaro_plugin_t *p, void *local, \
             libtrace_packet_t *packet, corsaro_packet_tags_t *tags); \
     char *plugin##_derive_output_name(corsaro_plugin_t *p, void *local, \
@@ -136,7 +136,7 @@ struct corsaro_plugin {
     int (*start_interval)(corsaro_plugin_t *p, void *local,
             corsaro_interval_t *int_start);
     void *(*end_interval)(corsaro_plugin_t *p, void *local,
-            corsaro_interval_t *int_end);
+            corsaro_interval_t *int_end, uint8_t complete);
     int (*process_packet)(corsaro_plugin_t *p, void *local,
             libtrace_packet_t *packet, corsaro_packet_tags_t *tags);
     char *(*derive_output_name)(corsaro_plugin_t *p, void *local,
@@ -148,7 +148,6 @@ struct corsaro_plugin {
     int (*merge_interval_results)(corsaro_plugin_t *p, void *local,
             void **tomerge, corsaro_fin_interval_t *fin);
     int (*rotate_output)(corsaro_plugin_t *p, void *local);
-    
 
 
     /* High level global state variables */
@@ -188,12 +187,11 @@ corsaro_plugin_set_t *corsaro_start_merging_plugins(corsaro_logger_t *logger,
         corsaro_plugin_t *plist, int count, int maxsources);
 int corsaro_stop_plugins(corsaro_plugin_set_t *pluginset);
 void **corsaro_push_end_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
-        uint32_t ts);
+        uint32_t ts, uint8_t complete);
 int corsaro_push_start_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
         uint32_t ts);
 int corsaro_push_packet_plugins(corsaro_plugin_set_t *pluginset,
         libtrace_packet_t *packet, corsaro_packet_tags_t *tags);
-
 int corsaro_rotate_plugin_output(corsaro_logger_t *logger,
         corsaro_plugin_set_t *pset);
 int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
@@ -220,7 +218,8 @@ int corsaro_is_backscatter_packet(libtrace_packet_t *packet);
 
 #define CORSARO_PLUGIN_GENERATE_MERGE_PTRS(plugin)          \
   plugin##_init_merging, plugin##_halt_merging,                 \
-  plugin##_merge_interval_results, plugin##_rotate_output       
+  plugin##_merge_interval_results,                          \
+  plugin##_rotate_output
 
 #define CORSARO_PLUGIN_GENERATE_TAIL                            \
   NULL, 0, 0, NULL, NULL

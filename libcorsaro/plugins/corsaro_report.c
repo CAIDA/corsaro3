@@ -199,7 +199,8 @@ typedef enum {
 enum {
     CORSARO_IP_MESSAGE_HALT,        /**< Halt tracker thread */
     CORSARO_IP_MESSAGE_UPDATE,      /**< Message contains new stats */
-    CORSARO_IP_MESSAGE_INTERVAL     /**< Interval has ended, begin tally */
+    CORSARO_IP_MESSAGE_INTERVAL,    /**< Interval has ended, begin tally */
+    CORSARO_IP_MESSAGE_RESET        /**< Force tallies to be reset */
 };
 
 /** Structure describing an IP address that has been observed by an IP
@@ -1037,7 +1038,8 @@ static void *start_iptracker(void *tdata) {
             break;
         }
 
-        if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
+        if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL ||
+                msg.msgtype == CORSARO_IP_MESSAGE_RESET) {
 
             uint32_t complete;
 
@@ -1072,8 +1074,12 @@ static void *start_iptracker(void *tdata) {
             }
 
             pthread_mutex_lock(&(track->mutex));
-            track->lastresult = track->currentresult;
-            track->lastresultts = complete;
+            if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
+                track->lastresult = track->currentresult;
+                track->lastresultts = complete;
+            } else {
+                free_metrichash(track, (track->currentresult));
+            }
 
             if (track->haltphase == 1) {
                 track->haltphase = 2;
@@ -1506,12 +1512,15 @@ int corsaro_report_start_interval(corsaro_plugin_t *p, void *local,
  *  @param p            A reference to the running instance of the report plugin
  *  @param local        The packet processing thread state for this plugin.
  *  @param int_end      The details of the interval that has now ended.
+ *  @param complete     Flag indicating whether the interval was a complete
+ *                      one or a partial one.
  *  @return A pointer to an interim result structure that is to be combined
  *          with the corresponding interim results produced by the other
- *          packet processing threads.
+ *          packet processing threads, or NULL if there are no useful results
+ *          for this interval.
  */
 void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
-        corsaro_interval_t *int_end) {
+        corsaro_interval_t *int_end, uint8_t complete) {
 
     corsaro_report_config_t *conf;
     corsaro_report_state_t *state;
@@ -1528,15 +1537,22 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
         return NULL;
     }
 
-    interim = (corsaro_report_interim_t *)malloc(
-            sizeof(corsaro_report_interim_t));
-    interim->baseconf = conf;
 
     /* Tell the IP tracker threads that there will be no more updates
      * coming from this processing thread for this interval.
      */
     memset(&msg, 0, sizeof(msg));
-    msg.msgtype = CORSARO_IP_MESSAGE_INTERVAL;
+
+    if (complete) {
+        msg.msgtype = CORSARO_IP_MESSAGE_INTERVAL;
+        interim = (corsaro_report_interim_t *)malloc(
+                sizeof(corsaro_report_interim_t));
+        interim->baseconf = conf;
+    } else {
+        msg.msgtype = CORSARO_IP_MESSAGE_RESET;
+        interim = NULL;
+    }
+
     msg.timestamp = state->current_interval;
     msg.sender = state->threadid;
 
@@ -2551,6 +2567,11 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
         return -1;
+    }
+
+    /* Plugin result data is NULL, must be a partial interval */
+    if (tomerge[0] == NULL) {
+        return 0;
     }
 
     /* All of the interim results should point at the same config, so we
