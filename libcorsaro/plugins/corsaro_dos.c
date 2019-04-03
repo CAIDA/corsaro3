@@ -971,7 +971,7 @@ static struct corsaro_dos_state_t *copy_attack_state(corsaro_plugin_t *p,
 }
 
 void *corsaro_dos_end_interval(corsaro_plugin_t *p, void *local,
-        corsaro_interval_t *int_end) {
+        corsaro_interval_t *int_end, uint8_t complete) {
 
     corsaro_dos_config_t *conf;
     struct corsaro_dos_state_t *state, *deepcopy;
@@ -1776,6 +1776,7 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     config = (corsaro_dos_config_t *)(p->config);
 
+    assert(tomerge[0] != NULL);
     /* Use tomerge[0] as the "combined" result */
     combined = (struct corsaro_dos_state_t *)(tomerge[0]);
 

@@ -84,6 +84,11 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "pidfile")) {
+        glob->pidfile = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "interval")) {
         glob->interval = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
@@ -113,12 +118,18 @@ static void log_configuration(corsaro_wdcap_global_t *glob) {
                 glob->consterfframing);
     }
     corsaro_log(glob->logger, "rotating files every interval");
-    corsaro_log(glob->logger, "writing files using the %s format",
-            glob->fileformat);
+    if (glob->fileformat) {
+        corsaro_log(glob->logger, "writing files using the %s format",
+                glob->fileformat);
+    } else {
+        corsaro_log(glob->logger, "writing files using the pcapfile format");
+    }
+
     corsaro_log(glob->logger, "stripping vlans has been %s",
             glob->stripvlans ? "enabled" : "disabled");
     corsaro_log(glob->logger, "stats output file creation has been %s",
             glob->writestats ? "enabled" : "disabled");
+    corsaro_log(glob->logger, "pid file is set to %s", glob->pidfile);
 }
 
 static int parse_corsaro_wdcap_config(corsaro_wdcap_global_t *glob,
@@ -209,6 +220,11 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->inputuri = NULL;
     glob->stripvlans = CORSARO_DEFAULT_WDCAP_STRIP_VLANS;
     glob->writestats = CORSARO_DEFAULT_WDCAP_WRITE_STATS;
+    glob->threads_ended = 0;
+    glob->pidfile = NULL;
+    glob->zmq_pullsock = NULL;
+
+    pthread_mutex_init(&(glob->globmutex), NULL);
 
     /* Need to grab the template first, in case we need it for logging.
      * This will mean we read the config file twice... :(
@@ -253,6 +269,10 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
             filename);
         corsaro_wdcap_free_global(glob);
         return NULL;
+    }
+
+    if (glob->pidfile == NULL) {
+        glob->pidfile = strdup(CORSARO_WDCAP_DEFAULT_PIDFILE);
     }
 
     log_configuration(glob);
@@ -300,6 +320,11 @@ void corsaro_wdcap_free_global(corsaro_wdcap_global_t *glob) {
         free(glob->fileformat);
     }
 
+    if (glob->pidfile) {
+        free(glob->pidfile);
+    }
+
+    pthread_mutex_destroy(&(glob->globmutex));
     destroy_corsaro_logger(glob->logger);
     free(glob);
 }

@@ -35,6 +35,8 @@
 #include "libcorsaro_log.h"
 #include "libcorsaro.h"
 
+#define CORSARO_WDCAP_DEFAULT_PIDFILE "/var/run/corsaro/corsarowdcap.pid"
+
 /** Types of messages that can be received by the merging thread */
 enum {
     /** Processing thread has seen all packets for a given time interval */
@@ -173,6 +175,12 @@ typedef struct corsaro_wdcap_global {
 
     /** Array to store processing thread local data */
     corsaro_wdcap_local_t *threaddata;
+
+    uint8_t threads_ended;
+
+    char *pidfile;
+
+    pthread_mutex_t globmutex;
 } corsaro_wdcap_global_t;
 
 /** Describes an interim trace file that is being read by the merging thread */
@@ -235,6 +243,8 @@ struct corsaro_wdcap_local {
 
     /** Reference to the global state for this corsarowdcap instance */
     corsaro_wdcap_global_t *glob;
+
+    uint8_t ending;
 };
 
 /** Initialises global state for a corsarowdcap instance, based on the
