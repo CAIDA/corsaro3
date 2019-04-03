@@ -492,7 +492,6 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
     new_6t->packet_cnt = increment;
 
     /* add it to the hash */
-    //JLI(pval, state->st_hash, new_6t->hash_val);
     *pval = (Word_t)new_6t;
   } else {
     /* simply increment the existing one */
@@ -572,11 +571,14 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     if (tags) {
         t.tagproviders = tags->providers_used;
     } else {
-        assert(0);
         t.tagproviders = 0;
     }
 
-    t.hash_val = corsaro_flowtuple_hash_func(&t);
+    if (tags) {
+        t.hash_val = tags->ft_hash;
+    } else {
+        t.hash_val = corsaro_flowtuple_hash_func(&t);
+    }
 
     if (corsaro_flowtuple_add_inc(p->logger, state, &t, 1) != 0) {
         corsaro_log(p->logger, "could not increment value for flowtuple");
