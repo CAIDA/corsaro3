@@ -129,6 +129,15 @@ typedef struct corsaro_tagger_glob {
     /** The zeromq context used to create zeromq sockets */
     void *zmq_ctxt;
 
+    /** URI to use when creating the zeromq control socket */
+    char *control_uri;
+
+    /** A zmq socket for managing new subscribers */
+    void *zmq_control;
+
+    /* Number of unique labels to use when streaming tagged packets */
+    uint8_t output_hashbins;
+
     /** An array of thread-local state data, one entry for each processing
      *  thread.
      */

@@ -27,6 +27,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #include <libipmeta.h>
 #include "libcorsaro_filtering.h"
@@ -80,7 +81,6 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
     tagger->ipmeta = ipmeta;
     tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
     tagger->records = ipmeta_record_set_init();
-
     return tagger;
 }
 

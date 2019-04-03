@@ -71,11 +71,13 @@ typedef struct corsaro_trace_glob {
     char *subqueuename;
     char *filterstring;
     char *monitorid;
+    char *control_uri;
 
     libts_ascii_backend_t libtsascii;
     libts_kafka_backend_t libtskafka;
     libts_dbats_backend_t libtsdbats;
 
+    pthread_mutex_t mutex;
     uint32_t first_pkt_ts;
     uint32_t boundstartts;
     uint32_t boundendts;
@@ -92,8 +94,8 @@ typedef struct corsaro_trace_glob {
 
     void *zmq_ctxt;
     void *zmq_subsock;
-    void **zmq_workersocks;
 
+    uint8_t max_hashbins;
 } corsaro_trace_global_t;
 
 struct corsaro_trace_worker {
@@ -106,6 +108,7 @@ struct corsaro_trace_worker {
     corsaro_plugin_set_t *plugins;
     uint64_t pkts_outstanding;
 
+    uint32_t first_pkt_ts;
     uint32_t next_report;
     uint32_t next_rotate;
     uint32_t last_ts;

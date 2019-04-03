@@ -57,6 +57,8 @@ enum {
     CORSARO_FILTERBIT_NOTIP = 32768,
 };
 
+#define DEFAULT_CONTROL_SOCKET_URI "ipc:///tmp/corsarotagger-control"
+
 /** Identifiers for each of the supported built-in tags.
  *  Each identifier should be fairly self-explanatory.
  */
@@ -138,8 +140,10 @@ typedef struct corsaro_packet_tags {
  *  the tags that were applied to the packet.
  */
 typedef struct corsaro_tagged_packet_header {
+    uint8_t hashbin;
+
     /** Bitmask showing which filters were matched by the packet.
-     *  MUST be the first field in this structure so that zeromq
+     *  MUST be the second field in this structure so that zeromq
      *  subscription filtering can be applied properly.
      */
     uint16_t filterbits;
@@ -171,6 +175,7 @@ typedef struct corsaro_packet_tagger {
 
     /** A record set that is used to store the results of a libipmeta lookup */
     ipmeta_record_set_t *records;
+
 } corsaro_packet_tagger_t;
 
 /** Set of configuration options for the libipmeta prefix2asn provider. */

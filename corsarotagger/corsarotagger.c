@@ -58,6 +58,14 @@
 
 #define TAGGER_BUFFER_SIZE (1 * 1024 * 1024)
 
+#define ASSIGN_HASH_BIN(hash_val, hash_bins, result) { \
+    int hmod; \
+    hmod = hash_val % hash_bins; \
+    if (hmod < 26) {result = 'A' + hmod;} \
+    else {result = 'a' + (hmod - 26); } \
+}
+
+
 typedef struct tagger_proxy_data {
     char *insockname;
     char *outsockname;
@@ -569,7 +577,9 @@ static void *start_tagger_thread(void *data) {
                         "error while tagging IP payload in tagger thread.");
                 tls->errorcount ++;
             }
-            packet->hdr.filterbits = packet->hdr.tags.highlevelfilterbits;
+            ASSIGN_HASH_BIN(packet->hdr.tags.ft_hash,
+                    tls->glob->output_hashbins, packet->hdr.hashbin);
+            packet->hdr.filterbits = htons(packet->hdr.tags.highlevelfilterbits);
             packet->taggedby = tls->threadid;
             processed += packet->hdr.pktlen;
 
@@ -682,18 +692,18 @@ static void *start_zmq_output_thread(void *data) {
             goto proxyexit;
         }
 
-        if (zmq_connect(proxy_recv[i], sockname) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to create tagger output recv socket %s: %s",
-                    sockname, strerror(errno));
-            goto proxyexit;
-        }
-
         /* Only block for a max of one second when reading published packets */
         if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
             corsaro_log(glob->logger,
                     "unable to configure tagger output recv socket %s: %s",
                     sockname,strerror(errno));
+            goto proxyexit;
+        }
+
+        if (zmq_connect(proxy_recv[i], sockname) < 0) {
+            corsaro_log(glob->logger,
+                    "unable to create tagger output recv socket %s: %s",
+                    sockname, strerror(errno));
             goto proxyexit;
         }
 
@@ -805,18 +815,18 @@ static void *start_zmq_proxy_thread(void *data) {
         goto proxyexit;
     }
 
-    if (zmq_bind(proxy_recv, proxy->insockname) < 0) {
-        corsaro_log(glob->logger,
-                "unable to create tagger proxy recv socket %s: %s",
-                proxy->insockname, strerror(errno));
-        goto proxyexit;
-    }
-
     /* Only block for a max of one second when reading published packets */
     if (zmq_setsockopt(proxy_recv, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
         corsaro_log(glob->logger,
                 "unable to configure tagger proxy recv socket %s: %s",
                 proxy->insockname,strerror(errno));
+        goto proxyexit;
+    }
+
+    if (zmq_bind(proxy_recv, proxy->insockname) < 0) {
+        corsaro_log(glob->logger,
+                "unable to create tagger proxy recv socket %s: %s",
+                proxy->insockname, strerror(errno));
         goto proxyexit;
     }
 
@@ -1029,6 +1039,14 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Set up the subscriber control socket */
+    glob->zmq_control = zmq_socket(glob->zmq_ctxt, ZMQ_REP);
+    if (zmq_bind(glob->zmq_control, glob->control_uri) < 0) {
+        corsaro_log(glob->logger, "error while binding control socket: %s",
+                strerror(errno));
+        return 1;
+    }
+
     /* Start the zeromq proxy threads */
     internalproxy.glob = glob;
     internalproxy.insockname = PACKET_PUB_QUEUE;
@@ -1099,6 +1117,9 @@ int main(int argc, char *argv[]) {
     }
 
     while (glob->currenturi < glob->totaluris && !corsaro_halted) {
+        char controlin[100];
+        uint8_t reply;
+
         sigemptyset(&sig_block_all);
         if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
             corsaro_log(glob->logger, "unable to disable signals before starting threads.");
@@ -1122,8 +1143,22 @@ int main(int argc, char *argv[]) {
 
         /* Wait for the input to finish (or be halted via user signal) */
         while (!trace_halted) {
-            sleep(1);
+            if (zmq_recv(glob->zmq_control, controlin, sizeof(controlin),
+                    ZMQ_DONTWAIT) < 0) {
+                if (errno == EAGAIN) {
+                    usleep(100);
+                    continue;
+                }
+                corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
+                break;
+            }
+            reply = glob->output_hashbins;
+            if (zmq_send(glob->zmq_control, &reply, sizeof(reply), 0) < 0) {
+                corsaro_log(glob->logger, "error while sending control message: %s", strerror(errno));
+                /* carry on, don't die because of a bad client */
+            }
         }
+
         if (!trace_has_finished(glob->trace)) {
             glob->currenturi ++;
             trace_pstop(glob->trace);
