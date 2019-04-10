@@ -34,6 +34,8 @@
 #include <getopt.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/types.h>
 
 #include <zmq.h>
 #include <libtrace.h>
@@ -142,10 +144,22 @@ static void restart_signal(int sig) {
     (void)sig;
     clock_gettime(CLOCK_MONOTONIC, &tv);
 
+    /* If we've just restarted, don't bother doing so again -- make
+     * whoever is triggering the restart to wait at least a second */
     if (tv.tv_sec > corsaro_last_restart) {
         corsaro_restart = 1;
         corsaro_last_restart = tv.tv_sec;
     }
+}
+
+
+static void child_signal(int sig) {
+    int status;
+    (void)sig;
+
+    /* We need to call wait() to be able to properly reap any finished
+     * child processes */
+    wait(&status);
 }
 
 /** Provides usage guidance for this program.
@@ -1095,32 +1109,29 @@ static void *start_merging_thread(void *data) {
 	pthread_exit(NULL);
 }
 
-int main(int argc, char *argv[]) {
+/** Parse command line arguments and read the configuration file for wdcap.
+ *
+ *  Performs any other one-off configuration or initialisation required by
+ *  a corsarowdcap process.
+ *
+ *  @param argc     The number of items in the argv array
+ *  @param argv     An array of strings containing the command line arguments
+ *  @param glob     Global state variable for this corsarowdcap instance. Will
+ *                  be allocated and initialised by this function.
+ *
+ *  @return 0 if successful, 1 if an error occurs
+ */
+static int init_wdcap_process(int argc, char *argv[],
+        corsaro_wdcap_global_t **glob) {
+
     char *configfile = NULL;
     char *logmodestr = NULL;
-	corsaro_wdcap_global_t *glob = NULL;
 	int logmode = GLOBAL_LOGMODE_STDERR;
 	struct sigaction sigact;
-    sigset_t sig_before, sig_block_all;
-	int i, zero=0, mergestarted = 0;
-    int forked = 0;
-	pthread_t mergetid;
-    corsaro_wdcap_message_t haltmsg;
-    FILE *pidf = NULL;
 
-    /* Disable threaded I/O in libwandio, in situations where wandio is
-     * used -- we only do uncompressed output so the threading is just
-     * extra overhead for us */
-    if (setenv("LIBTRACEIO", "nothreads", 1) != 0) {
-        fprintf(stderr, "corsarowdcap: unable to set libwandio environment\n");
-        return -1;
-    }
-
-    corsaro_halted = 0;
-    corsaro_restart = 0;
-
+    optind = 1;
 	while (1) {
-        int optind;
+        int opti = 0;
         struct option long_options[] = {
             { "help", 0, 0, 'h' },
             { "config", 1, 0, 'c'},
@@ -1129,7 +1140,7 @@ int main(int argc, char *argv[]) {
         };
 
         int c = getopt_long(argc, argv, "l:c:h", long_options,
-                &optind);
+                &opti);
         if (c == -1) {
             break;
         }
@@ -1179,6 +1190,12 @@ int main(int argc, char *argv[]) {
     }
 
     /* Set up signal handling */
+    sigact.sa_handler = child_signal;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = SA_RESTART;
+
+    sigaction(SIGCHLD, &sigact, NULL);
+
     sigact.sa_handler = cleanup_signal;
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags = SA_RESTART;
@@ -1195,10 +1212,29 @@ int main(int argc, char *argv[]) {
     signal(SIGPIPE, SIG_IGN);
 
     /* Create initial global state based on configuration file content */
-	glob = corsaro_wdcap_init_global(configfile, logmode);
-	if (glob == NULL) {
+	*glob = corsaro_wdcap_init_global(configfile, logmode);
+	if (*glob == NULL) {
         return 1;
     }
+
+    return 0;
+}
+
+/** Starts a wdcap capture.
+ *
+ *  @param glob         The global state variable for this wdcap process
+ *  @param argc         The number of elements in the argv array
+ *  @param argv         The command line arguments provided to this process
+ *
+ *  @return 0 once the capture has been halted
+ */
+static int run_wdcap(corsaro_wdcap_global_t *glob, int argc, char *argv[]) {
+    sigset_t sig_before, sig_block_all;
+	int i, zero=0, mergestarted = 0;
+    int forked = 0;
+	pthread_t mergetid;
+    corsaro_wdcap_message_t haltmsg;
+    FILE *pidf = NULL;
 
     /* Create and initialise thread local state for the processing threads */
 	glob->threaddata = calloc(glob->threads, sizeof(corsaro_wdcap_local_t));
@@ -1207,6 +1243,9 @@ int main(int argc, char *argv[]) {
         init_wdcap_thread_data(&(glob->threaddata[i]), i, glob);
     }
 
+    /* Write our pid to the pidfile, so that our parent thread is able to
+     * signal us if we ever need to stop.
+     */
     pidf = fopen(glob->pidfile, "w");
     if (!pidf) {
         corsaro_log(glob->logger,
@@ -1304,14 +1343,6 @@ int main(int argc, char *argv[]) {
      * to set the halt flag.
      */
 	while (!corsaro_halted) {
-        if (corsaro_restart && !forked) {
-            if (fork() == 0) {
-                int selfexefd = open("/proc/self/exe", O_RDONLY);
-                fexecve(selfexefd, argv, environ);
-            }
-            forked = 1;
-        }
-
 		usleep(100);
 	}
 
@@ -1356,6 +1387,117 @@ endwdcap:
 		trace_destroy_callback_set(processing);
 	}
 	return 0;
+}
+
+static inline int get_running_pid(corsaro_wdcap_global_t *glob) {
+
+    int runpid;
+    FILE *f;
+
+    f = fopen(glob->pidfile, "r");
+    if (!f) {
+        corsaro_log(glob->logger, "Failed to open file containing running corsarowdcap pid (%s): %s", glob->pidfile, strerror(errno));
+        return 0;
+    }
+    if (fscanf(f, "%d", &runpid) != 1) {
+        corsaro_log(glob->logger, "Failed to read file containing running corsarowdcap pid (%s): %s", glob->pidfile, strerror(errno));
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+    return runpid;
+}
+
+int main(int argc, char *argv[]) {
+    struct sigaction sigact;
+    corsaro_wdcap_global_t *glob = NULL;
+    int runpid = 0;
+    int runerr = 0;
+
+    /* Disable threaded I/O in libwandio, in situations where wandio is
+     * used -- we only do uncompressed output so the threading is just
+     * extra overhead for us */
+    if (setenv("LIBTRACEIO", "nothreads", 1) != 0) {
+        fprintf(stderr, "corsarowdcap: unable to set libwandio environment\n");
+        return -1;
+    }
+
+    corsaro_halted = 0;
+    corsaro_restart = 0;
+
+    if (init_wdcap_process(argc, argv, &glob)) {
+        runerr = 1;
+        goto endwdcap;
+    }
+
+    /* For compatibility with systemd, we need to have a parent process that
+     * exists for the lifetime of the wdcap instance. This parent process
+     * will do nothing other than wait for signals and forward them onto
+     * the running capture process, which will be forked from the parent
+     * process.
+     */
+
+    /* Initial fork -- parent remains the "monitor" process, child becomes
+     * the first "capture" process.
+     */
+    if (fork() == 0) {
+        /* this is the first child -- start capture process */
+        if (run_wdcap(glob, argc, argv) == 0) {
+            return 0;
+        }
+    }
+
+    /* Everything from here on is the parent monitor process */
+    while (!corsaro_halted) {
+
+        if (corsaro_restart) {
+            /* we got a HUP, forward it on to our running child */
+            runpid = get_running_pid(glob);
+            if (runpid == 0) {
+                runerr = 1;
+                break;
+            }
+
+            if (kill(runpid, SIGHUP) < 0) {
+                corsaro_log(glob->logger, "Failed to send HUP to running corsarowdcap pid (%s): %s", glob->pidfile, strerror(errno));
+                runerr = 1;
+                break;
+            }
+            /* the running child will eventually exit on its own */
+
+            /* re-read global config ourselves, just in case the pidfile
+             * location is changed */
+	        corsaro_wdcap_free_global(glob);
+            glob = NULL;
+            if (init_wdcap_process(argc, argv, &glob)) {
+                goto endwdcap;
+            }
+            corsaro_restart = 0;
+
+            if (fork() == 0) {
+                /* this is the new child -- start capture process */
+                if (run_wdcap(glob, argc, argv) == 0) {
+                    return 0;
+                }
+            }
+
+        }
+        usleep(100);
+    }
+
+endwdcap:
+    if (!runerr) {
+        /* we are halting, so send a TERM to the running child */
+        runpid = get_running_pid(glob);
+        if (runpid != 0) {
+            if (kill(runpid, SIGTERM) < 0 && glob && glob->logger) {
+                corsaro_log(glob->logger, "Failed to send TERM to running corsarowdcap pid (%d): %s", runpid, strerror(errno));
+            }
+        }
+    }
+
+	corsaro_wdcap_free_global(glob);
+    return 0;
 }
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
