@@ -61,7 +61,7 @@ static inline uint32_t calc_flow_hash(hash_fields_t *hf) {
 }
 
 corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
-        ipmeta_t *ipmeta) {
+        corsaro_ipmeta_state_t *ipmeta) {
 
     corsaro_packet_tagger_t *tagger = NULL;
 
@@ -78,8 +78,22 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
      * but that's probably not a big deal.
      */
     tagger->logger = logger;
-    tagger->ipmeta = ipmeta;
-    tagger->providers = libtrace_list_init(sizeof(ipmeta_provider_t *));
+    tagger->ipmeta_state = ipmeta;
+
+    if (ipmeta->pfxipmeta) {
+        tagger->providers ++;
+    }
+    if (ipmeta->maxmindipmeta) {
+        tagger->providers ++;
+    }
+    if (ipmeta->netacqipmeta) {
+        tagger->providers ++;
+    }
+
+    pthread_mutex_lock(&(ipmeta->mutex));
+    assert(ipmeta->ending == 0);
+    ipmeta->refcount ++;
+    pthread_mutex_unlock(&(ipmeta->mutex));
     tagger->records = ipmeta_record_set_init();
     return tagger;
 }
@@ -283,89 +297,54 @@ ipmeta_provider_t *corsaro_init_ipmeta_provider(ipmeta_t *ipmeta,
     return prov;
 }
 
-int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
-        ipmeta_provider_t *prov) {
+void corsaro_free_ipmeta_state(corsaro_ipmeta_state_t *state) {
 
-
-    if (tagger == NULL) {
-        return -1;
+    if (state->ipmeta) {
+        ipmeta_free(state->ipmeta);
     }
 
-    if (tagger->ipmeta == NULL) {
-        corsaro_log(tagger->logger,
-                "Cannot enable IPMeta provider: IPMeta instance is NULL.");
-        return -1;
-    }
-
-    /* Provider is not initialised, so just skip it */
-    if (prov == NULL) {
-        return 0;
-    }
-
-    libtrace_list_push_back(tagger->providers, &prov);
-
-    return 0;
+    pthread_mutex_destroy(&(state->mutex));
+    free(state);
 }
 
-int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
-        ipmeta_provider_t *prov) {
+void corsaro_replace_tagger_ipmeta(corsaro_packet_tagger_t *tagger,
+        corsaro_ipmeta_state_t *replace) {
 
-    libtrace_list_node_t *n;
-    ipmeta_provider_t **current = NULL;
-
-    if (tagger == NULL) {
-        return -1;
-    }
-
-    if (tagger->ipmeta == NULL) {
-        corsaro_log(tagger->logger,
-                "Cannot replace IPMeta provider: IPMeta instance is NULL.");
-        return -1;
-    }
-
-    /* Provider is not initialised, so just skip it */
-    if (prov == NULL) {
-        return 0;
-    }
-
-    /* Try to find an existing instance of this provider in our provider
-     * list. */
-    n = tagger->providers->head;
-    while (n) {
-        current = (ipmeta_provider_t **)(n->data);
-
-        n = n->next;
-        if (ipmeta_get_provider_id(*current) == ipmeta_get_provider_id(prov)) {
-            break;
-        }
-        current = NULL;
-    }
-
-    if (current == NULL) {
-        /* This provider type didn't exist before? In that case, just
-         * add it to the list. */
-        libtrace_list_push_back(tagger->providers, &prov);
+    pthread_mutex_lock(&(tagger->ipmeta_state->mutex));
+    tagger->ipmeta_state->refcount --;
+    if (tagger->ipmeta_state->refcount == 0) {
+        tagger->ipmeta_state->ending = 1;
+        pthread_mutex_unlock(&(tagger->ipmeta_state->mutex));
+        corsaro_free_ipmeta_state(tagger->ipmeta_state);
     } else {
-        /* Replace the existing one with our new provider.
-         *
-         * XXX We DO NOT free the old provider instance here, hopefully the
-         * caller still has a reference to it...
-         */
-        n->data = &prov;
+        pthread_mutex_unlock(&(tagger->ipmeta_state->mutex));
     }
-    return 0;
+
+    pthread_mutex_lock(&(replace->mutex));
+    assert(replace->ending == 0);
+    replace->refcount ++;
+    pthread_mutex_unlock(&(replace->mutex));
+
+    tagger->ipmeta_state = replace;
 }
 
 void corsaro_destroy_packet_tagger(corsaro_packet_tagger_t *tagger) {
 
-    libtrace_list_node_t *n = NULL;
     if (tagger) {
-        if (tagger->providers) {
-            libtrace_list_deinit(tagger->providers);
-        }
-
         if (tagger->records) {
             ipmeta_record_set_free(&tagger->records);
+        }
+
+        if (tagger->ipmeta_state) {
+            pthread_mutex_lock(&(tagger->ipmeta_state->mutex));
+            tagger->ipmeta_state->refcount --;
+            if (tagger->ipmeta_state->refcount == 0) {
+                tagger->ipmeta_state->ending = 1;
+                pthread_mutex_unlock(&(tagger->ipmeta_state->mutex));
+                corsaro_free_ipmeta_state(tagger->ipmeta_state);
+            } else {
+                pthread_mutex_unlock(&(tagger->ipmeta_state->mutex));
+            }
         }
         free(tagger);
     }
@@ -531,7 +510,7 @@ static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
 
     update_basic_tags(tagger->logger, tags, ip, &rem);
 
-    if (tagger->providers == NULL) {
+    if (tagger->providers == 0) {
         return 0;
     }
 
@@ -542,7 +521,7 @@ static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
      * dest address too.
      */
     ipmeta_record_set_clear(tagger->records);
-    if (ipmeta_lookup_single(tagger->ipmeta, ip->ip_src.s_addr,
+    if (ipmeta_lookup_single(tagger->ipmeta_state->ipmeta, ip->ip_src.s_addr,
             0, tagger->records) < 0) {
         corsaro_log(tagger->logger, "error while performing ipmeta lookup");
         return -1;

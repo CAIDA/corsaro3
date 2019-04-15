@@ -58,6 +58,7 @@ enum {
 };
 
 #define DEFAULT_CONTROL_SOCKET_URI "ipc:///tmp/corsarotagger-control"
+#define DEFAULT_IPMETA_SOCKET_URI "ipc:///tmp/corsarotagger-ipmeta-reload"
 
 /** Identifiers for each of the supported built-in tags.
  *  Each identifier should be fairly self-explanatory.
@@ -161,17 +162,31 @@ typedef struct corsaro_tagged_packet_header {
     corsaro_packet_tags_t tags;
 } PACKED corsaro_tagged_packet_header_t;
 
+typedef struct corsaro_ipmeta_state {
+    ipmeta_t *ipmeta;
+
+    /** A instance of the Maxmind geolocation provider for libipmeta */
+    ipmeta_provider_t *maxmindipmeta;
+    /** A instance of the Netacq-edge geolocation provider for libipmeta */
+    ipmeta_provider_t *netacqipmeta;
+    /** A instance of the prefix to ASN provider for libipmeta */
+    ipmeta_provider_t *pfxipmeta;
+
+    pthread_mutex_t mutex;
+    uint8_t refcount;
+    uint8_t ending;
+} corsaro_ipmeta_state_t;
+
 /** Structure that maintains state required for tagging packets. */
 typedef struct corsaro_packet_tagger {
 
     /** Reference to the corsaro logging instance */
     corsaro_logger_t *logger;
 
-    /** Reference to an instance of libipmeta */
-    ipmeta_t *ipmeta;
+	corsaro_ipmeta_state_t *ipmeta_state;
 
-    /** List of active libipmeta providers */
-    libtrace_list_t *providers;
+    /** Number of active libipmeta providers */
+    uint8_t providers;
 
     /** A record set that is used to store the results of a libipmeta lookup */
     ipmeta_record_set_t *records;
@@ -243,12 +258,12 @@ typedef struct netacq_options {
  *
  *  @param logger       A corsaro logging instance that the tagger can write
  *                      any log messages to.
- *  @param ipmeta       An initialised libipmeta instance.
+ *  @param ipmeta       An initialised libipmeta state instance.
  *  @return a pointer to a newly initialised packet tagger, or NULL if an
  *          error occurred.
  */
 corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
-        ipmeta_t *ipmeta);
+        corsaro_ipmeta_state_t *ipmeta);
 
 /** Initialises and configures a libipmeta data provider for use with the
  *  corsaro tagger.
@@ -266,36 +281,10 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
 ipmeta_provider_t *corsaro_init_ipmeta_provider(ipmeta_t *ipmeta,
         ipmeta_provider_id_t provid, void *options, corsaro_logger_t *logger);
 
-/** Update a corsaro tagger to use the given libipmeta provider to tag
- *  packets.
- *
- *  @param tagger       The corsaro tagger that will be using the provider.
- *  @param prov         The libipmeta provider to enable on the tagger.
- *  @return 0 if the provider is enabled successfully, -1 if an error occurs.
- *
- *  @note if prov is NULL, it will be silently ignored.
- */
-int corsaro_enable_ipmeta_provider(corsaro_packet_tagger_t *tagger,
-        ipmeta_provider_t *prov);
+void corsaro_free_ipmeta_state(corsaro_ipmeta_state_t *state);
 
-/** Replace a libipmeta provider that is currently being used by a corsaro
- *  tagger with a new one.
- *
- *  This function is intended to help with situations where the underlying
- *  source data file has changed and we need to update the tagger to start
- *  using the new version of the data.
- *
- *  @param tagger       The corsaro tagger that needs to be updated.
- *  @param prov         The replacement libipmeta provider.
- *  @return 0 if successful, -1 if an error occurred.
- *
- *  @note an existing provider is only replaced if it has the same provider
- *  identifier as the one that is in 'prov'. If no existing providers match
- *  the given replacement, the replacement will be appended to the provider
- *  list.
- */
-int corsaro_replace_ipmeta_provider(corsaro_packet_tagger_t *tagger,
-        ipmeta_provider_t *prov);
+void corsaro_replace_tagger_ipmeta(corsaro_packet_tagger_t *tagger,
+        corsaro_ipmeta_state_t *replace);
 
 /** Destroys a corsaro packet tagger instance, freeing any allocated memory.
  *

@@ -507,14 +507,12 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     memset(&(glob->maxtagopts), 0, sizeof(maxmind_opts_t));
     memset(&(glob->netacqtagopts), 0, sizeof(netacq_opts_t));
 
-    glob->ipmeta = NULL;
-    glob->maxmindipmeta = NULL;
-    glob->netacqipmeta = NULL;
-    glob->pfxipmeta = NULL;
-
     glob->zmq_ctxt = zmq_ctx_new();
     glob->zmq_control = NULL;
+    glob->zmq_ipmeta = NULL;
     glob->control_uri = NULL;
+    glob->ipmeta_queue_uri = NULL;
+    glob->ipmeta_state = NULL;
 
     /* Create global logger */
     if (glob->logmode == GLOBAL_LOGMODE_STDERR) {
@@ -555,6 +553,10 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
 
     if (glob->control_uri == NULL) {
         glob->control_uri = strdup(DEFAULT_CONTROL_SOCKET_URI);
+    }
+
+    if (glob->ipmeta_queue_uri == NULL) {
+        glob->ipmeta_queue_uri = strdup(DEFAULT_IPMETA_SOCKET_URI);
     }
 
     log_configuration(glob);
@@ -661,16 +663,24 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
         libtrace_list_deinit(glob->netacqtagopts.polygon_table_files);
     }
 
-    if (glob->ipmeta) {
-        ipmeta_free(glob->ipmeta);
+    if (glob->ipmeta_state) {
+        corsaro_free_ipmeta_state(glob->ipmeta_state);
     }
 
     if (glob->zmq_control) {
         zmq_close(glob->zmq_control);
     }
 
+    if (glob->zmq_ipmeta) {
+        zmq_close(glob->zmq_ipmeta);
+    }
+
     if (glob->control_uri) {
         free(glob->control_uri);
+    }
+
+    if (glob->ipmeta_queue_uri) {
+        free(glob->ipmeta_queue_uri);
     }
 
     if (glob->zmq_ctxt) {

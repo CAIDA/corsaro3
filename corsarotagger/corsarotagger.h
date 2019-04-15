@@ -101,17 +101,7 @@ typedef struct corsaro_tagger_glob {
      *  module */
     netacq_opts_t netacqtagopts;
 
-    /** A libipmeta instance that can be used to add geolocation and ASN
-     *  tags for an IP address
-     */
-    ipmeta_t *ipmeta;
-
-    /** A instance of the Maxmind geolocation provider for libipmeta */
-    ipmeta_provider_t *maxmindipmeta;
-    /** A instance of the Netacq-edge geolocation provider for libipmeta */
-    ipmeta_provider_t *netacqipmeta;
-    /** A instance of the prefix to ASN provider for libipmeta */
-    ipmeta_provider_t *pfxipmeta;
+    corsaro_ipmeta_state_t *ipmeta_state;
 
     /** A libtrace hasher function that can be used to distribute received
      *  packets to processing threads.
@@ -132,17 +122,27 @@ typedef struct corsaro_tagger_glob {
     /** URI to use when creating the zeromq control socket */
     char *control_uri;
 
-    /** A zmq socket for managing new subscribers */
+    /** A zeromq socket for managing new subscribers */
     void *zmq_control;
 
-    /* Number of unique labels to use when streaming tagged packets */
+    /** Number of unique labels to use when streaming tagged packets */
     uint8_t output_hashbins;
+
+    /** ID of the IP meta reloading thread */
+    pthread_t ipmeta_reloader;
+
+    /** URI to use when creating the IP meta reloading socket */
+    char *ipmeta_queue_uri;
+
+    /** A zeromq socket for communicating with the IP meta reloading thread */
+    void *zmq_ipmeta;
 
     /** An array of thread-local state data, one entry for each processing
      *  thread.
      */
     corsaro_tagger_local_t *threaddata;
     corsaro_packet_local_t *packetdata;
+
 } corsaro_tagger_global_t;
 
 typedef struct corsaro_tagger_buffer {
@@ -159,6 +159,19 @@ typedef struct corsaro_tagger_packet {
     corsaro_tagged_packet_header_t hdr;     /* Always have this LAST! */
 } PACKED corsaro_tagger_packet_t;
 
+enum {
+    CORSARO_TAGGER_MSG_TOTAG,
+    CORSARO_TAGGER_MSG_IPMETA
+};
+
+typedef struct corsaro_tagger_internal_msg {
+    uint8_t type;
+    union {
+        corsaro_tagger_buffer_t *buf;
+        corsaro_ipmeta_state_t *replace;
+    } content;
+} PACKED corsaro_tagger_internal_msg_t;
+
 /** Structure for storing thread-local state for a single processing thread */
 struct corsaro_tagger_local {
 
@@ -170,6 +183,8 @@ struct corsaro_tagger_local {
 
     /** A corsaro tagger instance */
     corsaro_packet_tagger_t *tagger;
+
+    void *controlsock;
 
     /** A zeromq socket to publish tagged packets onto */
     void *pubsock;
