@@ -44,225 +44,107 @@
 #include "libcorsaro_memhandler.h"
 #include "pqueue.h"
 
+/* Some notes of the structure of the corsarotagger...
+ *
+ * The tagger's role is relatively simple: read packets from a packet
+ * source (probably an ndag multicaster socket) and attach to each packet
+ * a set of "tags" that are useful for filtering or analytic purposes.
+ *
+ * This seems simple, but is actually a lot more complex in practice.
+ *
+ * There are quite a few different classes of threads that run concurrently
+ * to make this all work optimally:
+ *   - packet processing threads        ( see packet_thread.c )
+ *   - tagger worker threads            ( see tagger_thread.c )
+ *   - the internal proxy thread        ( see proxy_threads.c )
+ *   - the external proxy thread        ( see proxy_threads.c )
+ *   - the IPmeta reloading thread
+ *   - the main thread
+ *
+ * Packet processing threads are typical parallel-libtrace style threads.
+ * These receive packets from the input source, attach a blank set of tags
+ * to each packet, buffer them together (to save on writes), then push
+ * them on towards the tagger worker threads. The reason that we do not
+ * do the tagging in these threads is because we want to minimise the amount
+ * of time spent holding on to a packet -- the sooner our "per_packet"
+ * function finishes, the less likely we are to drop packets during high load.
+ *
+ * Tagger worker threads do the actual tagging of each packet. This includes
+ * both the "basic" tagging (i.e. port numbers, protocols) as well as
+ * computing the flowtuple hash. Packets are also assigned to a hash bin
+ * (represented by a single character) that allows clients to subscribe to
+ * different portions of our output using different threads to parallelise
+ * their own workload easily. The hash bin is based on the flowtuple hash to
+ * ensure all packets for the same flow end up in the same hash bin.
+ *
+ * Advanced tagging can also occur via the libipmeta library, provided
+ * suitable source data files are available. These can be used for
+ * geo-location and prefix-to-ASN mapping of the packet's source IP address.
+ *
+ * The internal proxy thread is used to move packets between the packet
+ * processing and tagger worker threads. This is required to make the
+ * multiple-publisher, multiple-consumer model that we are using work
+ * smoothly. Since the tagging process itself is relatively state-less on
+ * a per-packet basis, it doesn't matter which worker thread each packet is
+ * assigned to.
+ *
+ * The external proxy thread is used to publish the tagged packets produced
+ * by the worker threads onto a single queue for consumption by any number
+ * of interested subscribers.
+ *
+ * The IPmeta reloading thread has a single purpose: wait for a message
+ * from the main thread telling it that a SIGHUP has been observed and once
+ * received, reload the libipmeta source files and push the new IPmeta data
+ * to each of the tagging threads.
+ *
+ * The main thread listens for signals (like the aforementioned SIGHUP) and
+ * acts upon them (i.e. trigger a reload or begin a clean halt of the tagger).
+ * It also waits for query messages from clients to which it will reply with
+ * any useful configuration that the client may want to know (such as the
+ * number of hash bins being used by the tagger threads).
+ */
+
+
 /** Older versions of libzmq use a different name for this option */
 #ifndef ZMQ_IMMEDIATE
 #define ZMQ_IMMEDIATE ZMQ_DELAY_ATTACH_ON_CONNECT
 #endif
 
-/** Name of the zeromq socket that tagged packets will be written to.
- *  This is an internal socket, read by a proxy thread which will act
- *  as a broker between the tagger and its clients. */
-#define TAGGER_PUB_QUEUE "inproc://taggerproxypub"
-#define PACKET_PUB_QUEUE "inproc://taggerinternalpub"
-#define TAGGER_SUB_QUEUE "inproc://taggerinternalsub"
-
-#define TAGGER_BUFFER_SIZE (1 * 1024 * 1024)
-
-#define ASSIGN_HASH_BIN(hash_val, hash_bins, result) { \
-    int hmod; \
-    hmod = hash_val % hash_bins; \
-    if (hmod < 26) {result = 'A' + hmod;} \
-    else {result = 'a' + (hmod - 26); } \
-}
-
-
-typedef struct tagger_proxy_data {
-    char *insockname;
-    char *outsockname;
-    int recvtype;
-    int pushtype;
-
-    corsaro_tagger_global_t *glob;
-} corsaro_tagger_proxy_data_t;
-
 libtrace_callback_set_t *processing = NULL;
 
+/** Global flag that indicates if the tagger has received a halting
+ *  signal, i.e. SIGTERM or SIGINT */
 volatile int corsaro_halted = 0;
+
+/** Global flag that indicates whether the tagger should stop reading
+ *  packets from the input source */
 volatile int trace_halted = 0;
 
+/** Global flag that indicates whether the tagger should attempt to reload
+ *  the IP meta data files as soon as it can */
+volatile int ipmeta_reload = 0;
+
+
+/** Signal handler for SIGINT and SIGTERM */
 static void cleanup_signal(int sig) {
     (void)sig;
     corsaro_halted = 1;
     trace_halted = 1;
 }
 
+/** Signal handler for SIGHUP */
+static void reload_signal(int sig) {
+    (void)sig;
+    ipmeta_reload = 1;
+}
+
 #define ENQUEUE_BUFFER(tls) \
     if (tls->buf) { \
-        zmq_send(tls->pubsock, &(tls->buf), sizeof(corsaro_tagger_buffer_t *), 0); \
+        corsaro_tagger_internal_msg_t msg; \
+        msg.type = CORSARO_TAGGER_MSG_TOTAG; \
+        msg.content.buf = tls->buf; \
+        zmq_send(tls->pubsock, &msg, sizeof(msg), 0); \
     }
-
-static size_t pkt_get_pos(void *a) {
-    corsaro_tagger_packet_t *pkt = (corsaro_tagger_packet_t *)a;
-    return pkt->pqueue_pos;
-}
-
-static void pkt_set_pos(void *a, size_t pos) {
-    corsaro_tagger_packet_t *pkt = (corsaro_tagger_packet_t *)a;
-    pkt->pqueue_pos = pos;
-}
-
-static int pkt_cmp_pri(void *next, void *curr) {
-    corsaro_tagger_packet_t *nextpkt = (corsaro_tagger_packet_t *)next;
-    corsaro_tagger_packet_t *currpkt = (corsaro_tagger_packet_t *)curr;
-
-    if (nextpkt->hdr.ts_sec > currpkt->hdr.ts_sec) {
-        return 1;
-    }
-
-    if (nextpkt->hdr.ts_sec < currpkt->hdr.ts_sec) {
-        return 0;
-    }
-
-    if (nextpkt->hdr.ts_usec < currpkt->hdr.ts_usec) {
-        return 0;
-    }
-
-    return 1;
-}
-
-
-static inline corsaro_tagger_buffer_t *create_tls_buffer() {
-
-    corsaro_tagger_buffer_t *buf;
-
-    buf = calloc(1, sizeof(corsaro_tagger_buffer_t));
-    buf->space = malloc(TAGGER_BUFFER_SIZE * sizeof(uint8_t));
-    buf->used = 0;
-    buf->size = TAGGER_BUFFER_SIZE;
-
-    return buf;
-}
-
-static inline void free_tls_buffer(corsaro_tagger_buffer_t *buf) {
-    free(buf->space);
-    free(buf);
-}
-
-static void freebuf(void *data, void *hint) {
-    free(data);
-}
-
-static inline void init_packet_thread_data(corsaro_packet_local_t *tls,
-        int threadid, corsaro_tagger_global_t *glob) {
-
-    int hwm = 0;
-    int one = 1;
-    tls->stopped = 0;
-    tls->lastmisscount = 0;
-    tls->lastaccepted = 0;
-    tls->tickcounter = 0;
-
-    tls->buf = create_tls_buffer();
-
-    /* create zmq socket for publishing */
-    tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
-    if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting HWM for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    /* Don't queue messages for incomplete connections */
-    if (zmq_setsockopt(tls->pubsock, ZMQ_IMMEDIATE, &one, sizeof(one)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting immediate for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    if (zmq_connect(tls->pubsock, PACKET_PUB_QUEUE) != 0) {
-        corsaro_log(glob->logger,
-                "error while connecting zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-}
-
-/** Initialises the local data for each processing thread.
- *
- *  @param tls          The thread-local data to be initialised
- *  @param threadid     A numeric identifier for the thread that this data
- *                      is going to be attached to
- *  @param glob         The global data for this corsarotagger instance.
- *
- */
-static inline void init_tagger_thread_data(corsaro_tagger_local_t *tls,
-        int threadid, corsaro_tagger_global_t *glob) {
-    int hwm = 0;
-    int one = 1;
-    char pubname[1024];
-
-    tls->ptid = 0;
-    tls->glob = glob;
-    tls->stopped = 0;
-    tls->tagger = corsaro_create_packet_tagger(glob->logger, glob->ipmeta);
-    tls->errorcount = 0;
-    tls->threadid = threadid;
-
-    if (tls->tagger == NULL) {
-        corsaro_log(glob->logger,
-                "out of memory while creating packet tagger.");
-        tls->stopped = 1;
-        return;
-    }
-
-    /* Enable the libipmeta providers */
-    if (corsaro_enable_ipmeta_provider(tls->tagger, glob->pfxipmeta) < 0) {
-        corsaro_log(glob->logger,
-                "error while enabling prefix->asn tagging in thread %d",
-                threadid);
-        tls->stopped = 1;
-    }
-
-    if (corsaro_enable_ipmeta_provider(tls->tagger, glob->netacqipmeta) < 0) {
-        corsaro_log(glob->logger,
-                "error while enabling Netacq-Edge geo-location tagging in thread %d",
-                threadid);
-        tls->stopped = 1;
-    }
-
-    if (corsaro_enable_ipmeta_provider(tls->tagger, glob->maxmindipmeta) < 0) {
-        corsaro_log(glob->logger,
-                "error while enabling Maxmind geo-location tagging in thread %d",
-                threadid);
-        tls->stopped = 1;
-    }
-
-    /* create zmq socket for publishing */
-    tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
-    if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting HWM for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    /* Don't queue messages for incomplete connections */
-    if (zmq_setsockopt(tls->pubsock, ZMQ_IMMEDIATE, &one, sizeof(one)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting immediate for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    snprintf(pubname, 1024, "%s-%d", TAGGER_PUB_QUEUE, threadid);
-    if (zmq_bind(tls->pubsock, pubname) != 0) {
-        corsaro_log(glob->logger,
-                "error while connecting zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    tls->pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-    if (zmq_connect(tls->pullsock, TAGGER_SUB_QUEUE) != 0) {
-        corsaro_log(glob->logger,
-                "error while binding zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-}
 
 /** Initialisation callback for a libtrace processing thread
  *
@@ -287,7 +169,13 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
 }
 
 
-
+/** Destructor callback for a libtrace processing thread
+ *
+ *  @param trace        The libtrace input that this thread belongs to (unused)
+ *  @param t            The libtrace processing thread
+ *  @param global       The global state for this corsarotagger instance
+ *  @param local        The thread-local state for this thread.
+ */
 static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local) {
 
@@ -298,108 +186,6 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         ENQUEUE_BUFFER(tls);
     }
     zmq_send(tls->pubsock, NULL, 0, 0);
-}
-
-/** Destroys the thread local state for a libtrace processing thread.
- *
- *  @param glob         The global state for this corsarotagger instance
- *  @param tls          The thread-local state to be destroyed
- *  @param threadid     The identifier for the thread that owned this state
- */
-static void destroy_local_tagger_state(corsaro_tagger_global_t *glob,
-        corsaro_tagger_local_t *tls, int threadid) {
-    int linger = 1000;
-
-    if (tls->tagger) {
-        corsaro_destroy_packet_tagger(tls->tagger);
-    }
-
-    if (tls->pubsock) {
-        zmq_setsockopt(tls->pubsock, ZMQ_LINGER, &linger, sizeof(linger));
-    }
-    zmq_close(tls->pubsock);
-
-    if (tls->pullsock) {
-        zmq_setsockopt(tls->pullsock, ZMQ_LINGER, &linger, sizeof(linger));
-    }
-    zmq_close(tls->pullsock);
-
-}
-
-static void destroy_local_packet_state(corsaro_tagger_global_t *glob,
-        corsaro_packet_local_t *tls, int threadid) {
-    int linger = 1000;
-
-    if (tls->pubsock) {
-        zmq_setsockopt(tls->pubsock, ZMQ_LINGER, &linger, sizeof(linger));
-    }
-    zmq_close(tls->pubsock);
-    
-    if (tls->buf) {
-        free_tls_buffer(tls->buf);
-    }
-
-}
-
-/** Create a tagged packet message and publishes it to the tagger proxy
- *  queue.
- *
- *  @param glob         The global state for this corsarotagger instance.
- *  @param tls          The thread-local state for this processing thread.
- *  @param tags         The tags assigned to the packet.
- *  @param packet       The packet to be published.
- */
-static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
-        corsaro_packet_local_t *tls, libtrace_packet_t *packet) {
-
-    struct timeval tv;
-    void *pktcontents;
-    uint32_t rem;
-    libtrace_linktype_t linktype;
-    corsaro_tagger_packet_t *tpkt;
-    size_t bufsize;
-
-    pktcontents = trace_get_layer2(packet, &linktype, &rem);
-    if (rem == 0 || pktcontents == NULL) {
-        return 0;
-    }
-
-    if (linktype != TRACE_TYPE_ETH) {
-        return 0;
-    }
-    tv = trace_get_timeval(packet);
-
-    bufsize = sizeof(corsaro_tagger_packet_t) + rem;
-
-    assert(tls->buf->used <= tls->buf->size);
-    if (tls->buf->size - tls->buf->used < bufsize) {
-        ENQUEUE_BUFFER(tls);
-        tls->buf = create_tls_buffer();
-        if (tls->buf == NULL) {
-            corsaro_log(glob->logger, "OOM while tagging packets");
-            return -1;
-        }
-    }
-
-    tpkt = (corsaro_tagger_packet_t *)
-            (tls->buf->space + tls->buf->used);
-
-    tpkt->taggedby = 255;
-    tpkt->pqueue_pos = 0;
-    tpkt->hdr.filterbits = 0;
-    tpkt->hdr.ts_sec = tv.tv_sec;
-    tpkt->hdr.ts_usec = tv.tv_usec;
-    tpkt->hdr.pktlen = rem;
-    memset(&(tpkt->hdr.tags), 0, sizeof(corsaro_packet_tags_t));
-
-    tls->buf->used += sizeof(corsaro_tagger_packet_t);
-    /* Put the packet itself in the buffer (minus the capture and
-     * meta-data headers -- we don't need them).
-     */
-    memcpy(tls->buf->space + tls->buf->used, pktcontents, rem);
-    tls->buf->used += rem;
-
-    return 0;
 }
 
 /** Per-packet processing callback for a libtrace processing thread.
@@ -483,396 +269,6 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     }
 }
 
-static void *start_tagger_thread(void *data) {
-    corsaro_tagger_local_t *tls = (corsaro_tagger_local_t *)data;
-    int r;
-    uint32_t processed;
-    int onesec = 1000;
-    uint8_t recvbuf[TAGGER_BUFFER_SIZE];
-
-    if (zmq_setsockopt(tls->pullsock, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
-        corsaro_log(tls->glob->logger,
-                "unable to configure tagger thread pull socket: %s",
-                strerror(errno));
-        pthread_exit(NULL);
-    }
-
-    memset(recvbuf, 0, TAGGER_BUFFER_SIZE);
-
-    while (!corsaro_halted) {
-        corsaro_tagger_buffer_t **recvd = NULL;
-
-        assert(tls->buf == NULL);
-        r = zmq_recv(tls->pullsock, recvbuf, TAGGER_BUFFER_SIZE, 0);
-        if (r < 0) {
-            if (errno == EAGAIN) {
-                continue;
-            }
-            break;
-        }
-
-        if (r == 0) {
-            break;
-        }
-
-        assert(r == sizeof(corsaro_tagger_buffer_t *));
-        recvd = (corsaro_tagger_buffer_t **)recvbuf;
-
-        processed = 0;
-
-        while (processed < (*recvd)->used) {
-            corsaro_tagger_packet_t *packet;
-            libtrace_ip_t *ip;
-            void *l2, *next;
-            uint32_t rem;
-            uint16_t ethertype;
-
-            packet = (corsaro_tagger_packet_t *)((*recvd)->space +
-                    processed);
-
-            if ((*recvd)->used - processed <
-                    sizeof(corsaro_tagger_packet_t)) {
-                corsaro_log(tls->glob->logger,
-                        "error: not enough buffer content for a complete header...");
-                exit(2);
-            }
-
-            processed += sizeof(corsaro_tagger_packet_t);
-            if ((*recvd)->used - processed < packet->hdr.pktlen) {
-                corsaro_log(tls->glob->logger,
-                        "error: missing packet contents in tagger thread...");
-                exit(2);
-            }
-
-            l2 = (*recvd)->space + processed;
-            rem = packet->hdr.pktlen;
-
-            next = trace_get_payload_from_layer2(l2, TRACE_TYPE_ETH,
-                    &ethertype, &rem);
-            while (next != NULL && rem > 0) {
-                switch(ethertype) {
-                    case TRACE_ETHERTYPE_8021Q:
-                        next = trace_get_payload_from_vlan(next, &ethertype, &rem);
-                        continue;
-                    case TRACE_ETHERTYPE_MPLS:
-                        next = trace_get_payload_from_mpls(next, &ethertype, &rem);
-                        continue;
-                    case TRACE_ETHERTYPE_PPP_SES:
-                        next = trace_get_payload_from_pppoe(next, &ethertype, &rem);
-                        continue;
-                    default:
-                        break;
-                }
-                break;
-            }
-
-            if (rem == 0) {
-                next = NULL;
-            }
-
-            ip = (libtrace_ip_t *)next;
-            if (corsaro_tag_ippayload(tls->tagger, &(packet->hdr.tags),
-                    ip, rem) < 0) {
-                corsaro_log(tls->glob->logger,
-                        "error while tagging IP payload in tagger thread.");
-                tls->errorcount ++;
-            }
-            ASSIGN_HASH_BIN(packet->hdr.tags.ft_hash,
-                    tls->glob->output_hashbins, packet->hdr.hashbin);
-            packet->hdr.filterbits = htons(packet->hdr.tags.highlevelfilterbits);
-            packet->taggedby = tls->threadid;
-            processed += packet->hdr.pktlen;
-
-            zmq_send(tls->pubsock, packet, sizeof(corsaro_tagger_packet_t)
-                    + packet->hdr.pktlen, 0);
-        }
-        free_tls_buffer(*recvd);
-
-        if (corsaro_halted) {
-            break;
-        }
-    }
-
-    pthread_exit(NULL);
-}
-
-static inline void run_simple_proxy(void *proxy_recv, void *proxy_fwd) {
-    int tosend = 0;
-    uint8_t recvbuf[TAGGER_BUFFER_SIZE];
-
-    while (!corsaro_halted) {
-        int r;
-
-        if (tosend == 0) {
-            /* Try read a tagged packet buffer from one of our packet threads */
-            if ((r = zmq_recv(proxy_recv, recvbuf, TAGGER_BUFFER_SIZE, 0)) < 0)             {
-                if (errno == EAGAIN) {
-                    /* Nothing available for now, check if we need to halt
-                     * then try again.
-                     */
-                    continue;
-                }
-                break;
-            }
-
-            tosend = r;
-            if (corsaro_halted) {
-                break;
-            }
-            assert(r == sizeof(corsaro_tagger_buffer_t *));
-        }
-
-        /* Got something, publish it to our workers */
-        r = zmq_send(proxy_fwd, recvbuf, tosend, ZMQ_DONTWAIT);
-
-        if (r < 0) {
-            if (errno == EAGAIN) {
-                continue;
-            }
-            break;
-        }
-        tosend = 0;
-    }
-}
-
-static void *start_zmq_output_thread(void *data) {
-    corsaro_tagger_proxy_data_t *proxy = (corsaro_tagger_proxy_data_t *)data;
-    corsaro_tagger_global_t *glob = proxy->glob;
-    corsaro_tagger_packet_t *packet;
-
-    pqueue_t *pq;
-    int i, r, zero = 0;
-    int onesec = 1000;
-
-    void **proxy_recv = calloc(glob->tag_threads, sizeof(void *));
-    void *proxy_fwd = zmq_socket(glob->zmq_ctxt, proxy->pushtype);
-
-    uint8_t **recvbufs = calloc(glob->tag_threads, sizeof(uint8_t *));
-    uint32_t *recvbufsizes = calloc(glob->tag_threads, sizeof(uint32_t));
-
-    pq = pqueue_init(glob->tag_threads, pkt_cmp_pri, pkt_get_pos, pkt_set_pos);
-
-    if (zmq_setsockopt(proxy_fwd, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
-        corsaro_log(glob->logger,
-                "unable to configure tagger output forwarding socket %s: %s",
-                proxy->outsockname, strerror(errno));
-        goto proxyexit;
-    }
-
-    /* Allow the forwarding socket to buffer as many messages as it
-     * wants -- NOTE: this means you will run out of memory if you
-     * have a slow client!
-     */
-    if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &zero, sizeof(zero)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting HWM for output forwarding socket %s: %s",
-                proxy->outsockname, strerror(errno));
-        goto proxyexit;
-    }
-
-    if (zmq_bind(proxy_fwd, proxy->outsockname) < 0) {
-        corsaro_log(glob->logger,
-                "unable to create tagger output forwarding socket %s: %s",
-                proxy->outsockname, strerror(errno));
-        goto proxyexit;
-    }
-
-    for (i = 0; i < glob->tag_threads; i++) {
-        char sockname[1024];
-
-        snprintf(sockname, 1024, "%s-%d", proxy->insockname, i);
-
-        recvbufs[i] = malloc(TAGGER_BUFFER_SIZE);
-
-        proxy_recv[i] = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-        if (zmq_setsockopt(proxy_recv[i], ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to configure tagger output recv socket: %s",
-                    strerror(errno));
-            goto proxyexit;
-        }
-
-        /* Only block for a max of one second when reading published packets */
-        if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to configure tagger output recv socket %s: %s",
-                    sockname,strerror(errno));
-            goto proxyexit;
-        }
-
-        if (zmq_connect(proxy_recv[i], sockname) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to create tagger output recv socket %s: %s",
-                    sockname, strerror(errno));
-            goto proxyexit;
-        }
-
-        /* Read the first packet produced by each tagger thread */
-        while (1) {
-            r = zmq_recv(proxy_recv[i], recvbufs[i], TAGGER_BUFFER_SIZE, 0);
-            if (r < 0) {
-                if (errno == EAGAIN) {
-                    continue;
-                }
-                corsaro_log(glob->logger,
-                        "error while reading first packet from tagger thread %d: %s",
-                        i, strerror(errno));
-                goto proxyexit;
-            }
-
-            if (r < sizeof(corsaro_tagger_packet_t)) {
-                corsaro_log(glob->logger,
-                        "first packet from tagger thread %d is too small?", i);
-                goto proxyexit;
-            }
-            break;
-        }
-        packet = (corsaro_tagger_packet_t *)recvbufs[i];
-        recvbufsizes[i] = r;
-        pqueue_insert(pq, recvbufs[i]);
-    }
-
-    while (!corsaro_halted) {
-        uint8_t *nextpkt;
-        uint8_t workind = 0;
-
-        nextpkt = (uint8_t *)(pqueue_pop(pq));
-        if (nextpkt == NULL) {
-            usleep(10);
-            continue;
-        }
-        packet = (corsaro_tagger_packet_t *)nextpkt;
-        workind = packet->taggedby;
-
-        zmq_send(proxy_fwd, &(packet->hdr),
-                sizeof(packet->hdr) + packet->hdr.pktlen, 0);
-
-        while (!corsaro_halted) {
-            r = zmq_recv(proxy_recv[workind], recvbufs[workind],
-                    TAGGER_BUFFER_SIZE, ZMQ_DONTWAIT);
-
-            if (r < 0) {
-                if (errno == EAGAIN) {
-                    continue;
-                }
-                corsaro_log(glob->logger,
-                        "error while reading subsequent packet from tagger thread %d: %s",
-                        workind, strerror(errno));
-                goto proxyexit;
-            }
-
-            if (r < sizeof(corsaro_tagger_packet_t)) {
-                corsaro_log(glob->logger,
-                        "first packet from tagger thread %d is too small?",
-                        workind);
-                goto proxyexit;
-            }
-            break;
-        }
-
-        recvbufsizes[workind] = r;
-        pqueue_insert(pq, recvbufs[workind]);
-    }
-
-proxyexit:
-    pqueue_free(pq);
-    for (i = 0; i < glob->tag_threads; i++) {
-        if (proxy_recv[i]) {
-            zmq_close(proxy_recv[i]);
-        }
-        free(recvbufs[i]);
-    }
-    free(proxy_recv);
-    free(recvbufs);
-    free(recvbufsizes);
-    zmq_close(proxy_fwd);
-    pthread_exit(NULL);
-}
-
-/** Starts the thread which manages the proxy that bridges our zeromq
- *  publishing sockets to the clients that are subscribing to them.
- *
- *  The reason for the proxy is to support our multiple-publisher,
- *  multiple-subscriber architecture without either side having to
- *  know how many sockets exist on the other side of the proxy.
- *
- *  @param data         The global state for this corsarotagger instance.
- *  @return NULL when the proxy thread has halted.
- */
-static void *start_zmq_proxy_thread(void *data) {
-    corsaro_tagger_proxy_data_t *proxy = (corsaro_tagger_proxy_data_t *)data;
-    corsaro_tagger_global_t *glob = proxy->glob;
-
-    void *proxy_recv = zmq_socket(glob->zmq_ctxt, proxy->recvtype);
-    void *proxy_fwd = zmq_socket(glob->zmq_ctxt, proxy->pushtype);
-    int zero = 0;
-    int onesec = 1000;
-
-    if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
-        corsaro_log(glob->logger,
-                "unable to configure tagger proxy recv socket: %s",
-                strerror(errno));
-        goto proxyexit;
-    }
-
-    /* Only block for a max of one second when reading published packets */
-    if (zmq_setsockopt(proxy_recv, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
-        corsaro_log(glob->logger,
-                "unable to configure tagger proxy recv socket %s: %s",
-                proxy->insockname,strerror(errno));
-        goto proxyexit;
-    }
-
-    if (zmq_bind(proxy_recv, proxy->insockname) < 0) {
-        corsaro_log(glob->logger,
-                "unable to create tagger proxy recv socket %s: %s",
-                proxy->insockname, strerror(errno));
-        goto proxyexit;
-    }
-
-    if (proxy->recvtype == ZMQ_SUB) {
-        /* Subscribe to ALL streams */
-        if (zmq_setsockopt(proxy_recv, ZMQ_SUBSCRIBE, "", 0) < 0) {
-            corsaro_log(glob->logger,
-                    "unable to configure tagger proxy recv socket %s: %s",
-                    proxy->insockname, strerror(errno));
-            goto proxyexit;
-        }
-    }
-
-    if (zmq_setsockopt(proxy_fwd, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
-        corsaro_log(glob->logger,
-                "unable to configure tagger proxy forwarding socket %s: %s",
-                proxy->outsockname, strerror(errno));
-        goto proxyexit;
-    }
-
-    /* Allow the forwarding socket to buffer as many messages as it
-     * wants -- NOTE: this means you will run out of memory if you
-     * have a slow client!
-     */
-    if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &zero, sizeof(zero)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting HWM for proxy forwarding socket %s: %s",
-                proxy->outsockname, strerror(errno));
-        goto proxyexit;
-    }
-
-    if (zmq_bind(proxy_fwd, proxy->outsockname) < 0) {
-        corsaro_log(glob->logger,
-                "unable to create tagger proxy forwarding socket %s: %s",
-                proxy->outsockname, strerror(errno));
-        goto proxyexit;
-    }
-
-    run_simple_proxy(proxy_recv, proxy_fwd);
-
-proxyexit:
-    zmq_close(proxy_recv);
-    zmq_close(proxy_fwd);
-    pthread_exit(NULL);
-}
-
 /** Creates and starts a libtrace input.
  *
  *  @param glob     The global state for this corsarotagger instance.
@@ -947,19 +343,270 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
     return 0;
 }
 
+/** Creates and populates an IPMeta data structure, based on the contents
+ *  of the files listed in the configuration file.
+ *
+ *  @param glob             Global state for this corsarotagger instance
+ *  @param ipmeta_state     A newly allocated IP meta state variable to be
+ *                          populated by this function.
+ */
+static void load_ipmeta_data(corsaro_tagger_global_t *glob,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    ipmeta_provider_t *prov;
+
+    ipmeta_state->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
+    if (glob->pfxtagopts.enabled) {
+        /* Prefix to ASN mapping */
+        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
+                IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts),
+                glob->logger);
+        if (prov == NULL) {
+            corsaro_log(glob->logger, "error while enabling pfx2asn tagging.");
+        } else {
+            ipmeta_state->pfxipmeta = prov;
+        }
+    }
+
+    if (glob->maxtagopts.enabled) {
+        /* Maxmind geolocation */
+        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
+                IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts),
+                glob->logger);
+        if (prov == NULL) {
+            corsaro_log(glob->logger,
+                    "error while enabling Maxmind geo-location tagging.");
+        } else {
+            ipmeta_state->maxmindipmeta = prov;
+        }
+    }
+    if (glob->netacqtagopts.enabled) {
+        /* Netacq Edge geolocation */
+        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
+                IPMETA_PROVIDER_NETACQ_EDGE, &(glob->netacqtagopts),
+                glob->logger);
+        if (prov == NULL) {
+            corsaro_log(glob->logger,
+                    "error while enabling Netacq-Edge geo-location tagging.");
+        } else {
+            ipmeta_state->netacqipmeta = prov;
+        }
+    }
+
+    ipmeta_state->ending = 0;
+    ipmeta_state->refcount = 1;
+    pthread_mutex_init(&(ipmeta_state->mutex), NULL);
+}
+
+/** Main loop for the thread that reloads IPMeta data when signaled.
+ *
+ */
+static void *ipmeta_reload_thread(void *tdata) {
+    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)tdata;
+    corsaro_ipmeta_state_t *replace;
+    void **taggercontrolsocks;
+    void *incoming;
+    char msgin[8];
+    char sockname[56];
+    int i;
+
+    /* These sockets allow us to tell the tagger threads to use the
+     * newly reloaded IPMeta data.
+     */
+    taggercontrolsocks = calloc(glob->tag_threads, sizeof(void *));
+
+    for (i = 0; i < glob->tag_threads; i++) {
+        char sockname[56];
+
+        taggercontrolsocks[i] = zmq_socket(glob->zmq_ctxt, ZMQ_PAIR);
+        snprintf(sockname, 56, "%s-%d",
+                TAGGER_CONTROL_SOCKET, i);
+
+        if (zmq_bind(taggercontrolsocks[i], sockname) < 0) {
+            corsaro_log(glob->logger,
+                    "unable to bind tagger control socket %s: %s",
+                    sockname, strerror(errno));
+        }
+    }
+
+    /** This socket has two purposes:
+     *  1) the main thread will use it to send us the signal to reload
+     *  2) we send the new IPmeta data back to the main thread to signal
+     *     that the reload is complete.
+     */
+    incoming = zmq_socket(glob->zmq_ctxt, ZMQ_PAIR);
+    if (zmq_connect(incoming, glob->ipmeta_queue_uri) < 0) {
+        corsaro_log(glob->logger,
+                "error while connecting to IPmeta reload queue %s: %s",
+                glob->ipmeta_queue_uri, strerror(errno));
+        goto ipmeta_exit;
+    }
+
+    while (!corsaro_halted) {
+        if (zmq_recv(incoming, msgin, sizeof(msgin), ZMQ_DONTWAIT) < 0) {
+            if (errno == EAGAIN) {
+                usleep(10000);
+                continue;
+            }
+            corsaro_log(glob->logger,
+                    "error during recv on IPmeta reload queue: %s",
+                    strerror(errno));
+            break;
+        }
+
+        /* Trigger a reload of the IPMeta data */
+        corsaro_log(glob->logger,
+                "starting reload of IPmeta data files...");
+        replace = calloc(1, sizeof(corsaro_ipmeta_state_t));
+        load_ipmeta_data(glob, replace);
+
+        /* Send the replacement IPmeta data to all of the tagger threads */
+        for (i = 0; i < glob->tag_threads; i++) {
+            if (zmq_send(taggercontrolsocks[i], &replace,
+                        sizeof(corsaro_ipmeta_state_t *), 0) < 0) {
+                corsaro_log(glob->logger,
+                        "error during send to tagger control queue: %s",
+                        strerror(errno));
+                goto ipmeta_exit;
+            }
+        }
+
+        /* Send the replacement IPmeta data to the main thread, so we
+         * can update our global reference to the IPmeta data  */
+        if (zmq_send(incoming, &replace, sizeof(corsaro_ipmeta_state_t *), 0)
+                < 0) {
+            corsaro_log(glob->logger,
+                    "error during send to IPmeta reload queue: %s",
+                    strerror(errno));
+            break;
+        }
+        corsaro_log(glob->logger,
+                "IPmeta data file reload completed");
+    }
+
+ipmeta_exit:
+    for (i = 0; i < glob->tag_threads; i++) {
+        zmq_close(taggercontrolsocks[i]);
+    }
+    zmq_close(incoming);
+    free(taggercontrolsocks);
+    pthread_exit(NULL);
+
+}
+
 void usage(char *prog) {
     printf("Usage: %s [ -l logmode ] -c configfile \n\n", prog);
     printf("Accepted logmodes:\n");
     printf("\tterminal\n\tfile\n\tsyslog\n\tdisabled\n");
 }
 
+/** Checks for any messages that are sent to the main corsarotagger
+ *  thread and acts upon them.
+ *
+ *  @param glob         The global state for the corsarotagger instance
+ *  @return -1 if an error occurs, 0 otherwise.
+ */
+static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
+    char controlin[100];
+    uint8_t reply;
+    zmq_pollitem_t items[2];
+    int rc;
+
+    if (ipmeta_reload) {
+        /* We got a SIGHUP, trigger a reload of IPmeta data */
+        if (zmq_send(glob->zmq_ipmeta, "", 0, 0) < 0) {
+            corsaro_log(glob->logger, "error while sending reload IPMeta message: %s", strerror(errno));
+        }
+
+        ipmeta_reload = 0;
+    }
+
+    /* Two sockets are polled here. zmq_control is a socket that is used
+     * to communicate information to new clients (i.e. the number of hash
+     * bins that we are streaming tagged packets into). zmq_ipmeta is a
+     * pair socket linking us with the IPmeta reloading thread and is used
+     * to send us a pointer to the new IPmeta structure once a reload is
+     * complete.
+     */
+    items[0].socket = glob->zmq_control;
+    items[0].events = ZMQ_POLLIN;
+    items[1].socket = glob->zmq_ipmeta;
+    items[1].events = ZMQ_POLLIN;
+
+    rc = zmq_poll(items, 2, 10);
+    if (rc < 0) {
+        if (errno == EINTR) {
+            return 0;
+        }
+        corsaro_log(glob->logger, "error while polling zeromq sockets: %s",
+                strerror(errno));
+        return -1;
+    }
+
+    if (items[0].revents & ZMQ_POLLIN) {
+        /* The message contents don't matter, just the fact that we got a
+         * message.
+         */
+        if (zmq_recv(glob->zmq_control, controlin, sizeof(controlin), 0) < 0) {
+            if (errno == EINTR) {
+                return 0;
+            }
+            corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
+            return -1;
+        }
+        /* Send our hash bin number back */
+        reply = glob->output_hashbins;
+        while (1) {
+            if (zmq_send(glob->zmq_control, &reply, sizeof(reply), 0) < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                corsaro_log(glob->logger, "error while sending control message: %s", strerror(errno));
+                /* carry on, don't die because of a bad client */
+            }
+            break;
+        }
+    }
+
+    if (items[1].revents & ZMQ_POLLIN) {
+        /* IP meta has been reloaded successfully */
+        char recvbuf[12];
+        corsaro_ipmeta_state_t *replace;
+
+        if (zmq_recv(glob->zmq_ipmeta, recvbuf, 12, 0) < 0) {
+            if (errno == EINTR) {
+                return 0;
+            }
+            corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
+            return -1;
+        }
+        replace = *((corsaro_ipmeta_state_t **)recvbuf);
+        assert(replace);
+        assert(replace->ipmeta);
+
+        /* Replace our own global IP meta context */
+        pthread_mutex_lock(&(glob->ipmeta_state->mutex));
+        glob->ipmeta_state->refcount --;
+        if (glob->ipmeta_state->refcount == 0) {
+            glob->ipmeta_state->ending = 1;
+            pthread_mutex_unlock(&(glob->ipmeta_state->mutex));
+            corsaro_free_ipmeta_state(glob->ipmeta_state);
+        } else {
+            pthread_mutex_unlock(&(glob->ipmeta_state->mutex));
+        }
+
+        glob->ipmeta_state = replace;
+
+    }
+
+    return 0;
+}
 
 int main(int argc, char *argv[]) {
     char *configfile = NULL;
     char *logmodestr = NULL;
     corsaro_tagger_global_t *glob = NULL;
     int logmode = GLOBAL_LOGMODE_STDERR;
-    ipmeta_provider_t *prov;
     int i;
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
@@ -969,6 +616,7 @@ int main(int argc, char *argv[]) {
     corsaro_tagger_proxy_data_t internalproxy;
     corsaro_tagger_proxy_data_t externalproxy;
 
+    corsaro_halted = 0;
     while (1) {
         int optind;
         struct option long_options[] = {
@@ -1026,6 +674,12 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
+    sigact.sa_handler = reload_signal;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = SA_RESTART;
+
+    sigaction(SIGHUP, &sigact, NULL);
+
     sigact.sa_handler = cleanup_signal;
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags = SA_RESTART;
@@ -1047,6 +701,15 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Set up the IP meta reloading socket */
+    glob->zmq_ipmeta = zmq_socket(glob->zmq_ctxt, ZMQ_PAIR);
+    if (zmq_bind(glob->zmq_ipmeta, glob->ipmeta_queue_uri) < 0) {
+        corsaro_log(glob->logger,
+                "error while binding IP meta reload socket: %s",
+                strerror(errno));
+        return 1;
+    }
+
     /* Start the zeromq proxy threads */
     internalproxy.glob = glob;
     internalproxy.insockname = PACKET_PUB_QUEUE;
@@ -1064,61 +727,37 @@ int main(int argc, char *argv[]) {
     pthread_create(&proxythreads[1], NULL, start_zmq_output_thread, &externalproxy);
 
     /* Load the libipmeta provider data */
-    glob->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
-    if (glob->pfxtagopts.enabled) {
-        /* Prefix to ASN mapping */
-        prov = corsaro_init_ipmeta_provider(glob->ipmeta,
-                IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts),
-                glob->logger);
-        if (prov == NULL) {
-            corsaro_log(glob->logger, "error while enabling pfx2asn tagging.");
-        } else {
-            glob->pfxipmeta = prov;
-        }
-    }
-
-    if (glob->maxtagopts.enabled) {
-        /* Maxmind geolocation */
-        prov = corsaro_init_ipmeta_provider(glob->ipmeta,
-                IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts),
-                glob->logger);
-        if (prov == NULL) {
-            corsaro_log(glob->logger,
-                    "error while enabling Maxmind geo-location tagging.");
-        } else {
-            glob->maxmindipmeta = prov;
-        }
-    }
-    if (glob->netacqtagopts.enabled) {
-        /* Netacq Edge geolocation */
-        prov = corsaro_init_ipmeta_provider(glob->ipmeta,
-                IPMETA_PROVIDER_NETACQ_EDGE, &(glob->netacqtagopts),
-                glob->logger);
-        if (prov == NULL) {
-            corsaro_log(glob->logger,
-                    "error while enabling Netacq-Edge geo-location tagging.");
-        } else {
-            glob->netacqipmeta = prov;
-        }
-    }
+    glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
+    load_ipmeta_data(glob, glob->ipmeta_state);
 
     glob->threaddata = calloc(glob->tag_threads, sizeof(corsaro_tagger_local_t));
     glob->packetdata = calloc(glob->pkt_threads, sizeof(corsaro_packet_local_t));
+    pthread_create(&(glob->ipmeta_reloader), NULL, ipmeta_reload_thread, glob);
 
-    /* Initialise all of our thread local state for the processing threads */
+    /* Note: I'm being a bit unconventional here in that I'm creating and
+     * initialising the thread-local state for my threads outside of the
+     * threads themselves.
+     *
+     * The reason for this is that I have certain variables (namely the
+     * zeromq sockets) that I only want to free *after* I am sure that the
+     * threads spawned by this program have exited. This prevents deadlocks
+     * on exit where a receiver has gone away but the sender is stuck in a
+     * blocking send.
+     */
+
+    /* Initialise all of our thread local state for the tagging threads */
     for (i = 0; i < glob->tag_threads; i++) {
         init_tagger_thread_data(&(glob->threaddata[i]), i, glob);
         pthread_create(&(glob->threaddata[i].ptid), NULL, start_tagger_thread,
                 &(glob->threaddata[i]));
     }
 
+    /* Initialise all of our thread local state for the processing threads */
     for (i = 0; i < glob->pkt_threads; i++) {
         init_packet_thread_data(&(glob->packetdata[i]), i, glob);
     }
 
     while (glob->currenturi < glob->totaluris && !corsaro_halted) {
-        char controlin[100];
-        uint8_t reply;
 
         sigemptyset(&sig_block_all);
         if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
@@ -1143,20 +782,10 @@ int main(int argc, char *argv[]) {
 
         /* Wait for the input to finish (or be halted via user signal) */
         while (!trace_halted) {
-            if (zmq_recv(glob->zmq_control, controlin, sizeof(controlin),
-                    ZMQ_DONTWAIT) < 0) {
-                if (errno == EAGAIN) {
-                    usleep(100);
-                    continue;
-                }
-                corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
+            if (tagger_main_loop(glob) < 0) {
                 break;
             }
-            reply = glob->output_hashbins;
-            if (zmq_send(glob->zmq_control, &reply, sizeof(reply), 0) < 0) {
-                corsaro_log(glob->logger, "error while sending control message: %s", strerror(errno));
-                /* carry on, don't die because of a bad client */
-            }
+
         }
 
         if (!trace_has_finished(glob->trace)) {
@@ -1192,10 +821,13 @@ int main(int argc, char *argv[]) {
     for (i = 0; i < glob->tag_threads; i++) {
         pthread_join(glob->threaddata[i].ptid, NULL);
         destroy_local_tagger_state(glob, &(glob->threaddata[i]), i);
+
     }
     for (i = 0; i < glob->pkt_threads; i++) {
         destroy_local_packet_state(glob, &(glob->packetdata[i]), i);
     }
+    pthread_join(glob->ipmeta_reloader, NULL);
+
     corsaro_log(glob->logger, "all threads have joined, exiting.");
     corsaro_tagger_free_global(glob);
     pthread_join(proxythreads[0], NULL);
