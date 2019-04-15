@@ -28,6 +28,7 @@
 #ifndef CORSAROTRACE_H_
 #define CORSAROTRACE_H_
 
+#include <stdlib.h>
 #include <libtrace.h>
 #include <libtrace_parallel.h>
 
@@ -37,8 +38,20 @@
 #include "libcorsaro_tagging.h"
 #include "libcorsaro_memhandler.h"
 
+#define TAGGER_PUB_QUEUE "inproc://taggerproxypub"
+#define PACKET_PUB_QUEUE "inproc://taggerinternalpub"
+#define TAGGER_SUB_QUEUE "inproc://taggerinternalsub"
+#define TAGGER_CONTROL_SOCKET "inproc://taggercontrolsock"
+
+#define TAGGER_BUFFER_SIZE (1 * 1024 * 1024)
+
+
 typedef struct corsaro_tagger_local corsaro_tagger_local_t;
 typedef struct corsaro_packet_local corsaro_packet_local_t;
+
+/** Global flag that indicates if the tagger has received a halting
+ *  signal, i.e. SIGTERM or SIGINT */
+extern volatile int corsaro_halted;
 
 /** Structure for storing global state for a corsarotagger instance */
 typedef struct corsaro_tagger_glob {
@@ -172,6 +185,15 @@ typedef struct corsaro_tagger_internal_msg {
     } content;
 } PACKED corsaro_tagger_internal_msg_t;
 
+typedef struct tagger_proxy_data {
+    char *insockname;
+    char *outsockname;
+    int recvtype;
+    int pushtype;
+
+    corsaro_tagger_global_t *glob;
+} corsaro_tagger_proxy_data_t;
+
 /** Structure for storing thread-local state for a single processing thread */
 struct corsaro_tagger_local {
 
@@ -236,6 +258,105 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
  *  @param glob             The global state to destroy.
  */
 void corsaro_tagger_free_global(corsaro_tagger_global_t *glob);
+
+/** Initialises thread-local state for a packet processing thread.
+ *
+ *  @param tls          The thread local state for this thread
+ *  @param threadid     The id number of the thread
+ *  @param glob         The global state for the corsaro tagger
+ */
+void init_packet_thread_data(corsaro_packet_local_t *tls,
+        int threadid, corsaro_tagger_global_t *glob);
+
+/** Destroys the thread local state for a packet processing thread.
+ *
+ *  @param glob         The global state for this corsarotagger instance
+ *  @param tls          The thread-local state to be destroyed
+ *  @param threadid     The identifier for the thread that owned this state
+ */
+void destroy_local_packet_state(corsaro_tagger_global_t *glob,
+        corsaro_packet_local_t *tls, int threadid);
+
+/** Create a tagged packet message and publishes it to the tagger proxy
+ *  queue.
+ *
+ *  @param glob         The global state for this corsarotagger instance.
+ *  @param tls          The thread-local state for this processing thread.
+ *  @param packet       The packet to be published.
+ */
+int corsaro_publish_tags(corsaro_tagger_global_t *glob,
+        corsaro_packet_local_t *tls, libtrace_packet_t *packet);
+
+/** Initialises the local data for a tagging thread.
+ *
+ *  @param tls          The thread-local data to be initialised
+ *  @param threadid     A numeric identifier for the thread that this data
+ *                      is going to be attached to
+ *  @param glob         The global data for this corsarotagger instance.
+ *
+ */
+void init_tagger_thread_data(corsaro_tagger_local_t *tls,
+        int threadid, corsaro_tagger_global_t *glob);
+
+/** Destroys the thread local state for a tagging thread.
+ *
+ *  @param glob         The global state for this corsarotagger instance
+ *  @param tls          The thread-local state to be destroyed
+ *  @param threadid     The identifier for the thread that owned this state
+ */
+void destroy_local_tagger_state(corsaro_tagger_global_t *glob,
+        corsaro_tagger_local_t *tls, int threadid);
+
+/** Starts a tagger worker thread.
+ *
+ *  @param data     The thread-local state variable for this tagger thread,
+ *                  must be already initialised.
+ *  @return NULL when the thread exits
+ */
+void *start_tagger_thread(void *data);
+
+/** Main loop for the proxy thread that publishes tagged packets produced
+ *  by the tagging threads.
+ *
+ *  @param data         The tagger proxy state for this proxy thread.
+ *  @return NULL when the proxy thread has halted.
+ */
+void *start_zmq_output_thread(void *data);
+
+/** Starts the thread which manages the proxy that bridges our zeromq
+ *  publishing sockets to the clients that are subscribing to them.
+ *
+ *  The reason for the proxy is to support our multiple-publisher,
+ *  multiple-subscriber architecture without either side having to
+ *  know how many sockets exist on the other side of the proxy.
+ *
+ *  @param data         The tagger proxy state for this proxy thread.
+ *  @return NULL when the proxy thread has halted.
+ */
+void *start_zmq_proxy_thread(void *data);
+
+/** Allocates and initialises a new corsaro tagger buffer structure.
+ */
+static inline corsaro_tagger_buffer_t *create_tls_buffer() {
+
+    corsaro_tagger_buffer_t *buf;
+
+    buf = calloc(1, sizeof(corsaro_tagger_buffer_t));
+    buf->space = malloc(TAGGER_BUFFER_SIZE * sizeof(uint8_t));
+    buf->used = 0;
+    buf->size = TAGGER_BUFFER_SIZE;
+
+    return buf;
+}
+
+/** Deallocates a corsaro tagger buffer structure.
+ *
+ *  @param buf      The buffer to be deallocated
+ */
+static inline void free_tls_buffer(corsaro_tagger_buffer_t *buf) {
+    free(buf->space);
+    free(buf);
+}
 
 #endif
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -30,6 +30,9 @@ bin_PROGRAMS = corsarotagger
 corsarotagger_SOURCES = \
 	corsarotagger.c \
         configparser.c \
+        tagger_thread.c \
+        packet_thread.c \
+        proxy_threads.c \
         corsarotagger.h
 
 corsarotagger_LDADD = -lcorsaro
