@@ -44,6 +44,67 @@
 #include "libcorsaro_memhandler.h"
 #include "pqueue.h"
 
+/* Some notes of the structure of the corsarotagger...
+ *
+ * The tagger's role is relatively simple: read packets from a packet
+ * source (probably an ndag multicaster socket) and attach to each packet
+ * a set of "tags" that are useful for filtering or analytic purposes.
+ *
+ * This seems simple, but is actually a lot more complex in practice.
+ *
+ * There are quite a few different classes of threads that run concurrently
+ * to make this all work optimally:
+ *   - packet processing threads
+ *   - tagger worker threads
+ *   - the internal proxy thread
+ *   - the external proxy thread
+ *   - the IPmeta reloading thread
+ *   - the main thread
+ *
+ * Packet processing threads are typical parallel-libtrace style threads.
+ * These receive packets from the input source, attach a blank set of tags
+ * to each packet, buffer them together (to save on writes), then push
+ * them on towards the tagger worker threads. The reason that we do not
+ * do the tagging in these threads is because we want to minimise the amount
+ * of time spent holding on to a packet -- the sooner our "per_packet"
+ * function finishes, the less likely we are to drop packets during high load.
+ *
+ * Tagger worker threads do the actual tagging of each packet. This includes
+ * both the "basic" tagging (i.e. port numbers, protocols) as well as
+ * computing the flowtuple hash. Packets are also assigned to a hash bin
+ * (represented by a single character) that allows clients to subscribe to
+ * different portions of our output using different threads to parallelise
+ * their own workload easily. The hash bin is based on the flowtuple hash to
+ * ensure all packets for the same flow end up in the same hash bin.
+ *
+ * Advanced tagging can also occur via the libipmeta library, provided
+ * suitable source data files are available. These can be used for
+ * geo-location and prefix-to-ASN mapping of the packet's source IP address.
+ *
+ * The internal proxy thread is used to move packets between the packet
+ * processing and tagger worker threads. This is required to make the
+ * multiple-publisher, multiple-consumer model that we are using work
+ * smoothly. Since the tagging process itself is relatively state-less on
+ * a per-packet basis, it doesn't matter which worker thread each packet is
+ * assigned to.
+ *
+ * The external proxy thread is used to publish the tagged packets produced
+ * by the worker threads onto a single queue for consumption by any number
+ * of interested subscribers.
+ *
+ * The IPmeta reloading thread has a single purpose: wait for a message
+ * from the main thread telling it that a SIGHUP has been observed and once
+ * received, reload the libipmeta source files and push the new IPmeta data
+ * to each of the tagging threads.
+ *
+ * The main thread listens for signals (like the aforementioned SIGHUP) and
+ * acts upon them (i.e. trigger a reload or begin a clean halt of the tagger).
+ * It also waits for query messages from clients to which it will reply with
+ * any useful configuration that the client may want to know (such as the
+ * number of hash bins being used by the tagger threads).
+ */
+
+
 /** Older versions of libzmq use a different name for this option */
 #ifndef ZMQ_IMMEDIATE
 #define ZMQ_IMMEDIATE ZMQ_DELAY_ATTACH_ON_CONNECT
