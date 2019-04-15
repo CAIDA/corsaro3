@@ -78,16 +78,27 @@ typedef struct tagger_proxy_data {
 
 libtrace_callback_set_t *processing = NULL;
 
+/** Global flag that indicates if the tagger has received a halting
+ *  signal, i.e. SIGTERM or SIGINT */
 volatile int corsaro_halted = 0;
+
+/** Global flag that indicates whether the tagger should stop reading
+ *  packets from the input source */
 volatile int trace_halted = 0;
+
+/** Global flag that indicates whether the tagger should attempt to reload
+ *  the IP meta data files as soon as it can */
 volatile int ipmeta_reload = 0;
 
+
+/** Signal handler for SIGINT and SIGTERM */
 static void cleanup_signal(int sig) {
     (void)sig;
     corsaro_halted = 1;
     trace_halted = 1;
 }
 
+/** Signal handler for SIGHUP */
 static void reload_signal(int sig) {
     (void)sig;
     ipmeta_reload = 1;
@@ -101,16 +112,26 @@ static void reload_signal(int sig) {
         zmq_send(tls->pubsock, &msg, sizeof(msg), 0); \
     }
 
+/** Get Position function for a tagged packet priority queue */
 static size_t pkt_get_pos(void *a) {
     corsaro_tagger_packet_t *pkt = (corsaro_tagger_packet_t *)a;
     return pkt->pqueue_pos;
 }
 
+/** Set Position function for a tagged packet priority queue */
 static void pkt_set_pos(void *a, size_t pos) {
     corsaro_tagger_packet_t *pkt = (corsaro_tagger_packet_t *)a;
     pkt->pqueue_pos = pos;
 }
 
+
+/** Comparison function for two tagged packets.
+ *
+ *  @param next     A tagged packet being added to a priority queue
+ *  @param curr     A tagged packet already in the priority queue
+ *  @return 1 if curr has a high priority than next, 0 if next should
+ *          be exported ahead of curr.
+ */
 static int pkt_cmp_pri(void *next, void *curr) {
     corsaro_tagger_packet_t *nextpkt = (corsaro_tagger_packet_t *)next;
     corsaro_tagger_packet_t *currpkt = (corsaro_tagger_packet_t *)curr;
@@ -131,6 +152,8 @@ static int pkt_cmp_pri(void *next, void *curr) {
 }
 
 
+/** Allocates and initialises a new corsaro tagger buffer structure.
+  */
 static inline corsaro_tagger_buffer_t *create_tls_buffer() {
 
     corsaro_tagger_buffer_t *buf;
@@ -143,15 +166,22 @@ static inline corsaro_tagger_buffer_t *create_tls_buffer() {
     return buf;
 }
 
+/** Deallocates a corsaro tagger buffer structure.
+ *
+ *  @param buf      The buffer to be deallocated
+ */
 static inline void free_tls_buffer(corsaro_tagger_buffer_t *buf) {
     free(buf->space);
     free(buf);
 }
 
-static void freebuf(void *data, void *hint) {
-    free(data);
-}
 
+/** Initialises thread-local state for a packet processing thread.
+ *
+ *  @param tls          The thread local state for this thread
+ *  @param threadid     The id number of the thread
+ *  @param glob         The global state for the corsaro tagger
+ */
 static inline void init_packet_thread_data(corsaro_packet_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
 
@@ -189,7 +219,7 @@ static inline void init_packet_thread_data(corsaro_packet_local_t *tls,
     }
 }
 
-/** Initialises the local data for each processing thread.
+/** Initialises the local data for a tagging thread.
  *
  *  @param tls          The thread-local data to be initialised
  *  @param threadid     A numeric identifier for the thread that this data
@@ -285,7 +315,13 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
 }
 
 
-
+/** Destructor callback for a libtrace processing thread
+ *
+ *  @param trace        The libtrace input that this thread belongs to (unused)
+ *  @param t            The libtrace processing thread
+ *  @param global       The global state for this corsarotagger instance
+ *  @param local        The thread-local state for this thread.
+ */
 static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local) {
 
@@ -298,7 +334,7 @@ static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
     zmq_send(tls->pubsock, NULL, 0, 0);
 }
 
-/** Destroys the thread local state for a libtrace processing thread.
+/** Destroys the thread local state for a tagging thread.
  *
  *  @param glob         The global state for this corsarotagger instance
  *  @param tls          The thread-local state to be destroyed
@@ -329,6 +365,12 @@ static void destroy_local_tagger_state(corsaro_tagger_global_t *glob,
 
 }
 
+/** Destroys the thread local state for a packet processing thread.
+ *
+ *  @param glob         The global state for this corsarotagger instance
+ *  @param tls          The thread-local state to be destroyed
+ *  @param threadid     The identifier for the thread that owned this state
+ */
 static void destroy_local_packet_state(corsaro_tagger_global_t *glob,
         corsaro_packet_local_t *tls, int threadid) {
     int linger = 1000;
@@ -337,7 +379,7 @@ static void destroy_local_packet_state(corsaro_tagger_global_t *glob,
         zmq_setsockopt(tls->pubsock, ZMQ_LINGER, &linger, sizeof(linger));
     }
     zmq_close(tls->pubsock);
-    
+
     if (tls->buf) {
         free_tls_buffer(tls->buf);
     }
@@ -349,7 +391,6 @@ static void destroy_local_packet_state(corsaro_tagger_global_t *glob,
  *
  *  @param glob         The global state for this corsarotagger instance.
  *  @param tls          The thread-local state for this processing thread.
- *  @param tags         The tags assigned to the packet.
  *  @param packet       The packet to be published.
  */
 static int corsaro_publish_tags(corsaro_tagger_global_t *glob,
@@ -486,6 +527,14 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     }
 }
 
+/** Receives and processes a buffer of untagged packets for a tagger thread,
+ *  tagging each packet contained within that buffer appropriately and
+ *  publishing it to the external proxy thread.
+ *
+ *  @param tls      The thread-local state for this tagging thread.
+ *  @return 1 if the buffer was received and processed successfully, -1
+ *          if an error occurs, 0 if there is an EOF on receive.
+ */
 static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
     uint8_t recvbuf[TAGGER_BUFFER_SIZE];
     int r;
@@ -512,6 +561,8 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
     buf = recvd->content.buf;
     processed = 0;
 
+    /* The buffer probably contains multiple untagged packets, so keep
+     * looping until we've tagged them all */
     while (processed < buf->used) {
         corsaro_tagger_packet_t *packet;
         libtrace_ip_t *ip;
@@ -534,6 +585,8 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
             exit(2);
         }
 
+        /* Find the IP header in the packet contents.
+         * The packet should start with an Ethernet header */
         l2 = buf->space + processed;
         rem = packet->hdr.pktlen;
 
@@ -561,18 +614,29 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
         }
 
         ip = (libtrace_ip_t *)next;
+
+        /* Actually do the tagging */
         if (corsaro_tag_ippayload(tls->tagger, &(packet->hdr.tags),
                     ip, rem) < 0) {
             corsaro_log(tls->glob->logger,
                     "error while tagging IP payload in tagger thread.");
             tls->errorcount ++;
         }
+
+        /* Using the results of the flowtuple hash tag, assign this packet
+         * to one of our output hash bins, so clients will be able to
+         * receive the tagged packets in parallel if they desire.
+         */
         ASSIGN_HASH_BIN(packet->hdr.tags.ft_hash,
                 tls->glob->output_hashbins, packet->hdr.hashbin);
         packet->hdr.filterbits = htons(packet->hdr.tags.highlevelfilterbits);
         packet->taggedby = tls->threadid;
         processed += packet->hdr.pktlen;
 
+        /* Send the packet on to the external proxy for publishing. Don't
+         * block -- if the proxy closes its pull socket (i.e. during
+         * pre-exit cleanup), we can end up blocking forever.
+         */
         while (!corsaro_halted) {
             r = zmq_send(tls->pubsock, packet, sizeof(corsaro_tagger_packet_t)
                     + packet->hdr.pktlen, ZMQ_DONTWAIT);
@@ -594,18 +658,15 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
     return 1;
 }
 
+/** Main loop for a tagger thread. */
 static void *start_tagger_thread(void *data) {
     corsaro_tagger_local_t *tls = (corsaro_tagger_local_t *)data;
-    int onesec = 1000;
     zmq_pollitem_t items[2];
 
-    if (zmq_setsockopt(tls->pullsock, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
-        corsaro_log(tls->glob->logger,
-                "unable to configure tagger thread pull socket: %s",
-                strerror(errno));
-        pthread_exit(NULL);
-    }
-
+    /* We have two sockets that we care about -- the pull socket, which
+     * we receive untagged packets from, and the control socket, which
+     * we receive updated IPmeta state on.
+     */
 
     while (!corsaro_halted) {
         corsaro_tagger_internal_msg_t *recvd = NULL;
@@ -624,6 +685,7 @@ static void *start_tagger_thread(void *data) {
         }
 
         if (items[1].revents & ZMQ_POLLIN) {
+            /* New IPmeta state, replace what we've got */
             char recvbuf[12];
             corsaro_ipmeta_state_t **replace;
 
@@ -639,6 +701,7 @@ static void *start_tagger_thread(void *data) {
         }
 
         if (items[0].revents & ZMQ_POLLIN) {
+            /* Got some untagged packets to process */
             if (tagger_thread_process_buffer(tls) <= 0) {
                 break;
             }
@@ -648,6 +711,13 @@ static void *start_tagger_thread(void *data) {
     pthread_exit(NULL);
 }
 
+/** Main loop for the proxy thread that links our packet processing
+ *  threads with our tagging worker threads.
+ *
+ *  @param proxy_recv       A zeromq socket for receiving from the packet
+ *                          processing threads.
+ *  @param proxy_fwd        A zeromq socket for sending to the tagger threads.
+ */
 static inline void run_simple_proxy(void *proxy_recv, void *proxy_fwd) {
     int tosend = 0;
     uint8_t recvbuf[TAGGER_BUFFER_SIZE];
@@ -687,6 +757,10 @@ static inline void run_simple_proxy(void *proxy_recv, void *proxy_fwd) {
     }
 }
 
+/** Main loop for the proxy thread that publishes tagged packets produced
+ *  by the tagging threads.
+ *
+ */
 static void *start_zmq_output_thread(void *data) {
     corsaro_tagger_proxy_data_t *proxy = (corsaro_tagger_proxy_data_t *)data;
     corsaro_tagger_global_t *glob = proxy->glob;
@@ -702,6 +776,10 @@ static void *start_zmq_output_thread(void *data) {
     uint8_t **recvbufs = calloc(glob->tag_threads, sizeof(uint8_t *));
     uint32_t *recvbufsizes = calloc(glob->tag_threads, sizeof(uint32_t));
 
+    /** Our output needs to be in chronological order, so we'll use a
+     *  priority queue to make sure we're publishing the oldest packet
+     *  available.
+     */
     pq = pqueue_init(glob->tag_threads, pkt_cmp_pri, pkt_get_pos, pkt_set_pos);
 
     if (zmq_setsockopt(proxy_fwd, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
@@ -729,6 +807,9 @@ static void *start_zmq_output_thread(void *data) {
         goto proxyexit;
     }
 
+    /* Set up our receiving sockets from each of the tagger threads and
+     * read a packet from each to populate the priority queue.
+     */
     for (i = 0; i < glob->tag_threads; i++) {
         char sockname[1024];
 
@@ -788,6 +869,7 @@ static void *start_zmq_output_thread(void *data) {
         uint8_t *nextpkt;
         uint8_t workind = 0;
 
+        /* Grab the oldest packet from the priority queue */
         nextpkt = (uint8_t *)(pqueue_pop(pq));
         if (nextpkt == NULL) {
             usleep(10);
@@ -799,6 +881,9 @@ static void *start_zmq_output_thread(void *data) {
         zmq_send(proxy_fwd, &(packet->hdr),
                 sizeof(packet->hdr) + packet->hdr.pktlen, 0);
 
+        /* Read the next packet from the worker that provided us with
+         * the packet we just published.
+         */
         while (!corsaro_halted) {
             r = zmq_recv(proxy_recv[workind], recvbufs[workind],
                     TAGGER_BUFFER_SIZE, ZMQ_DONTWAIT);
@@ -999,6 +1084,13 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
     return 0;
 }
 
+/** Creates and populates an IPMeta data structure, based on the contents
+ *  of the files listed in the configuration file.
+ *
+ *  @param glob             Global state for this corsarotagger instance
+ *  @param ipmeta_state     A newly allocated IP meta state variable to be
+ *                          populated by this function.
+ */
 static void load_ipmeta_data(corsaro_tagger_global_t *glob,
         corsaro_ipmeta_state_t *ipmeta_state) {
 
@@ -1047,6 +1139,9 @@ static void load_ipmeta_data(corsaro_tagger_global_t *glob,
     pthread_mutex_init(&(ipmeta_state->mutex), NULL);
 }
 
+/** Main loop for the thread that reloads IPMeta data when signaled.
+ *
+ */
 static void *ipmeta_reload_thread(void *tdata) {
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)tdata;
     corsaro_ipmeta_state_t *replace;
@@ -1056,6 +1151,9 @@ static void *ipmeta_reload_thread(void *tdata) {
     char sockname[56];
     int i;
 
+    /* These sockets allow us to tell the tagger threads to use the
+     * newly reloaded IPMeta data.
+     */
     taggercontrolsocks = calloc(glob->tag_threads, sizeof(void *));
 
     for (i = 0; i < glob->tag_threads; i++) {
@@ -1072,6 +1170,11 @@ static void *ipmeta_reload_thread(void *tdata) {
         }
     }
 
+    /** This socket has two purposes:
+     *  1) the main thread will use it to send us the signal to reload
+     *  2) we send the new IPmeta data back to the main thread to signal
+     *     that the reload is complete.
+     */
     incoming = zmq_socket(glob->zmq_ctxt, ZMQ_PAIR);
     if (zmq_connect(incoming, glob->ipmeta_queue_uri) < 0) {
         corsaro_log(glob->logger,
@@ -1138,6 +1241,12 @@ void usage(char *prog) {
     printf("\tterminal\n\tfile\n\tsyslog\n\tdisabled\n");
 }
 
+/** Checks for any messages that are sent to the main corsarotagger
+ *  thread and acts upon them.
+ *
+ *  @param glob         The global state for the corsarotagger instance
+ *  @return -1 if an error occurs, 0 otherwise.
+ */
 static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
     char controlin[100];
     uint8_t reply;
@@ -1145,6 +1254,7 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
     int rc;
 
     if (ipmeta_reload) {
+        /* We got a SIGHUP, trigger a reload of IPmeta data */
         if (zmq_send(glob->zmq_ipmeta, "", 0, 0) < 0) {
             corsaro_log(glob->logger, "error while sending reload IPMeta message: %s", strerror(errno));
         }
@@ -1152,6 +1262,13 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
         ipmeta_reload = 0;
     }
 
+    /* Two sockets are polled here. zmq_control is a socket that is used
+     * to communicate information to new clients (i.e. the number of hash
+     * bins that we are streaming tagged packets into). zmq_ipmeta is a
+     * pair socket linking us with the IPmeta reloading thread and is used
+     * to send us a pointer to the new IPmeta structure once a reload is
+     * complete.
+     */
     items[0].socket = glob->zmq_control;
     items[0].events = ZMQ_POLLIN;
     items[1].socket = glob->zmq_ipmeta;
@@ -1168,6 +1285,9 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
     }
 
     if (items[0].revents & ZMQ_POLLIN) {
+        /* The message contents don't matter, just the fact that we got a
+         * message.
+         */
         if (zmq_recv(glob->zmq_control, controlin, sizeof(controlin), 0) < 0) {
             if (errno == EINTR) {
                 return 0;
@@ -1175,6 +1295,7 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
             corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
             return -1;
         }
+        /* Send our hash bin number back */
         reply = glob->output_hashbins;
         while (1) {
             if (zmq_send(glob->zmq_control, &reply, sizeof(reply), 0) < 0) {
@@ -1353,13 +1474,14 @@ int main(int argc, char *argv[]) {
     glob->packetdata = calloc(glob->pkt_threads, sizeof(corsaro_packet_local_t));
     pthread_create(&(glob->ipmeta_reloader), NULL, ipmeta_reload_thread, glob);
 
-    /* Initialise all of our thread local state for the processing threads */
+    /* Initialise all of our thread local state for the tagging threads */
     for (i = 0; i < glob->tag_threads; i++) {
         init_tagger_thread_data(&(glob->threaddata[i]), i, glob);
         pthread_create(&(glob->threaddata[i].ptid), NULL, start_tagger_thread,
                 &(glob->threaddata[i]));
     }
 
+    /* Initialise all of our thread local state for the processing threads */
     for (i = 0; i < glob->pkt_threads; i++) {
         init_packet_thread_data(&(glob->packetdata[i]), i, glob);
     }
