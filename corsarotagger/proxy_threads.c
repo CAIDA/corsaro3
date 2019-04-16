@@ -93,7 +93,7 @@ void *start_zmq_output_thread(void *data) {
     int seqindex;
 
     pqueue_t *pq;
-    int i, r, zero = 0, hwm = 1000000;
+    int i, r, zero = 0, hwm = 10000;
     int onesec = 1000;
 
     void **proxy_recv = calloc(glob->tag_threads, sizeof(void *));
@@ -101,6 +101,9 @@ void *start_zmq_output_thread(void *data) {
 
     uint8_t **recvbufs = calloc(glob->tag_threads, sizeof(uint8_t *));
     uint32_t *recvbufsizes = calloc(glob->tag_threads, sizeof(uint32_t));
+
+    uint8_t **sendbufs = calloc(glob->output_hashbins, sizeof(uint8_t *));
+    uint32_t *sendbufsizes = calloc(glob->output_hashbins, sizeof(uint32_t));
 
     nextseq = (uint64_t *)calloc(glob->output_hashbins, sizeof(uint64_t));
 
@@ -160,6 +163,10 @@ void *start_zmq_output_thread(void *data) {
                 "unable to create tagger output forwarding socket %s: %s",
                 proxy->outsockname, strerror(errno));
         goto proxyexit;
+    }
+
+    for (i = 0; i < glob->output_hashbins; i++) {
+        sendbufs[i] = malloc(10 * TAGGER_BUFFER_SIZE);
     }
 
     /* Set up our receiving sockets from each of the tagger threads and
@@ -245,8 +252,17 @@ void *start_zmq_output_thread(void *data) {
         packet->hdr.seqno = bswap_host_to_be64(nextseq[seqindex]);
         nextseq[seqindex] ++;
 
-        zmq_send(proxy_fwd, &(packet->hdr),
-                sizeof(packet->hdr) + packet->hdr.pktlen, 0);
+        if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
+                sizeof(packet->hdr) + packet->hdr.pktlen) {
+
+            zmq_send(proxy_fwd, sendbufs[seqindex], sendbufsizes[seqindex], 0);
+            sendbufsizes[seqindex] = 0;
+        }
+
+        memcpy(sendbufs[seqindex] + sendbufsizes[seqindex], &(packet->hdr),
+                sizeof(packet->hdr) + packet->hdr.pktlen);
+        sendbufsizes[seqindex] += sizeof(packet->hdr) + packet->hdr.pktlen;
+
 
         /* Read the next packet from the worker that provided us with
          * the packet we just published.
@@ -281,6 +297,13 @@ void *start_zmq_output_thread(void *data) {
 proxyexit:
     pqueue_free(pq);
     free(nextseq);
+    for (i = 0; i < glob->output_hashbins; i++) {
+        if (sendbufsizes[i] > 0) {
+            zmq_send(proxy_fwd, sendbufs[i], sendbufsizes[i], 0);
+        }
+        free(sendbufs[i]);
+    }
+
     for (i = 0; i < glob->tag_threads; i++) {
         if (proxy_recv[i]) {
             zmq_close(proxy_recv[i]);
@@ -290,6 +313,8 @@ proxyexit:
     free(proxy_recv);
     free(recvbufs);
     free(recvbufsizes);
+    free(sendbufs);
+    free(sendbufsizes);
     zmq_close(proxy_fwd);
     pthread_exit(NULL);
 }

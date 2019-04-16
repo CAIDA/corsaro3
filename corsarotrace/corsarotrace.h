@@ -122,6 +122,7 @@ struct corsaro_trace_worker {
     void *zmq_pullsock;
     void *zmq_pushsock;
 
+    libtrace_packet_t *packet;
 };
 
 struct corsaro_trace_merger {
