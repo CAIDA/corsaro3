@@ -1109,6 +1109,16 @@ static void *start_iptracker(void *tdata) {
         }
     }
 
+    while (zmq_recv(track->incoming, &msg, sizeof(msg), ZMQ_DONTWAIT) >= 0) {
+        if (msg.msgtype == CORSARO_IP_MESSAGE_UPDATE) {
+            if (msg.handler) {
+                release_corsaro_memhandler_item(msg.handler, msg.memsrc);
+            } else {
+                free(msg.update);
+            }
+        }
+    }
+
     /* Thread is ending, tidy up everything */
     free_metrichash(track, (track->currentresult));
     free_metrichash(track, (track->nextresult));
@@ -1416,7 +1426,10 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
             state->nextmsg[i].memsrc = NULL;
             state->nextmsg[i].handler = NULL;
 
+        } else {
+            free(state->nextmsg[i].update);
         }
+
         /* Send the halt message */
         if (zmq_send(state->tracker_queues[i],
                 (void *)(&msg), sizeof(corsaro_report_ip_message_t), 0) < 0) {
