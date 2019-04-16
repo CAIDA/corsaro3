@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
+#include "libcorsaro_common.h"
 #include "libcorsaro_log.h"
 
 int parse_onoff_option(corsaro_logger_t *logger, char *value,
@@ -52,5 +53,26 @@ int parse_onoff_option(corsaro_logger_t *logger, char *value,
 
     return 0;
 }
+
+/* Byte swapping functions for various inttypes */
+uint64_t byteswap64(uint64_t num)
+{
+    return (byteswap32((num&0xFFFFFFFF00000000ULL)>>32))
+        |((uint64_t)byteswap32(num&0x00000000FFFFFFFFULL)<<32);
+}
+
+uint32_t byteswap32(uint32_t num)
+{
+    return ((num&0x000000FFU)<<24)
+        | ((num&0x0000FF00U)<<8)
+        | ((num&0x00FF0000U)>>8)
+        | ((num&0xFF000000U)>>24);
+}
+
+uint16_t byteswap16(uint16_t num)
+{
+    return ((num<<8)&0xFF00)|((num>>8)&0x00FF);
+}
+
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

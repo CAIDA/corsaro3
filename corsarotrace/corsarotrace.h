@@ -114,6 +114,11 @@ struct corsaro_trace_worker {
     uint32_t last_ts;
     uint8_t stopped;
 
+    uint32_t taggerid;
+    uint64_t *nextseq;
+    uint64_t dropcounter;
+    uint64_t dropinstances;
+
     void *zmq_pullsock;
     void *zmq_pushsock;
 

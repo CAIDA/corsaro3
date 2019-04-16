@@ -158,6 +158,10 @@ typedef struct corsaro_tagged_packet_header {
     /** The length of the packet, starting from the Ethernet header */
     uint16_t pktlen;
 
+    uint32_t tagger_id;
+
+    uint64_t seqno;
+
     /** The tags that were applied to this packet by the tagging module */
     corsaro_packet_tags_t tags;
 } PACKED corsaro_tagged_packet_header_t;

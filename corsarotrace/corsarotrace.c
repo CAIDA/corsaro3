@@ -40,6 +40,7 @@
 #include <zmq.h>
 
 #include "libcorsaro_log.h"
+#include "libcorsaro_common.h"
 #include "corsarotrace.h"
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_filtering.h"
@@ -189,6 +190,12 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
                     tls->current_interval.number);
             return -1;
         }
+
+        corsaro_log(tls->glob->logger,
+                "worker thread %d has observed %u packets dropped (%u) by the tagger",
+                tls->workerid, tls->dropcounter, tls->dropinstances);
+        tls->dropcounter = 0;
+        tls->dropinstances = 0;
 
         if (tls->glob->rotatefreq > 0 &&
                 taghdr->ts_sec >= tls->next_rotate) {
@@ -379,6 +386,9 @@ static void *start_worker(void *tdata) {
 
     while (!corsaro_halted) {
         corsaro_tagged_packet_header_t *hdr;
+        uint32_t tagid;
+        uint64_t thisseq;
+        int seqindex;
 
         if (zmq_recv(tls->zmq_pullsock, rcvspace, TAGGER_MAX_MSGSIZE,
                 ZMQ_DONTWAIT) < 0) {
@@ -395,6 +405,34 @@ static void *start_worker(void *tdata) {
 
         hdr = (corsaro_tagged_packet_header_t *)rcvspace;
         packetsseen ++;
+
+        tagid = ntohl(hdr->tagger_id);
+        thisseq = bswap_be_to_host64(hdr->seqno);
+
+        if (hdr->hashbin <= 'Z') {
+            seqindex = hdr->hashbin - 'A';
+        } else {
+            seqindex = hdr->hashbin - 'a';
+        }
+
+        if (tagid != tls->taggerid) {
+            /* tagger has restarted -- reset our sequence numbers */
+            tls->taggerid = tagid;
+            memset(tls->nextseq, 0, sizeof(uint64_t) * tls->glob->max_hashbins);
+        }
+
+        /* seqno of 0 is a reserved value -- we will never receive a seqno
+         * of 0, so we can use it to mark the next expected sequence number
+         * as "unknown".
+         */
+        if (tls->nextseq[seqindex] != 0 && thisseq != tls->nextseq[seqindex]) {
+            tls->dropcounter += (thisseq - tls->nextseq[seqindex]);
+            tls->dropinstances ++;
+        }
+        tls->nextseq[seqindex] = thisseq + 1;
+        if (tls->nextseq[seqindex] == 0) {
+            tls->nextseq[seqindex] = 1;
+        }
 
         fast_construct_packet(deadtrace, packet, hdr,
                 rcvspace + sizeof(corsaro_tagged_packet_header_t),
@@ -726,6 +764,11 @@ int main(int argc, char *argv[]) {
     for (i = 0; i < glob->threads; i++) {
         workers[i].glob = glob;
         workers[i].workerid = i;
+        workers[i].taggerid = 0;
+        /* XXX wasteful, but easier than having to use a hash map */
+        workers[i].nextseq = calloc(glob->max_hashbins, sizeof(uint64_t));
+        workers[i].dropcounter = 0;
+        workers[i].dropinstances = 0;
     }
 
     merger.glob = glob;
