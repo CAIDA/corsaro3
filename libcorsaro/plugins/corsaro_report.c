@@ -668,8 +668,8 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
     corsaro_memsource_t *memsrc;
     PWord_t pval;
 
-    JLG(pval, *knownips, (Word_t)ipaddr);
-    if (pval == NULL) {
+    JLI(pval, *knownips, (Word_t)ipaddr);
+    if (*pval == 0) {
         /* New IP, so create a new entry in our map */
         if (track->ip_handler) {
             iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
@@ -681,8 +681,6 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
         iphash->ipaddr = ipaddr;
         iphash->metricsseen = NULL;
         iphash->metriccount = 0;
-
-        JLI(pval, *knownips, (Word_t)ipaddr);
         *pval = (Word_t)(iphash);
     } else {
         /* IP exists in the map, return the existing entry */
@@ -712,11 +710,9 @@ static inline void update_metric_map(corsaro_ip_hash_t *iphash,
     uint8_t metval;
     PWord_t pval;
 
-    JLG(pval, iphash->metricsseen, (Word_t)metricid);
-    if (pval == NULL) {
+    JLI(pval, iphash->metricsseen, (Word_t)metricid);
+    if (*pval == 0) {
         /* metricid was not in the metric hash for this IP */
-        JLI(pval, iphash->metricsseen, (Word_t)metricid);
-        *pval = 0;
         iphash->metriccount ++;
     }
 
@@ -762,8 +758,8 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
 
     PWord_t pval;
 
-    JLG(pval, *metrictally, (Word_t)metricid);
-    if (pval) {
+    JLI(pval, *metrictally, (Word_t)metricid);
+    if (*pval != 0) {
         m = (corsaro_metric_ip_hash_t *)(*pval);
     } else {
         if (track->metric_handler) {
@@ -781,8 +777,6 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         m->destips = 0;
         m->packets = 0;
         m->bytes = 0;
-
-        JLI(pval, *metrictally, (Word_t)metricid);
         *pval = (Word_t)(m);
     }
 
@@ -2416,11 +2410,10 @@ static void update_tracker_results(Pvoid_t *results,
     while (pval) {
         iter = (corsaro_metric_ip_hash_t *)(*pval);
 
-        JLG(pval2, *results, iter->metricid);
-        if (pval2 == NULL) {
+        JLI(pval2, *results, iter->metricid);
+        if (*pval2 == 0) {
             /* This is a new metric, add it to our result hash map */
             r = new_result(iter->metricid, reshandler, conf->outlabel, ts);
-            JLI(pval2, *results, iter->metricid);
             *pval2 = (Word_t)r;
         } else {
             r = (corsaro_report_result_t *)(*pval2);
