@@ -93,7 +93,7 @@ void *start_zmq_output_thread(void *data) {
     int seqindex;
 
     pqueue_t *pq;
-    int i, r, zero = 0, hwm = 10000;
+    int i, r, zero = 0, hwm = 100;
     int onesec = 1000;
 
     void **proxy_recv = calloc(glob->tag_threads, sizeof(void *));
@@ -189,6 +189,13 @@ void *start_zmq_output_thread(void *data) {
 
         /* Only block for a max of one second when reading published packets */
         if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
+            corsaro_log(glob->logger,
+                    "unable to configure tagger output recv socket %s: %s",
+                    sockname,strerror(errno));
+            goto proxyexit;
+        }
+
+        if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVHWM, &zero, sizeof(zero)) < 0) {
             corsaro_log(glob->logger,
                     "unable to configure tagger output recv socket %s: %s",
                     sockname,strerror(errno));
@@ -393,6 +400,13 @@ void *start_zmq_proxy_thread(void *data) {
 
 	/* Only block for a max of one second when reading published packets */
 	if (zmq_setsockopt(proxy_recv, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
+		corsaro_log(glob->logger,
+				"unable to configure tagger proxy recv socket %s: %s",
+				proxy->insockname,strerror(errno));
+		goto proxyexit;
+	}
+
+    if (zmq_setsockopt(proxy_recv, ZMQ_RCVHWM, &zero, sizeof(zero)) < 0) {
 		corsaro_log(glob->logger,
 				"unable to configure tagger proxy recv socket %s: %s",
 				proxy->insockname,strerror(errno));
