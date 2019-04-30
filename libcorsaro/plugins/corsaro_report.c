@@ -323,6 +323,7 @@ typedef struct corsaro_report_iptracker {
      */
     libtrace_list_t *outstanding;
 
+    uint64_t since_interval;
 } corsaro_report_iptracker_t;
 
 /** Structure describing configuration specific to the report plugin */
@@ -1004,6 +1005,8 @@ static void *start_iptracker(void *tdata) {
     corsaro_report_iptracker_t *track;
     corsaro_report_ip_message_t msg;
     int i;
+    uint32_t nextdump = 0;
+    struct timeval tv;
 
     track = (corsaro_report_iptracker_t *)tdata;
 
@@ -1023,6 +1026,19 @@ static void *start_iptracker(void *tdata) {
                     strerror(errno));
             break;
         }
+
+        gettimeofday(&tv, NULL);
+        if (nextdump == 0) {
+            nextdump = tv.tv_sec - (tv.tv_sec % 60) + 60;
+        }
+
+        while (tv.tv_sec >= nextdump) {
+            corsaro_log(track->logger, "processed %lu updates in last minute",
+                track->since_interval);
+            track->since_interval = 0;
+            nextdump += 60;
+        }
+
 
         if (msg.msgtype == CORSARO_IP_MESSAGE_HALT) {
             pthread_mutex_lock(&(track->mutex));
@@ -1095,6 +1111,7 @@ static void *start_iptracker(void *tdata) {
          * observations. */
         for (i = 0; i < msg.bodycount; i++) {
             process_msg_body(track, msg.sender, &(msg.update[i]));
+            track->since_interval ++;
         }
         if (msg.handler) {
             release_corsaro_memhandler_item(msg.handler, msg.memsrc);
@@ -1192,6 +1209,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         pthread_mutex_init(&(conf->iptrackers[i].mutex), NULL);
         conf->iptrackers[i].lastresultts = 0;
 
+        conf->iptrackers[i].since_interval = 0;
         conf->iptrackers[i].knownips = NULL;
         conf->iptrackers[i].knownips_next = NULL;
         conf->iptrackers[i].lastresult = NULL;
