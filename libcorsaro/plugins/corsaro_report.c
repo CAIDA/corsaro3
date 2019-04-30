@@ -380,7 +380,7 @@ typedef struct corsaro_report_msg_body {
 /* XXX could make this configurable? */
 /** The number of IP tag updates to include in a single enqueued message
  *  to an IP tracker thread. */
-#define REPORT_BATCH_SIZE (500)
+#define REPORT_BATCH_SIZE (100)
 
 /** A message sent from a packet processing thread to an IP tracker thread */
 typedef struct corsaro_report_ip_message {
@@ -669,8 +669,8 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
     corsaro_memsource_t *memsrc;
     PWord_t pval;
 
-    JLI(pval, *knownips, (Word_t)ipaddr);
-    if (*pval == 0) {
+    JLG(pval, *knownips, (Word_t)ipaddr);
+    if (pval == NULL) {
         /* New IP, so create a new entry in our map */
         if (track->ip_handler) {
             iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
@@ -679,6 +679,7 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
         } else {
             iphash = calloc(1, sizeof(corsaro_ip_hash_t));
         }
+        JLI(pval, *knownips, (Word_t)ipaddr);
         iphash->ipaddr = ipaddr;
         iphash->metricsseen = NULL;
         iphash->metriccount = 0;
@@ -711,9 +712,11 @@ static inline void update_metric_map(corsaro_ip_hash_t *iphash,
     uint8_t metval;
     PWord_t pval;
 
-    JLI(pval, iphash->metricsseen, (Word_t)metricid);
-    if (*pval == 0) {
+    JLG(pval, iphash->metricsseen, (Word_t)metricid);
+    if (pval == NULL) {
         /* metricid was not in the metric hash for this IP */
+        JLI(pval, iphash->metricsseen, (Word_t)metricid);
+        *pval = 0;
         iphash->metriccount ++;
     }
 
@@ -759,8 +762,8 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
 
     PWord_t pval;
 
-    JLI(pval, *metrictally, (Word_t)metricid);
-    if (*pval != 0) {
+    JLG(pval, *metrictally, (Word_t)metricid);
+    if (pval != NULL) {
         m = (corsaro_metric_ip_hash_t *)(*pval);
     } else {
         if (track->metric_handler) {
@@ -773,6 +776,7 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
             m->memsrc = NULL;
         }
 
+        JLI(pval, *metrictally, (Word_t)metricid);
         m->metricid = metricid;
         m->srcips = 0;
         m->destips = 0;
@@ -2428,10 +2432,11 @@ static void update_tracker_results(Pvoid_t *results,
     while (pval) {
         iter = (corsaro_metric_ip_hash_t *)(*pval);
 
-        JLI(pval2, *results, iter->metricid);
-        if (*pval2 == 0) {
+        JLG(pval2, *results, iter->metricid);
+        if (pval2 == NULL) {
             /* This is a new metric, add it to our result hash map */
             r = new_result(iter->metricid, reshandler, conf->outlabel, ts);
+            JLI(pval2, *results, iter->metricid);
             *pval2 = (Word_t)r;
         } else {
             r = (corsaro_report_result_t *)(*pval2);
