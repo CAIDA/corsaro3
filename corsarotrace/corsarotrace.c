@@ -83,9 +83,14 @@ static void fast_construct_packet(libtrace_t *deadtrace,
 
     packet->trace = deadtrace;
     if (*packetbufsize < taghdr->pktlen + sizeof(pcaphdr)) {
-        packet->buffer = realloc(packet->buffer,
-                taghdr->pktlen + sizeof(pcaphdr));
-        *packetbufsize = taghdr->pktlen + sizeof(pcaphdr);
+        if (taghdr->pktlen + sizeof(pcaphdr) > 512) {
+            packet->buffer = realloc(packet->buffer,
+                    taghdr->pktlen + sizeof(pcaphdr));
+            *packetbufsize = taghdr->pktlen + sizeof(pcaphdr);
+        } else {
+            packet->buffer = realloc(packet->buffer, 512);
+            *packetbufsize = 512;
+        }
     }
 
     packet->buf_control = TRACE_CTRL_PACKET;
