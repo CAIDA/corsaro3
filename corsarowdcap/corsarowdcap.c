@@ -126,6 +126,7 @@ libtrace_callback_set_t *processing = NULL;
 volatile int corsaro_halted = 0;
 volatile int corsaro_restart = 0;
 volatile int corsaro_last_restart = 0;
+volatile int child_halted = 0;
 
 /** Signal handler for SIGTERM and SIGINT
  *
@@ -159,7 +160,9 @@ static void child_signal(int sig) {
 
     /* We need to call wait() to be able to properly reap any finished
      * child processes */
-    wait(&status);
+    while(waitpid(-1, &status, WNOHANG) > 0) {
+        child_halted += 1;
+    }
 }
 
 /** Provides usage guidance for this program.
@@ -1413,6 +1416,7 @@ int main(int argc, char *argv[]) {
     corsaro_wdcap_global_t *glob = NULL;
     int runpid = 0;
     int runerr = 0;
+    int restart_triggered = 0;
 
     /* Disable threaded I/O in libwandio, in situations where wandio is
      * used -- we only do uncompressed output so the threading is just
@@ -1458,6 +1462,7 @@ int main(int argc, char *argv[]) {
                 break;
             }
 
+            restart_triggered = 1;
             if (kill(runpid, SIGHUP) < 0) {
                 corsaro_log(glob->logger, "Failed to send HUP to running corsarowdcap pid (%s): %s", glob->pidfile, strerror(errno));
                 runerr = 1;
@@ -1482,6 +1487,18 @@ int main(int argc, char *argv[]) {
             }
 
         }
+
+        while (child_halted > 0) {
+            if (!restart_triggered) {
+                corsaro_log(glob->logger, "Child corsarowdcap process terminated unexpectedly?");
+                runerr = 1;
+                corsaro_halted = 1;
+                break;
+            }
+            restart_triggered = 0;
+            child_halted --;
+        }
+
         usleep(100);
     }
 
