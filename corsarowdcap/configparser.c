@@ -133,12 +133,14 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
         }
 
         /* TODO zstd and lz4, once libtrace supports them properly */
+#if 0
         if (strcmp((char *)value->data.scalar.value, "zstd") == 0) {
             glob->compress_method = TRACE_OPTION_COMPRESSTYPE_ZSTD;
         }
         if (strcmp((char *)value->data.scalar.value, "lz4") == 0) {
             glob->compress_method = TRACE_OPTION_COMPRESSTYPE_LZ4;
         }
+#endif
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
