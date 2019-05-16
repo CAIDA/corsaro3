@@ -316,12 +316,26 @@ static inline int check_aiowrite_status(corsaro_fast_trace_writer_t *writer,
 
     if (err == 0) {
         /* Write has completed */
-        /* TODO deal with partial writes */
-        assert(aio_return(&(writer->aio[OTHERBUF(writer)])) ==
-                writer->offset[OTHERBUF(writer)]);
-        writer->waiting = 0;
-        writer->offset[OTHERBUF(writer)] = 0;
-        return 1;
+        int r = aio_return(&(writer->aio[OTHERBUF(writer)]));
+
+        if (r == writer->offset[OTHERBUF(writer)]) {
+            writer->waiting = 0;
+            writer->offset[OTHERBUF(writer)] = 0;
+            return 1;
+        }
+
+        /* Partial write (probably due to disk being full?) */
+        assert(r < writer->offset[OTHERBUF(writer)]);
+
+        writer->whichbuf = OTHERBUF(writer);
+
+        /* Try to send the remaining content again */
+        writer->offset[THISBUF(writer)] -= r;
+        memmove(writer->localbuf[THISBUF(writer)],
+                writer->localbuf[THISBUF(writer)] + r,
+                writer->offset[THISBUF(writer)]);
+        return schedule_aiowrite(writer, logger);
+
     } else if (err != EINPROGRESS) {
         corsaro_log(logger,
                 "error while performing async fast write: %s",
