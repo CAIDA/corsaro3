@@ -180,6 +180,9 @@ typedef struct corsaro_wdcap_global {
 
     char *pidfile;
 
+    uint8_t compress_level;
+    trace_option_compresstype_t compress_method;
+
     pthread_mutex_t globmutex;
 } corsaro_wdcap_global_t;
 
