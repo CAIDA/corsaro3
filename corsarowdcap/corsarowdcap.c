@@ -834,6 +834,12 @@ static int init_wdcap_process(int argc, char *argv[],
     return 0;
 }
 
+/** Start the proxy thread that links the communication channels between
+ *  the processing threads and the merging threads.
+ *
+ *  We need a proxy because this is a multiple-publisher to multiple-subscriber
+ *  architecture, which won't work in zeromq any other way.
+ */
 static void *start_proxy_thread(void *data) {
 
     corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)data;
@@ -857,15 +863,6 @@ static void *start_proxy_thread(void *data) {
         goto endproxy;
     }
 
-/*
-    if (zmq_setsockopt(xsub, ZMQ_SUBSCRIBE, "", 0) < 0) {
-        corsaro_log(glob->logger,
-                "failed to set subscribe sockopt on xsub in proxy thread: %s",
-                strerror(errno));
-        goto endproxy;
-    }
-*/
-
     if (zmq_bind(xsub, CORSARO_WDCAP_INTERNAL_QUEUE_BACK) < 0) {
         corsaro_log(glob->logger,
                 "failed to bind xsub socket in proxy thread: %s",
@@ -881,15 +878,10 @@ static void *start_proxy_thread(void *data) {
     }
 
     zmq_proxy(xsub, xpub, NULL);
-    zmq_close(xsub);
-    zmq_close(xpub);
-    pthread_exit(NULL);
-
 endproxy:
     zmq_close(xsub);
     zmq_close(xpub);
     pthread_exit(NULL);
-
 }
 
 /** Starts a wdcap capture.
@@ -938,7 +930,7 @@ static int run_wdcap(corsaro_wdcap_global_t *glob, int argc, char *argv[]) {
 
     pthread_create(&(glob->proxy_tid), NULL, start_proxy_thread, glob);
 
-    /* Create a PUSH socket that the main thread can use to send messages
+    /* Create a PUB socket that the main thread can use to send messages
      * to the merge thread. This is only really used to tell the merge
      * thread to stop running.
      */
@@ -1019,6 +1011,7 @@ endwdcap:
         if (glob->zmq_pushsock) {
             haltmsg.type = CORSARO_WDCAP_MSG_STOP;
 
+            /* All merging threads subscribe to '255' */
             haltmsg.target_thread = 255;
 
             if (zmq_send(glob->zmq_pushsock, &haltmsg, sizeof(haltmsg),

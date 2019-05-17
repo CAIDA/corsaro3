@@ -181,17 +181,25 @@ typedef struct corsaro_wdcap_global {
     /** Array to store processing thread local data */
     corsaro_wdcap_local_t *threaddata;
 
+    /** Array to store merging thread local data */
     corsaro_wdcap_merger_t *mergedata;
 
+    /** Number of processing threads that have observed the restart signal */
     uint8_t threads_ended;
 
+    /** The location of the PID file for this wdcap process */
     char *pidfile;
 
+    /** The compression level to use when writing the final output files */
     uint8_t compress_level;
+
+    /** The compression method to use when writing the final output files */
     trace_option_compresstype_t compress_method;
 
+    /** A mutex to protect the global state variables */
     pthread_mutex_t globmutex;
 
+    /** Pthread ID for the proxy thread */
     pthread_t proxy_tid;
 } corsaro_wdcap_global_t;
 

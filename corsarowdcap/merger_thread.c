@@ -250,14 +250,14 @@ fail:
     }
 
     if (success) {
-        /* All packets have been written to the merged file, now create a special
-         * ".done" file so that our archiving scripts can tell that the file is
-         * complete. */
+        /* All packets have been written to the merged file, now create a
+         * special ".done" file so that our archiving scripts can tell that
+         * the file is complete. */
         char *donefilename;
         FILE *f;
 
-        donefilename = corsaro_wdcap_derive_output_name(glob, interval->timestamp,
-                                                        -1, 0, 1);
+        donefilename = corsaro_wdcap_derive_output_name(glob,
+                    interval->timestamp, -1, 0, 1);
         f = fopen(donefilename, "w");
         /* File can be empty, just has to exist */
         fclose(f);
