@@ -109,6 +109,11 @@ The configuration options accepted by corsarowdcap are as follows:
                         libtrace 4.0.8 is installed on your system). If
                         not present, no compression will be performed.
 
+  mergethreads          Number of threads to dedicate to merging the
+                        interim output files into a single coherent trace
+                        file. Defaults to 1.
+
+
 Running corsarowdcap
 ====================
 
