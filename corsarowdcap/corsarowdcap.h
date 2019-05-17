@@ -31,6 +31,9 @@
 
 #define CORSARO_DEFAULT_WDCAP_WRITE_STATS 0
 
+#define CORSARO_WDCAP_INTERNAL_QUEUE_BACK "inproc://wdcapinternalback"
+#define CORSARO_WDCAP_INTERNAL_QUEUE_FRONT "inproc://wdcapinternalfront"
+
 #include "libcorsaro_trace.h"
 #include "libcorsaro_log.h"
 #include "libcorsaro.h"
@@ -63,6 +66,9 @@ enum {
 
 /** Message that is sent to the corsarowdcap merging thread */
 typedef struct corsaro_wdcap_message {
+    /* The merging thread that this message must be sent to */
+    uint8_t target_thread;
+
     /** The ID of the thread that sent this message */
     uint8_t threadid;
 
@@ -104,6 +110,7 @@ struct corsaro_wdcap_interval {
 };
 
 typedef struct corsaro_wdcap_local corsaro_wdcap_local_t;
+typedef struct corsaro_wdcap_merger corsaro_wdcap_merger_t;
 
 /** Global state for a corsarowdcap instance */
 typedef struct corsaro_wdcap_global {
@@ -133,6 +140,9 @@ typedef struct corsaro_wdcap_global {
      *  packets from the input source.
      */
     uint8_t threads;
+
+    /** The number of merging threads to use */
+    uint8_t merge_threads;
 
     /** The length of the file rotation interval in seconds */
     uint32_t interval;
@@ -168,13 +178,10 @@ typedef struct corsaro_wdcap_global {
      */
     void *zmq_pushsock;
 
-    /** ZeroMQ queue that will be used by the merge thread to receive
-     *  messages.
-     */
-    void *zmq_pullsock;
-
     /** Array to store processing thread local data */
     corsaro_wdcap_local_t *threaddata;
+
+    corsaro_wdcap_merger_t *mergedata;
 
     uint8_t threads_ended;
 
@@ -184,6 +191,8 @@ typedef struct corsaro_wdcap_global {
     trace_option_compresstype_t compress_method;
 
     pthread_mutex_t globmutex;
+
+    pthread_t proxy_tid;
 } corsaro_wdcap_global_t;
 
 /** Describes an interim trace file that is being read by the merging thread */
@@ -201,7 +210,13 @@ typedef struct corsaro_wdcap_interim_reader {
 } corsaro_wdcap_interim_reader_t;
 
 /** Local thread state for the merging thread */
-typedef struct corsaro_wdcap_merger {
+struct corsaro_wdcap_merger {
+    /** pthread ID for this thread */
+    pthread_t tid;
+
+    /** Identifier for this merging thread */
+    uint8_t thread_num;
+
     /** A libtrace output handle for the merged output file */
     libtrace_out_t *writer;
 
@@ -212,8 +227,11 @@ typedef struct corsaro_wdcap_merger {
     corsaro_wdcap_interval_t *waiting;
 
     /** ZeroMQ queue for receiving messages from other threads. */
-    void *zmq_pullsock;
-} corsaro_wdcap_merger_t;
+    void *zmq_subsock;
+
+    /** Reference to global state for this corsarowdcap instance */
+    corsaro_wdcap_global_t *glob;
+};
 
 /** Local thread state for the packet processing threads */
 struct corsaro_wdcap_local {
@@ -229,6 +247,9 @@ struct corsaro_wdcap_local {
 
     /** The details of the current interval that we are working on */
     corsaro_interval_t current_interval;
+
+    /** Number of intervals completed by this thread */
+    uint32_t interval_count;
 
     /** The timestamp when the current interval is due to end */
     uint32_t next_report;
@@ -267,5 +288,48 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename,
  *  @param glob     The global state to be freed.
  */
 void corsaro_wdcap_free_global(corsaro_wdcap_global_t *glob);
+
+/** Main loop for the corsarowdcap merging thread.
+ *
+ *  @param data     The global state for this corsarowdcap instance.
+ *
+ *  @return NULL once the thread is halted.
+ */
+void *start_merging_thread(void *data);
+
+/** Uses the output filename template to create a suitable output file
+ *  name for either an interim output file or the final merged output file.
+ *  Also replaces all special formatting options in the template with
+ *  the appropriate value.
+ *
+ *  Can be used both to generate a file name for writing, as well as by
+ *  the merging thread to figure out the names of the interim files that
+ *  it should read.
+ *
+ *  Supports a variety of format modifiers, including everything
+ *  recognised by strftime() (for naming files based on the interval
+ *  timestamp) plus a few custom ones specific to corsarowdcap (which
+ *  are described in the README).
+ *
+ *  @param glob         The global state for this corsarowdcap instance.
+ *  @param timestamp    The timestamp at the start of the current interval.
+ *  @param threadid     The cardinal ID for the thread that is the writer of
+ *                      this output file. Set to -1 if the writer is the
+ *                      merging thread.
+ *  @param needformat   If 1, prepend the trace file format followed by a
+ *                      colon to the output filename to create a valid
+ *                      libtrace URI.
+ *  @param exttype      If 1, append the '.done' extension to the filename.
+ *                      This is used to create special empty files which
+ *                      indicate to archival scripts that an output file is
+ *                      complete and ready to be archived.
+ *                      If 2, append the '.stats' extension to the filename.
+ *                      This is used to create the stats files.
+ *  @return A pointer to a string allocated via strdup() that contains the
+ *  output file name derived from the given parameters. This name must be
+ *  later freed by the caller to avoid leaking the memory holding the string.
+ */
+char *corsaro_wdcap_derive_output_name(corsaro_wdcap_global_t *glob,
+        uint32_t timestamp, int threadid, int needformat, int exttype);
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -148,12 +148,24 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
         glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "mergethreads")) {
+        glob->merge_threads = strtoul((char *)value->data.scalar.value, NULL,
+                10);
+        if (glob->merge_threads < 1) {
+            corsaro_log(glob->logger, "configuration error: you must have at least one merge thread!");
+            corsaro_log(glob->logger, "setting mergethreads to 1...");
+            glob->merge_threads = 1;
+        }
+    }
+
     return 1;
 }
 
 static void log_configuration(corsaro_wdcap_global_t *glob) {
     corsaro_log(glob->logger, "running on monitor %s", glob->monitorid);
     corsaro_log(glob->logger, "using %d processing threads", glob->threads);
+    corsaro_log(glob->logger, "using %d merging threads", glob->merge_threads);
     corsaro_log(glob->logger, "reading from %s\n", glob->inputuri);
     corsaro_log(glob->logger, "interval length is set to %u seconds",
             glob->interval);
@@ -283,6 +295,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->logfilename = NULL;
     glob->consterfframing = CORSARO_ERF_ETHERNET_FRAMING;
     glob->threads = 8;
+    glob->merge_threads = 1;
     glob->logger = NULL;
     glob->trace = NULL;
     glob->inputuri = NULL;
@@ -290,7 +303,6 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->writestats = CORSARO_DEFAULT_WDCAP_WRITE_STATS;
     glob->threads_ended = 0;
     glob->pidfile = NULL;
-    glob->zmq_pullsock = NULL;
 
     glob->compress_level = 0;
     glob->compress_method = TRACE_OPTION_COMPRESSTYPE_NONE;
