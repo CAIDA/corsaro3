@@ -187,6 +187,7 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     int seqindex;
     uint16_t pktalloc = 0;
     void **final_result;
+    uint16_t fbits = 0;
 
     tagid = ntohl(taghdr->tagger_id);
     thisseq = bswap_be_to_host64(taghdr->seqno);
@@ -305,11 +306,15 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
             return -1;
         }
 
-        corsaro_log(tls->glob->logger,
-                "worker thread %d has observed %u packets dropped (%u) by the tagger",
-                tls->workerid, tls->dropcounter, tls->dropinstances);
+        if (tls->dropcounter > 0) {
+            corsaro_log(tls->glob->logger,
+                    "warning: worker thread %d has observed %u packets dropped by the tagger in the past interval (%u instances)",
+                    tls->workerid,
+                    tls->dropcounter, tls->dropinstances);
+        }
         tls->dropcounter = 0;
         tls->dropinstances = 0;
+        tls->filteredcount = 0;
 
         if (tls->glob->rotatefreq > 0 &&
                 taghdr->ts_sec >= tls->next_rotate) {
@@ -333,9 +338,27 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
         tls->pkts_outstanding = 0;
     }
 
+    fbits = ntohs(taghdr->filterbits);
+    if (tls->glob->removespoofed && (fbits & CORSARO_FILTERBIT_SPOOFED)) {
+        goto filtered;
+    }
+
+    if (tls->glob->removeerratic && (fbits & CORSARO_FILTERBIT_ERRATIC)) {
+        goto filtered;
+    }
+
+    if (tls->glob->removerouted && !(fbits & CORSARO_FILTERBIT_NONROUTABLE)) {
+        goto filtered;
+    }
+
     tls->pkts_outstanding ++;
     tls->last_ts = taghdr->ts_sec;
     corsaro_push_packet_plugins(tls->plugins, tls->packet, &(taghdr->tags));
+
+    return 1;
+
+filtered:
+    tls->filteredcount ++;
     return 1;
 }
 static int subscribe_streams(corsaro_trace_global_t *glob,
@@ -359,44 +382,12 @@ static int subscribe_streams(corsaro_trace_global_t *glob,
             assert(glob->max_hashbins < 52);
         }
 
-        /* If nothing is removed, then subscribe to everything */
-        if (glob->removespoofed == 0 && glob->removeerratic == 0 &&
-                glob->removerouted == 0) {
-
-            if (zmq_setsockopt(zmqsock, ZMQ_SUBSCRIBE, tosub, 1)
-                    < 0) {
-                corsaro_log(glob->logger,
-                        "unable to subscribe to all streams of tagged packets: %s",
-                        strerror(errno));
-                return -1;
-            }
-            continue;
-        }
-
-        for (j = 0; j < 8; j++) {
-            uint16_t subbytes;
-
-            if ((j & CORSARO_FILTERBIT_ERRATIC) && glob->removeerratic) {
-                continue;
-            }
-            if ((j & CORSARO_FILTERBIT_SPOOFED) && glob->removespoofed) {
-                continue;
-            }
-            if ((j & CORSARO_FILTERBIT_NONROUTABLE) == 0 &&
-                    glob->removerouted) {
-                continue;
-            }
-
-            subbytes = htons((uint16_t)j);
-            memcpy(tosub + 1, &subbytes, sizeof(uint16_t));
-
-            if (zmq_setsockopt(zmqsock, ZMQ_SUBSCRIBE, tosub,
-                    sizeof(subbytes) + 1) < 0) {
-                corsaro_log(glob->logger,
-                        "unable to subscribe to stream of tagged packets: %s",
-                        strerror(errno));
-                return -1;
-            }
+        if (zmq_setsockopt(zmqsock, ZMQ_SUBSCRIBE, tosub, 1)
+                < 0) {
+            corsaro_log(glob->logger,
+                    "unable to subscribe to all streams of tagged packets: %s",
+                    strerror(errno));
+            return -1;
         }
     }
     return 0;
@@ -446,6 +437,7 @@ static void *start_worker(void *tdata) {
                 tls->workerid);
         goto endworker;
     }
+    tls->filteredcount = 0;
 
     while (!corsaro_halted) {
         corsaro_tagged_packet_header_t *hdr;
