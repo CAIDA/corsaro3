@@ -438,8 +438,6 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
     plugin_state_ptrs = calloc(fin->threads_ended, sizeof(void *));
 
     while (p != NULL) {
-        corsaro_log(logger, "commencing merge for plugin %s", p->name);
-
         for (pindex = 0; pindex < fin->threads_ended; pindex ++) {
             plugin_state_ptrs[pindex] = fin->thread_plugin_data[pindex][index];
         }

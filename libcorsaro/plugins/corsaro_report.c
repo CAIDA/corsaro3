@@ -434,6 +434,7 @@ typedef struct corsaro_report_state {
      *  threads -- one queue per tracker thread.
      */
     void **tracker_queues;
+
 } corsaro_report_state_t;
 
 /** Merge thread state for the report plugin */
@@ -1009,8 +1010,6 @@ static void *start_iptracker(void *tdata) {
     corsaro_report_iptracker_t *track;
     corsaro_report_ip_message_t msg;
     int i;
-    uint32_t nextdump = 0;
-    struct timeval tv;
 
     track = (corsaro_report_iptracker_t *)tdata;
 
@@ -1030,19 +1029,6 @@ static void *start_iptracker(void *tdata) {
                     strerror(errno));
             break;
         }
-
-        gettimeofday(&tv, NULL);
-        if (nextdump == 0) {
-            nextdump = tv.tv_sec - (tv.tv_sec % 60) + 60;
-        }
-
-        while (tv.tv_sec >= nextdump) {
-            corsaro_log(track->logger, "processed %lu updates in last minute",
-                track->since_interval);
-            track->since_interval = 0;
-            nextdump += 60;
-        }
-
 
         if (msg.msgtype == CORSARO_IP_MESSAGE_HALT) {
             pthread_mutex_lock(&(track->mutex));
@@ -1950,7 +1936,6 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     if (extract_addresses(packet, &srcaddr, &dstaddr, &iplen) != 0) {
         return 0;
     }
-
     /* Update our metrics observed for the source address */
     update_metrics_for_address(conf, state, srcaddr, 1, iplen, tags, p->logger);
     /* Update our metrics observed for the destination address */
@@ -2613,7 +2598,6 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     procconf = ((corsaro_report_interim_t *)(tomerge[0]))->baseconf;
     conf = (corsaro_report_config_t *)(p->config);
 
-    corsaro_log(p->logger, "waiting for IP tracker results.....%u", fin->timestamp);
     trackers_done = (uint8_t *)calloc(procconf->tracker_count, sizeof(uint8_t));
 
     if (initialise_results(p, &results, m->res_handler, fin->timestamp) < 0) {
@@ -2658,7 +2642,6 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     } while (totaldone < procconf->tracker_count);
 
     free(trackers_done);
-    corsaro_log(p->logger, "all IP tracker results have been read!");
 
     if (skipresult) {
         /* This result is invalid because not all of the tracker threads
