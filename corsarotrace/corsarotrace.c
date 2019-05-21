@@ -314,7 +314,6 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
         }
         tls->dropcounter = 0;
         tls->dropinstances = 0;
-        tls->filteredcount = 0;
 
         if (tls->glob->rotatefreq > 0 &&
                 taghdr->ts_sec >= tls->next_rotate) {
@@ -358,7 +357,6 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     return 1;
 
 filtered:
-    tls->filteredcount ++;
     return 1;
 }
 static int subscribe_streams(corsaro_trace_global_t *glob,
@@ -437,7 +435,6 @@ static void *start_worker(void *tdata) {
                 tls->workerid);
         goto endworker;
     }
-    tls->filteredcount = 0;
 
     while (!corsaro_halted) {
         corsaro_tagged_packet_header_t *hdr;
