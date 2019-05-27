@@ -34,6 +34,7 @@
 
 #include "libcorsaro_log.h"
 #include "libcorsaro_tagging.h"
+#include "libcorsaro_common.h"
 #include "corsarotagger.h"
 #include "pqueue.h"
 
@@ -86,9 +87,13 @@ void *start_zmq_output_thread(void *data) {
     corsaro_tagger_proxy_data_t *proxy = (corsaro_tagger_proxy_data_t *)data;
     corsaro_tagger_global_t *glob = proxy->glob;
     corsaro_tagger_packet_t *packet;
+    uint32_t taggerid = 0;
+    uint64_t *nextseq = NULL;
+    FILE *f;
+    int seqindex;
 
     pqueue_t *pq;
-    int i, r, zero = 0;
+    int i, r, zero = 0, hwm = 100;
     int onesec = 1000;
 
     void **proxy_recv = calloc(glob->tag_threads, sizeof(void *));
@@ -96,6 +101,38 @@ void *start_zmq_output_thread(void *data) {
 
     uint8_t **recvbufs = calloc(glob->tag_threads, sizeof(uint8_t *));
     uint32_t *recvbufsizes = calloc(glob->tag_threads, sizeof(uint32_t));
+
+    uint8_t **sendbufs = calloc(glob->output_hashbins, sizeof(uint8_t *));
+    uint32_t *sendbufsizes = calloc(glob->output_hashbins, sizeof(uint32_t));
+
+    nextseq = (uint64_t *)calloc(glob->output_hashbins, sizeof(uint64_t));
+
+    /* Assign ourselves a "random" tagger ID number so that clients can
+     * tell if the tagger is restarted (and therefore its sequence space
+     * will be reset).
+     * Try using /dev/urandom but fall back to current Unix time if that
+     * fails for some reason.
+     */
+    f = fopen("/dev/urandom", "rb");
+    if (f == NULL) {
+        corsaro_log(glob->logger,
+                "unable to open /dev/urandom to generate tagger ID: %s",
+                strerror(errno));
+        taggerid = (uint32_t) time(NULL);
+    }
+
+    while (taggerid == 0) {
+        if (fread(&taggerid, sizeof(taggerid), 1, f) < 1) {
+            corsaro_log(glob->logger,
+                    "unable to read /dev/urandom to generate tagger ID: %s",
+                    strerror(errno));
+            taggerid = (uint32_t) time(NULL);
+        }
+    }
+
+    if (f) {
+        fclose(f);
+    }
 
     /** Our output needs to be in chronological order, so we'll use a
      *  priority queue to make sure we're publishing the oldest packet
@@ -114,7 +151,7 @@ void *start_zmq_output_thread(void *data) {
      * wants -- NOTE: this means you will run out of memory if you
      * have a slow client!
      */
-    if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &zero, sizeof(zero)) != 0) {
+    if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
         corsaro_log(glob->logger,
                 "error while setting HWM for output forwarding socket %s: %s",
                 proxy->outsockname, strerror(errno));
@@ -126,6 +163,10 @@ void *start_zmq_output_thread(void *data) {
                 "unable to create tagger output forwarding socket %s: %s",
                 proxy->outsockname, strerror(errno));
         goto proxyexit;
+    }
+
+    for (i = 0; i < glob->output_hashbins; i++) {
+        sendbufs[i] = malloc(10 * TAGGER_BUFFER_SIZE);
     }
 
     /* Set up our receiving sockets from each of the tagger threads and
@@ -148,6 +189,13 @@ void *start_zmq_output_thread(void *data) {
 
         /* Only block for a max of one second when reading published packets */
         if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
+            corsaro_log(glob->logger,
+                    "unable to configure tagger output recv socket %s: %s",
+                    sockname,strerror(errno));
+            goto proxyexit;
+        }
+
+        if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVHWM, &zero, sizeof(zero)) < 0) {
             corsaro_log(glob->logger,
                     "unable to configure tagger output recv socket %s: %s",
                     sockname,strerror(errno));
@@ -198,8 +246,30 @@ void *start_zmq_output_thread(void *data) {
         packet = (corsaro_tagger_packet_t *)nextpkt;
         workind = packet->taggedby;
 
-        zmq_send(proxy_fwd, &(packet->hdr),
-                sizeof(packet->hdr) + packet->hdr.pktlen, 0);
+        if (packet->hdr.hashbin <= 'Z') {
+            seqindex = packet->hdr.hashbin - 'A';
+        } else {
+            seqindex = packet->hdr.hashbin - 'a';
+        }
+
+        packet->hdr.tagger_id = htonl(taggerid);
+        if (nextseq[seqindex] == 0) {
+            nextseq[seqindex] = 1;
+        }
+        packet->hdr.seqno = bswap_host_to_be64(nextseq[seqindex]);
+        nextseq[seqindex] ++;
+
+        if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
+                sizeof(packet->hdr) + packet->hdr.pktlen) {
+
+            zmq_send(proxy_fwd, sendbufs[seqindex], sendbufsizes[seqindex], 0);
+            sendbufsizes[seqindex] = 0;
+        }
+
+        memcpy(sendbufs[seqindex] + sendbufsizes[seqindex], &(packet->hdr),
+                sizeof(packet->hdr) + packet->hdr.pktlen);
+        sendbufsizes[seqindex] += sizeof(packet->hdr) + packet->hdr.pktlen;
+
 
         /* Read the next packet from the worker that provided us with
          * the packet we just published.
@@ -233,6 +303,14 @@ void *start_zmq_output_thread(void *data) {
 
 proxyexit:
     pqueue_free(pq);
+    free(nextseq);
+    for (i = 0; i < glob->output_hashbins; i++) {
+        if (sendbufsizes[i] > 0) {
+            zmq_send(proxy_fwd, sendbufs[i], sendbufsizes[i], 0);
+        }
+        free(sendbufs[i]);
+    }
+
     for (i = 0; i < glob->tag_threads; i++) {
         if (proxy_recv[i]) {
             zmq_close(proxy_recv[i]);
@@ -242,6 +320,8 @@ proxyexit:
     free(proxy_recv);
     free(recvbufs);
     free(recvbufsizes);
+    free(sendbufs);
+    free(sendbufsizes);
     zmq_close(proxy_fwd);
     pthread_exit(NULL);
 }
@@ -320,6 +400,13 @@ void *start_zmq_proxy_thread(void *data) {
 
 	/* Only block for a max of one second when reading published packets */
 	if (zmq_setsockopt(proxy_recv, ZMQ_RCVTIMEO, &onesec, sizeof(onesec)) < 0) {
+		corsaro_log(glob->logger,
+				"unable to configure tagger proxy recv socket %s: %s",
+				proxy->insockname,strerror(errno));
+		goto proxyexit;
+	}
+
+    if (zmq_setsockopt(proxy_recv, ZMQ_RCVHWM, &zero, sizeof(zero)) < 0) {
 		corsaro_log(glob->logger,
 				"unable to configure tagger proxy recv socket %s: %s",
 				proxy->insockname,strerror(errno));
