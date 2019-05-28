@@ -145,6 +145,18 @@ The full set of supported config options for corsarowdcap is:
 			corresponding trace files, except they will have a
 			'.stats' extension.
 
+  compresslevel         Compression level to use when writing compressed
+                        trace files (defaults to 0, i.e. no compression).
+
+  compressmethod        Compression method to use when writing compressed
+                        trace files. Can be one of "gzip", "bzip2", "lzo",
+                        or "lzma" ("zstd" and "lz4" will be added if
+                        libtrace 4.0.8 is installed on your system). If
+                        not present, no compression will be performed.
+
+  mergethreads          Number of threads to dedicate to merging the
+                        interim output files into a single coherent trace
+                        file. Defaults to 1.
 
 Running corsarotagger
 =====================

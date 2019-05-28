@@ -31,6 +31,7 @@
 #include "libcorsaro_common.h"
 #include "corsarowdcap.h"
 
+#include <libtrace.h>
 #include <yaml.h>
 
 static int grab_corsaro_filename_template(corsaro_wdcap_global_t *glob,
@@ -100,8 +101,62 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "compresslevel")) {
+        uint32_t level = strtoul((char *)value->data.scalar.value, NULL, 10);
+
+        if (level > 9) {
+            corsaro_log(glob->logger, "bad compression level %u, must be between 0 and 9 inclusive -- ignoring.", level);
+        } else {
+            glob->compress_level = level;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "compressmethod")) {
+        if (strcmp((char *)value->data.scalar.value, "gzip") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_ZLIB;
+        }
+        if (strcmp((char *)value->data.scalar.value, "zlib") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_ZLIB;
+        }
+        if (strcmp((char *)value->data.scalar.value, "bzip") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_BZ2;
+        }
+        if (strcmp((char *)value->data.scalar.value, "bzip2") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_BZ2;
+        }
+        if (strcmp((char *)value->data.scalar.value, "lzo") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_LZO;
+        }
+        if (strcmp((char *)value->data.scalar.value, "lzma") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_LZMA;
+        }
+
+        /* TODO zstd and lz4, once libtrace supports them properly */
+#if 0
+        if (strcmp((char *)value->data.scalar.value, "zstd") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_ZSTD;
+        }
+        if (strcmp((char *)value->data.scalar.value, "lz4") == 0) {
+            glob->compress_method = TRACE_OPTION_COMPRESSTYPE_LZ4;
+        }
+#endif
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "threads")) {
         glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "mergethreads")) {
+        glob->merge_threads = strtoul((char *)value->data.scalar.value, NULL,
+                10);
+        if (glob->merge_threads < 1) {
+            corsaro_log(glob->logger, "configuration error: you must have at least one merge thread!");
+            corsaro_log(glob->logger, "setting mergethreads to 1...");
+            glob->merge_threads = 1;
+        }
     }
 
     return 1;
@@ -110,6 +165,7 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
 static void log_configuration(corsaro_wdcap_global_t *glob) {
     corsaro_log(glob->logger, "running on monitor %s", glob->monitorid);
     corsaro_log(glob->logger, "using %d processing threads", glob->threads);
+    corsaro_log(glob->logger, "using %d merging threads", glob->merge_threads);
     corsaro_log(glob->logger, "reading from %s\n", glob->inputuri);
     corsaro_log(glob->logger, "interval length is set to %u seconds",
             glob->interval);
@@ -117,6 +173,30 @@ static void log_configuration(corsaro_wdcap_global_t *glob) {
         corsaro_log(glob->logger, "assuming constant ERF framing length of %d",
                 glob->consterfframing);
     }
+
+    if (glob->compress_level == 0 ||
+            glob->compress_method == TRACE_OPTION_COMPRESSTYPE_NONE) {
+        corsaro_log(glob->logger, "writing uncompressed files");
+    } else {
+        char *method="unknown";
+        switch(glob->compress_method) {
+            case TRACE_OPTION_COMPRESSTYPE_ZLIB:
+                method = "gzip";
+                break;
+            case TRACE_OPTION_COMPRESSTYPE_BZ2:
+                method = "bzip2";
+                break;
+            case TRACE_OPTION_COMPRESSTYPE_LZO:
+                method = "lzo";
+                break;
+            case TRACE_OPTION_COMPRESSTYPE_LZMA:
+                method = "lzma";
+                break;
+        }
+        corsaro_log(glob->logger, "writing %s-compressed files using level %u",
+                method, glob->compress_level);
+    }
+
     corsaro_log(glob->logger, "rotating files every interval");
     if (glob->fileformat) {
         corsaro_log(glob->logger, "writing files using the %s format",
@@ -215,6 +295,7 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->logfilename = NULL;
     glob->consterfframing = CORSARO_ERF_ETHERNET_FRAMING;
     glob->threads = 8;
+    glob->merge_threads = 1;
     glob->logger = NULL;
     glob->trace = NULL;
     glob->inputuri = NULL;
@@ -222,7 +303,9 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->writestats = CORSARO_DEFAULT_WDCAP_WRITE_STATS;
     glob->threads_ended = 0;
     glob->pidfile = NULL;
-    glob->zmq_pullsock = NULL;
+
+    glob->compress_level = 0;
+    glob->compress_method = TRACE_OPTION_COMPRESSTYPE_NONE;
 
     pthread_mutex_init(&(glob->globmutex), NULL);
 

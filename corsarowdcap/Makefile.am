@@ -31,6 +31,7 @@ EXTRA_DIST = README exampleconfig.yaml
 # main corsaro program
 corsarowdcap_SOURCES = \
 	corsarowdcap.c \
+        merger_thread.c \
         configparser.c \
         corsarowdcap.h
 
