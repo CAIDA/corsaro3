@@ -1074,14 +1074,6 @@ int main(int argc, char *argv[]) {
     int runerr = 0;
     int restart_triggered = 0;
 
-    /* Disable threaded I/O in libwandio, in situations where wandio is
-     * used -- we only do uncompressed output so the threading is just
-     * extra overhead for us */
-    if (setenv("LIBTRACEIO", "nothreads", 1) != 0) {
-        fprintf(stderr, "corsarowdcap: unable to set libwandio environment\n");
-        return -1;
-    }
-
     corsaro_halted = 0;
     corsaro_restart = 0;
 
