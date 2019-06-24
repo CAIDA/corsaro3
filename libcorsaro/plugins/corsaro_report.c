@@ -167,6 +167,30 @@ const char *alpha2_countries[] = {
     "VI", "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
 };
 
+const char *country_continents[] = {
+    "unknown", "EU", "AS", "AS", "NA", "NA", "EU", "AS", "AF", "AN", "SA", "OC",
+    "EU", "OC", "NA", "EU", "AS", "EU" ,"NA", "AS", "EU", "AF", "EU", "AS",
+    "AF", "AF", "NA", "NA", "AS", "EU", "NA", "SA", "NA", "AS", "AN", "AF",
+    "EU", "NA", "NA", "AS", "AF", "AF", "AF", "EU", "AF", "OC", "SA", "AF",
+    "AS", "SA", "NA", "NA", "AF", "NA", "AS", "EU", "EU", "EU", "AF", "EU",
+    "NA", "NA", "AF", "SA", "EU", "AF", "AF", "AF", "EU", "AF", "EU", "OC",
+    "SA", "OC", "EU", "EU", "AF", "EU", "NA", "AS", "SA", "EU", "AF", "EU",
+    "NA", "AF", "AF", "NA", "AF", "EU", "AN", "NA", "OC", "AF", "SA", "AS",
+    "AN", "NA", "EU", "NA", "EU", "AS", "EU", "AS", "EU", "AS", "AS", "AS",
+    "AS", "EU", "EU", "EU", "NA", "AS", "AS", "AF", "AS", "AS", "OC", "AF",
+    "NA", "AS", "AS", "AS", "NA", "AS", "AS", "AS", "NA", "EU", "AS", "AF",
+    "AF", "EU", "EU", "EU", "AF", "AF", "EU", "EU", "EU", "NA", "AF", "OC",
+    "EU", "AF", "AS", "AS", "AS", "OC", "NA", "AF", "NA", "EU", "AF", "AS",
+    "AF", "NA", "AS", "AF", "AF", "OC", "AF", "OC", "AF", "NA", "EU", "EU",
+    "AS", "OC", "OC", "OC", "AS", "NA", "SA", "OC", "OC", "AS", "AS", "EU",
+    "NA", "OC", "NA", "AS", "EU", "OC", "SA", "AS", "AF", "EU", "EU", "EU",
+    "AF", "AS", "OC", "AF", "AF", "EU", "AS", "AF", "EU", "EU", "EU", "AF",
+    "EU", "AF", "AF", "SA", "AF", "AF", "NA", "NA", "AS", "AF", "NA", "AF",
+    "AN", "AF", "AS", "AS", "OC", "AS", "AS", "AF", "OC", "AS", "NA", "OC",
+    "AS", "AF", "EU", "AF", "NA", "NA", "SA", "AS", "EU", "NA", "SA", "NA",
+    "NA", "AS", "OC", "OC", "OC", "AS", "AF", "AF", "AF", "AF",
+};
+
 /** Common plugin information and function callbacks */
 static corsaro_plugin_t corsaro_report_plugin = {
     PLUGIN_NAME,
@@ -456,6 +480,8 @@ typedef struct corsaro_report_merge_state {
      *  libtimeseries instance.
      */
     Pvoid_t metrickp_keys;
+
+    Pvoid_t country_cont_map;
 } corsaro_report_merge_state_t;
 
 
@@ -1953,6 +1979,25 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
 
 /** ------------- MERGING API -------------------- */
 
+static inline void populate_country_continent_map(
+        corsaro_report_merge_state_t *m) {
+
+    int i;
+    Word_t *pval;
+
+    for (i = 0; i < CORSAROTRACE_NUM_COUNTRIES; i++) {
+
+        uint64_t countrynum;
+
+        countrynum = (((uint64_t)alpha2_countries[i][0]) |
+                 ((uint64_t)alpha2_countries[i][1]) << 8);
+
+        JLI(pval, m->country_cont_map, countrynum);
+        *pval = (Word_t)(country_continents[i]);
+    }
+
+}
+
 /** Creates and initialises the internal state required by the merging thread
  *  when using the report plugin.
  *
@@ -2025,6 +2070,9 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
     }
 
     m->metrickp_keys = (Pvoid_t) NULL;
+    m->country_cont_map = (Pvoid_t) NULL;
+
+    populate_country_continent_map(m);
 
 #ifdef HAVE_TCMALLOC
     m->res_handler = NULL;
@@ -2071,6 +2119,7 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
     }
 
     JLFA(judyret, m->metrickp_keys);
+    JLFA(judyret, m->country_cont_map);
 
     free(m);
     return 0;
@@ -2079,8 +2128,21 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
 #define AVRO_CONVERSION_FAILURE -1
 #define AVRO_WRITE_FAILURE -2
 
-static inline void metric_to_strings(corsaro_report_result_t *res) {
-    char valspace[2048];
+#define LOOKUP_COUNTRY_CONTINENT(contmap, metricid) \
+    lookup = metricid & 0xffffffff; \
+    JLF(pval, contmap, lookup); \
+    if (pval == NULL) { \
+        contkey = "notfound"; \
+    } else { \
+        contkey = (const char *)*pval; \
+    }
+
+static inline void metric_to_strings(Pvoid_t *contmap,
+        corsaro_report_result_t *res) {
+
+    Word_t *pval;
+    const char *contkey = NULL;
+    uint64_t lookup;
 
     /* Convert the 64 bit metric ID into printable strings that we can
      * put in our result output.
@@ -2122,22 +2184,24 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
             snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_CONTINENT:
-            strncpy(res->metrictype, "geo.maxmind.continent", 128);
+            strncpy(res->metrictype, "geo.maxmind", 128);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
-            strncpy(res->metrictype, "geo.maxmind.country", 128);
+            LOOKUP_COUNTRY_CONTINENT(contmap, res->metricid)
+            snprintf(res->metrictype, 128, "geo.maxmind.%s", contkey);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             break;
         case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
-            strncpy(res->metrictype, "geo.netacuity.continent", 128);
+            strncpy(res->metrictype, "geo.netacuity", 128);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             break;
         case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
-            strncpy(res->metrictype, "geo.netacuity.country", 128);
+            LOOKUP_COUNTRY_CONTINENT(contmap, res->metricid)
+            snprintf(res->metrictype, 128, "geo.netacuity.%s", contkey);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             break;
@@ -2160,12 +2224,13 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
  *  @return the length of the resulting key string.
  */
 static inline int derive_libts_keyname(corsaro_plugin_t *p,
+        corsaro_report_merge_state_t *m,
         char *keyspace, int keylen, corsaro_report_result_t *res) {
 
     int ret;
     corsaro_report_config_t *config = (corsaro_report_config_t *)p->config;
 
-    metric_to_strings(res);
+    metric_to_strings(m->country_cont_map, res);
     /* 'overall' metrics have no suitable metric value, so we need to
      * account for this case.
      */
@@ -2195,12 +2260,13 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
  *  @param res          The report plugin result to be written.
  *  @return 0 if the write is successful, -1 if an error occurs.
  */
-static int write_single_metric_avro(corsaro_logger_t *logger,
+static int write_single_metric_avro(Pvoid_t countrycontmap,
+        corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, corsaro_report_result_t *res) {
 
     avro_value_t *avro;
 
-    metric_to_strings(res);
+    metric_to_strings(countrycontmap, res);
     avro = corsaro_populate_avro_item(writer, res, report_result_to_avro);
     if (avro == NULL) {
         corsaro_log(logger,
@@ -2228,7 +2294,7 @@ static int write_single_metric_avro(corsaro_logger_t *logger,
 
 static int write_all_metrics_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
-        corsaro_memhandler_t *handler) {
+        corsaro_memhandler_t *handler, Pvoid_t contmap) {
 
     corsaro_report_result_t *r, *tmpres;
     int writeret = 0;
@@ -2245,7 +2311,7 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
          * anymore.
          */
         if (!stopwriting) {
-            writeret = write_single_metric_avro(logger, writer, r);
+            writeret = write_single_metric_avro(contmap, logger, writer, r);
             if (writeret == AVRO_WRITE_FAILURE) {
                 stopwriting = 1;
             }
@@ -2309,7 +2375,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
             char fullkeyname[5000];
             int keyid = -1;
 
-            if (derive_libts_keyname(p, keyname, 4096, r) <= 0) {
+            if (derive_libts_keyname(p, m, keyname, 4096, r) <= 0) {
                 corsaro_log(p->logger,
                         "error deriving suitable keyname from metricid %lu",
                         r->metricid);
@@ -2472,7 +2538,8 @@ static int report_write_avro_output(corsaro_plugin_t *p,
         free(outname);
     }
 
-    if (write_all_metrics_avro(p->logger, m->writer, results, m->res_handler)
+    if (write_all_metrics_avro(p->logger, m->writer, results, m->res_handler,
+                m->country_cont_map)
         < 0) {
         return -1;
     }
