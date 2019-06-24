@@ -2387,6 +2387,11 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
         timeseries_kp_set(m->kp, (*pval) + 2, r->pkt_cnt);
         timeseries_kp_set(m->kp, (*pval) + 3, r->bytes);
 
+        if (m->res_handler) {
+            release_corsaro_memhandler_item(m->res_handler, r->memsrc);
+        } else {
+            free(r);
+        }
         JLN(pval, *results, index);
     }
 
