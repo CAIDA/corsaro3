@@ -497,10 +497,10 @@ typedef struct corsaro_report_result {
     char *label;
 
     /** A string representation of the metric class */
-    char *metrictype;
+    char metrictype[128];
 
     /** A string representation of the metric value */
-    char *metricval;
+    char metricval[128];
 
     /** Pointer to the memory blob that this structure came from */
     corsaro_memsource_t *memsrc;
@@ -2082,72 +2082,60 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
      */
     switch(res->metricid >> 32) {
         case CORSARO_METRIC_CLASS_COMBINED:
-            res->metrictype = "overall";
-            res->metricval = "";
+            strncpy(res->metrictype, "overall", 128);
+            res->metricval[0] = '\0';
             break;
         case CORSARO_METRIC_CLASS_IP_PROTOCOL:
-            res->metrictype = "traffic.protocol";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.protocol", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_ICMP_CODE:
-            res->metrictype = "traffic.icmp.code";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.icmp.code", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_ICMP_TYPE:
-            res->metrictype = "traffic.icmp.type";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.icmp.type", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
-            res->metrictype = "traffic.port.tcp.src_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.tcp.src_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_TCP_DEST_PORT:
-            res->metrictype = "traffic.port.tcp.dst_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.tcp.dst_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_UDP_SOURCE_PORT:
-            res->metrictype = "traffic.port.udp.src_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.udp.src_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_UDP_DEST_PORT:
-            res->metrictype = "traffic.port.udp.dst_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.udp.dst_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_CONTINENT:
-            res->metrictype = "geo.maxmind.continent";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            strncpy(res->metrictype, "geo.maxmind.continent", 128);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
-            res->metrictype = "geo.maxmind.country";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            strncpy(res->metrictype, "geo.maxmind.country", 128);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
-            res->metrictype = "geo.netacuity.continent";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            strncpy(res->metrictype, "geo.netacuity.continent", 128);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
-            res->metrictype = "geo.netacuity.country";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            strncpy(res->metrictype, "geo.netacuity.country", 128);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_PREFIX_ASN:
-            res->metrictype = "routing.asn";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype , "routing.asn", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
     }
 }
@@ -2383,8 +2371,8 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
     r->uniq_dst_ips = 0;
     r->attimestamp = ts;
     r->label = outlabel;
-    r->metrictype = NULL;
-    r->metricval = NULL;
+    r->metrictype[0] = '\0';
+    r->metricval[0] = '\0';
     return r;
 }
 
