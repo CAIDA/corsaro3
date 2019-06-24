@@ -1067,13 +1067,17 @@ static void *start_iptracker(void *tdata) {
             pthread_mutex_unlock(&(track->mutex));
 
             /* End of interval, take final tally and update lastresults */
-            if (track->lastresult != NULL) {
-                corsaro_log(track->logger,
-                        "error, ended report interval before we had dealt with the results from the previous one!");
-                assert(0);
-            }
+            do {
+                pthread_mutex_lock(&(track->mutex));
+                if (track->lastresult == NULL) {
+                    break;
+                }
+                pthread_mutex_unlock(&(track->mutex));
+                /* TODO use a proper condition variable here */
+                sleep(1);
+            } while (1);
 
-            pthread_mutex_lock(&(track->mutex));
+            //pthread_mutex_lock(&(track->mutex));
             if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
                 track->lastresult = track->currentresult;
                 track->lastresultts = complete;
