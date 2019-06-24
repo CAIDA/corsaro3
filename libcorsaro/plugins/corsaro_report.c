@@ -1111,6 +1111,7 @@ static void *start_iptracker(void *tdata) {
             release_corsaro_memhandler_item(msg.handler, msg.memsrc);
         } else {
             free(msg.update);
+            msg.update = NULL;
         }
     }
 
@@ -1120,6 +1121,7 @@ static void *start_iptracker(void *tdata) {
                 release_corsaro_memhandler_item(msg.handler, msg.memsrc);
             } else {
                 free(msg.update);
+                msg.update = NULL;
             }
         }
     }
@@ -1433,7 +1435,9 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
             state->nextmsg[i].handler = NULL;
 
         } else {
-            free(state->nextmsg[i].update);
+            if (state->nextmsg[i].update) {
+                free(state->nextmsg[i].update);
+            }
         }
 
         /* Send the halt message */
