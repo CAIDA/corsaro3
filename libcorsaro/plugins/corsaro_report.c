@@ -2273,12 +2273,15 @@ static int write_single_metric_avro(corsaro_report_merge_state_t *m,
  *  @param resultmap    The hash map containing the combined metric tallies.
  *  @param handler      The corsaro memory handler that was used to allocate
  *                      the results in the result map.
+ *  @param subtreemask  A bitmask showing which metric classes were actively
+ *                      measured during the last interval
  *  @return 0 if successful, -1 if an error occurred.
  */
 
 static int write_all_metrics_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
-        corsaro_memhandler_t *handler, corsaro_report_merge_state_t *m) {
+        corsaro_memhandler_t *handler, corsaro_report_merge_state_t *m,
+        uint32_t subtreemask) {
 
     corsaro_report_result_t *r, *tmpres;
     int writeret = 0;
@@ -2290,6 +2293,16 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
     JLF(pval, *resultmap, index);
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
+
+        /* Don't write metrics for sub-trees that have never been
+         * looked at by the upstream tagger, e.g. if we have no
+         * maxmind tagging, don't write a bunch of 0s for each
+         * country.
+         */
+        if ((subtreemask & (1 << (r->metricid >> 32))) == 0) {
+            JLN(pval, *resultmap, index);
+            continue;
+        }
 
         /* If we run into an error while writing, maybe don't try to write
          * anymore.
@@ -2334,11 +2347,14 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
  *  @param timestamp    The timestamp for the interval that the tallies
  *                      correspond to
  *  @param results      A Judy array containing the tallies
+ *  @param subtreemask  A bitmask showing which metric classes were actively
+ *                      measured during the last interval
  *
  *  @return -1 if an error occurs, 0 if successful
  */
 static int report_write_libtimeseries(corsaro_plugin_t *p,
-        corsaro_report_merge_state_t *m, uint32_t timestamp, Pvoid_t *results)
+        corsaro_report_merge_state_t *m, uint32_t timestamp, Pvoid_t *results,
+        uint32_t subtreemask)
 {
     corsaro_report_result_t *r;
     Word_t index = 0, judyret;
@@ -2349,6 +2365,16 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
     /* Iterate over all of the metrics in our array */
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
+
+        /* Don't write metrics for sub-trees that have never been
+         * looked at by the upstream tagger, e.g. if we have no
+         * maxmind tagging, don't write a bunch of 0s for each
+         * country.
+         */
+        if ((subtreemask & (1 << (r->metricid >> 32))) == 0) {
+            JLN(pval, *results, index);
+            continue;
+        }
 
         JLG(pval, m->metrickp_keys, r->metricid);
         if (pval == NULL) {
@@ -2453,7 +2479,8 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
  */
 static void update_tracker_results(Pvoid_t *results,
         corsaro_report_iptracker_t *tracker, uint32_t ts,
-        corsaro_report_config_t *conf, corsaro_memhandler_t *reshandler) {
+        corsaro_report_config_t *conf, corsaro_memhandler_t *reshandler,
+        uint32_t *subtrees_seen) {
 
     corsaro_report_result_t *r;
     corsaro_metric_ip_hash_t *iter;
@@ -2467,6 +2494,8 @@ static void update_tracker_results(Pvoid_t *results,
     JLF(pval, tracker->lastresult, index);
     while (pval) {
         iter = (corsaro_metric_ip_hash_t *)(*pval);
+
+        *subtrees_seen = (*subtrees_seen) | (1 << (iter->metricid >> 32));
 
         JLG(pval2, *results, iter->metricid);
         if (pval2 == NULL) {
@@ -2510,7 +2539,7 @@ static void update_tracker_results(Pvoid_t *results,
  */
 static int report_write_avro_output(corsaro_plugin_t *p,
         corsaro_report_merge_state_t *m, uint32_t timestamp,
-        Pvoid_t *results) {
+        Pvoid_t *results, uint32_t subtreemask) {
 
     char *outname;
 
@@ -2528,7 +2557,7 @@ static int report_write_avro_output(corsaro_plugin_t *p,
     }
 
     if (write_all_metrics_avro(p->logger, m->writer, results, m->res_handler,
-                m) < 0) {
+                m, subtreemask) < 0) {
         return -1;
     }
 
@@ -2785,6 +2814,8 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
 
+    uint32_t subtrees_seen = 0;
+
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
         return -1;
@@ -2834,7 +2865,8 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
                     update_tracker_results(&results, &(procconf->iptrackers[i]),
-                            fin->timestamp, conf, m->res_handler);
+                            fin->timestamp, conf, m->res_handler,
+                            &subtrees_seen);
                     trackers_done[i] = 1;
                     totaldone ++;
                 } else if (procconf->iptrackers[i].haltphase == 2) {
@@ -2870,13 +2902,15 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
      * been merged into a single result -- write it out!
      */
     if (conf->outformat == CORSARO_OUTPUT_AVRO) {
-        if (report_write_avro_output(p, m, fin->timestamp, &results) < 0) {
+        if (report_write_avro_output(p, m, fin->timestamp, &results,
+                subtrees_seen) < 0) {
             return -1;
         }
     }
 
     if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
-        if (report_write_libtimeseries(p, m, fin->timestamp, &results) < 0) {
+        if (report_write_libtimeseries(p, m, fin->timestamp, &results,
+                subtrees_seen) < 0) {
             return -1;
         }
     }
