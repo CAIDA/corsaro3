@@ -117,6 +117,7 @@ typedef struct corsaro_tagger_glob {
     netacq_opts_t netacqtagopts;
 
     corsaro_ipmeta_state_t *ipmeta_state;
+    uint32_t ipmeta_version;
 
     /** A libtrace hasher function that can be used to distribute received
      *  packets to processing threads.

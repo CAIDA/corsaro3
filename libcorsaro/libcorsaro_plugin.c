@@ -265,7 +265,7 @@ corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
 }
 
 corsaro_plugin_set_t *corsaro_start_merging_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist, int count, int maxsources) {
+        corsaro_plugin_t *plist, int count, int maxsources, void *tagsock) {
 
     int index = 0;
 
@@ -283,7 +283,8 @@ corsaro_plugin_set_t *corsaro_start_merging_plugins(corsaro_logger_t *logger,
     while (plist != NULL) {
         assert(index < count);
 
-        pset->plugin_state[index] = plist->init_merging(plist, maxsources);
+        pset->plugin_state[index] = plist->init_merging(plist, maxsources,
+                tagsock);
 
         index += 1;
         plist = plist->next;

@@ -31,6 +31,7 @@
 #include <libtrace/linked_list.h>
 #include <libipmeta.h>
 #include <libtrace.h>
+#include <Judy.h>
 
 #include "libcorsaro_log.h"
 
@@ -166,6 +167,39 @@ typedef struct corsaro_tagged_packet_header {
     corsaro_packet_tags_t tags;
 } PACKED corsaro_tagged_packet_header_t;
 
+
+enum {
+    TAGGER_REQUEST_HELLO,
+    TAGGER_REQUEST_IPMETA_UPDATE,
+};
+
+enum {
+    TAGGER_LABEL_COUNTRY,
+    TAGGER_LABEL_REGION,
+    TAGGER_LABEL_POLYGON,
+};
+
+typedef struct corsaro_tagger_control_request {
+    uint8_t request_type;
+
+    union {
+        uint32_t last_version;
+    } data;
+} PACKED corsaro_tagger_control_request_t;
+
+typedef struct corsaro_tagger_label_hdr {
+    uint8_t subject_type;
+    uint32_t subject_id;
+    uint16_t label_len;
+} PACKED corsaro_tagger_label_hdr_t;
+
+typedef struct corsaro_tagger_control_reply {
+    uint8_t hashbins;
+    uint32_t ipmeta_version;
+    uint32_t label_count;
+
+} PACKED corsaro_tagger_control_reply_t;
+
 typedef struct corsaro_ipmeta_state {
     ipmeta_t *ipmeta;
 
@@ -179,6 +213,14 @@ typedef struct corsaro_ipmeta_state {
     pthread_mutex_t mutex;
     uint8_t refcount;
     uint8_t ending;
+
+    Pvoid_t country_labels;
+    Pvoid_t region_labels;
+
+    uint32_t last_reload;
+    Pvoid_t recently_added_country_labels;
+    Pvoid_t recently_added_region_labels;
+
 } corsaro_ipmeta_state_t;
 
 /** Structure that maintains state required for tagging packets. */
@@ -286,6 +328,7 @@ ipmeta_provider_t *corsaro_init_ipmeta_provider(ipmeta_t *ipmeta,
         ipmeta_provider_id_t provid, void *options, corsaro_logger_t *logger);
 
 void corsaro_free_ipmeta_state(corsaro_ipmeta_state_t *state);
+void corsaro_free_ipmeta_label_map(Pvoid_t labelmap, int dofree);
 
 void corsaro_replace_tagger_ipmeta(corsaro_packet_tagger_t *tagger,
         corsaro_ipmeta_state_t *replace);

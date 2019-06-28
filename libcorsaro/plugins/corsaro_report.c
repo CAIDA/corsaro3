@@ -142,7 +142,7 @@ const char *alpha2_continents[] = {
 };
 
 /* Pre-defined alpha-2 codes for countries */
-#define CORSAROTRACE_NUM_COUNTRIES (250)
+#define CORSAROTRACE_NUM_COUNTRIES (255)
 const char *alpha2_countries[] = {
     "??", "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS",
     "AT", "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH",
@@ -165,30 +165,7 @@ const char *alpha2_countries[] = {
     "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV",
     "TW", "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG",
     "VI", "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
-};
-
-const char *country_continents[] = {
-    "unknown", "EU", "AS", "AS", "NA", "NA", "EU", "AS", "AF", "AN", "SA", "OC",
-    "EU", "OC", "NA", "EU", "AS", "EU" ,"NA", "AS", "EU", "AF", "EU", "AS",
-    "AF", "AF", "NA", "NA", "AS", "EU", "NA", "SA", "NA", "AS", "AN", "AF",
-    "EU", "NA", "NA", "AS", "AF", "AF", "AF", "EU", "AF", "OC", "SA", "AF",
-    "AS", "SA", "NA", "NA", "AF", "NA", "AS", "EU", "EU", "EU", "AF", "EU",
-    "NA", "NA", "AF", "SA", "EU", "AF", "AF", "AF", "EU", "AF", "EU", "OC",
-    "SA", "OC", "EU", "EU", "AF", "EU", "NA", "AS", "SA", "EU", "AF", "EU",
-    "NA", "AF", "AF", "NA", "AF", "EU", "AN", "NA", "OC", "AF", "SA", "AS",
-    "AN", "NA", "EU", "NA", "EU", "AS", "EU", "AS", "EU", "AS", "AS", "AS",
-    "AS", "EU", "EU", "EU", "NA", "AS", "AS", "AF", "AS", "AS", "OC", "AF",
-    "NA", "AS", "AS", "AS", "NA", "AS", "AS", "AS", "NA", "EU", "AS", "AF",
-    "AF", "EU", "EU", "EU", "AF", "AF", "EU", "EU", "EU", "NA", "AF", "OC",
-    "EU", "AF", "AS", "AS", "AS", "OC", "NA", "AF", "NA", "EU", "AF", "AS",
-    "AF", "NA", "AS", "AF", "AF", "OC", "AF", "OC", "AF", "NA", "EU", "EU",
-    "AS", "OC", "OC", "OC", "AS", "NA", "SA", "OC", "OC", "AS", "AS", "EU",
-    "NA", "OC", "NA", "AS", "EU", "OC", "SA", "AS", "AF", "EU", "EU", "EU",
-    "AF", "AS", "OC", "AF", "AF", "EU", "AS", "AF", "EU", "EU", "EU", "AF",
-    "EU", "AF", "AF", "SA", "AF", "AF", "NA", "NA", "AS", "AF", "NA", "AF",
-    "AN", "AF", "AS", "AS", "OC", "AS", "AS", "AF", "OC", "AS", "NA", "OC",
-    "AS", "AF", "EU", "AF", "NA", "NA", "SA", "AS", "EU", "NA", "SA", "NA",
-    "NA", "AS", "OC", "OC", "OC", "AS", "AF", "AF", "AF", "AF",
+    "A1", "A2", "O1", "AP", "EU",
 };
 
 /** Common plugin information and function callbacks */
@@ -464,6 +441,9 @@ typedef struct corsaro_report_state {
 /** Merge thread state for the report plugin */
 typedef struct corsaro_report_merge_state {
 
+    /** ZeroMQ socket used for requesting IPmeta labels from the tagger */
+    void *zmq_taggersock;
+
     /** A writer instance used for writing output in the Avro format */
     corsaro_avro_writer_t *writer;
 
@@ -481,7 +461,11 @@ typedef struct corsaro_report_merge_state {
      */
     Pvoid_t metrickp_keys;
 
-    Pvoid_t country_cont_map;
+    uint32_t last_label_update;
+
+    Pvoid_t country_labels;
+
+    Pvoid_t region_labels;
 } corsaro_report_merge_state_t;
 
 
@@ -523,7 +507,7 @@ typedef struct corsaro_report_result {
     char *label;
 
     /** A string representation of the metric class */
-    char metrictype[128];
+    char metrictype[256];
 
     /** A string representation of the metric value */
     char metricval[128];
@@ -1979,25 +1963,6 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
 
 /** ------------- MERGING API -------------------- */
 
-static inline void populate_country_continent_map(
-        corsaro_report_merge_state_t *m) {
-
-    int i;
-    Word_t *pval;
-
-    for (i = 0; i < CORSAROTRACE_NUM_COUNTRIES; i++) {
-
-        uint64_t countrynum;
-
-        countrynum = (((uint64_t)alpha2_countries[i][0]) |
-                 ((uint64_t)alpha2_countries[i][1]) << 8);
-
-        JLI(pval, m->country_cont_map, countrynum);
-        *pval = (Word_t)(country_continents[i]);
-    }
-
-}
-
 /** Creates and initialises the internal state required by the merging thread
  *  when using the report plugin.
  *
@@ -2006,7 +1971,8 @@ static inline void populate_country_continent_map(
  *                  feeding into the merging thread.
  *  @return A pointer to the newly create report merging state.
  */
-void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
+void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources,
+        void *tagsock) {
 
     corsaro_report_merge_state_t *m;
     corsaro_report_config_t *conf;
@@ -2020,6 +1986,9 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
                 "corsaro_report_init_merging: out of memory while allocating merge state.");
         return NULL;
     }
+
+    m->zmq_taggersock = tagsock;
+    m->last_label_update = 0;
 
     if (conf->outformat == CORSARO_OUTPUT_AVRO) {
         m->writer = corsaro_create_avro_writer(p->logger, REPORT_RESULT_SCHEMA);
@@ -2070,9 +2039,8 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
     }
 
     m->metrickp_keys = (Pvoid_t) NULL;
-    m->country_cont_map = (Pvoid_t) NULL;
-
-    populate_country_continent_map(m);
+    m->country_labels = (Pvoid_t) NULL;
+    m->region_labels = (Pvoid_t) NULL;
 
 #ifdef HAVE_TCMALLOC
     m->res_handler = NULL;
@@ -2119,7 +2087,8 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
     }
 
     JLFA(judyret, m->metrickp_keys);
-    JLFA(judyret, m->country_cont_map);
+    corsaro_free_ipmeta_label_map(m->country_labels, 1);
+    corsaro_free_ipmeta_label_map(m->region_labels, 1);
 
     free(m);
     return 0;
@@ -2137,11 +2106,24 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
         contkey = (const char *)*pval; \
     }
 
-static inline void metric_to_strings(Pvoid_t *contmap,
+#define STRIP_METRIC_VALUE(foundkey, dest, len) \
+    { \
+        char *rstr = strrchr(foundkey, '.'); \
+        if (rstr == NULL || rstr - foundkey >= len) { \
+            memcpy(dest, foundkey, len - 1); \
+            metrickey[len - 1] = '\0'; \
+        } else { \
+            memcpy(dest, foundkey, rstr - foundkey); \
+            metrickey[rstr - foundkey] = '\0'; \
+        } \
+    }
+
+static inline void metric_to_strings(corsaro_report_merge_state_t *m,
         corsaro_report_result_t *res) {
 
     Word_t *pval;
     const char *contkey = NULL;
+    char metrickey[128];
     uint64_t lookup;
 
     /* Convert the 64 bit metric ID into printable strings that we can
@@ -2189,8 +2171,9 @@ static inline void metric_to_strings(Pvoid_t *contmap,
                     (int)((res->metricid >> 8) & 0xff));
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
-            LOOKUP_COUNTRY_CONTINENT(contmap, res->metricid)
-            snprintf(res->metrictype, 128, "geo.maxmind.%s", contkey);
+            LOOKUP_COUNTRY_CONTINENT(m->country_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, 128);
+            snprintf(res->metrictype, 256, "geo.maxmind.%s", metrickey);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             break;
@@ -2200,8 +2183,9 @@ static inline void metric_to_strings(Pvoid_t *contmap,
                     (int)((res->metricid >> 8) & 0xff));
             break;
         case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
-            LOOKUP_COUNTRY_CONTINENT(contmap, res->metricid)
-            snprintf(res->metrictype, 128, "geo.netacuity.%s", contkey);
+            LOOKUP_COUNTRY_CONTINENT(m->country_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, 128);
+            snprintf(res->metrictype, 256, "geo.netacuity.%s", metrickey);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
             break;
@@ -2230,7 +2214,7 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
     int ret;
     corsaro_report_config_t *config = (corsaro_report_config_t *)p->config;
 
-    metric_to_strings(m->country_cont_map, res);
+    metric_to_strings(m, res);
     /* 'overall' metrics have no suitable metric value, so we need to
      * account for this case.
      */
@@ -2260,13 +2244,13 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
  *  @param res          The report plugin result to be written.
  *  @return 0 if the write is successful, -1 if an error occurs.
  */
-static int write_single_metric_avro(Pvoid_t countrycontmap,
+static int write_single_metric_avro(corsaro_report_merge_state_t *m,
         corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, corsaro_report_result_t *res) {
 
     avro_value_t *avro;
 
-    metric_to_strings(countrycontmap, res);
+    metric_to_strings(m, res);
     avro = corsaro_populate_avro_item(writer, res, report_result_to_avro);
     if (avro == NULL) {
         corsaro_log(logger,
@@ -2294,7 +2278,7 @@ static int write_single_metric_avro(Pvoid_t countrycontmap,
 
 static int write_all_metrics_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
-        corsaro_memhandler_t *handler, Pvoid_t contmap) {
+        corsaro_memhandler_t *handler, corsaro_report_merge_state_t *m) {
 
     corsaro_report_result_t *r, *tmpres;
     int writeret = 0;
@@ -2311,7 +2295,7 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
          * anymore.
          */
         if (!stopwriting) {
-            writeret = write_single_metric_avro(contmap, logger, writer, r);
+            writeret = write_single_metric_avro(m, logger, writer, r);
             if (writeret == AVRO_WRITE_FAILURE) {
                 stopwriting = 1;
             }
@@ -2539,8 +2523,7 @@ static int report_write_avro_output(corsaro_plugin_t *p,
     }
 
     if (write_all_metrics_avro(p->logger, m->writer, results, m->res_handler,
-                m->country_cont_map)
-        < 0) {
+                m) < 0) {
         return -1;
     }
 
@@ -2621,6 +2604,162 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
     return 0;
 }
 
+#define INSERT_IPMETA_LABEL(labelmap, index, labelstr) \
+    { \
+    PWord_t pval; \
+    JLI(pval, labelmap, index); \
+    if ((char *)(*pval) != NULL) { \
+        free((char *)(*pval)); \
+    } \
+    *pval = (Word_t)labelstr; \
+    }
+
+
+static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
+        corsaro_logger_t *logger) {
+
+    corsaro_tagger_control_request_t req;
+    corsaro_tagger_control_reply_t *reply;
+    zmq_msg_t frame;
+    char *buffer;
+    int buflen;
+    int firstpass = 1;
+    int iserr = 0;
+    uint32_t tocome = 0;
+    int more;
+    size_t more_size;
+    int attempts = 0;
+
+    req.request_type = TAGGER_REQUEST_IPMETA_UPDATE;
+    req.data.last_version = htonl(state->last_label_update);
+
+    if (zmq_send(state->zmq_taggersock, &req, sizeof(req), 0) < 0) {
+        corsaro_log(logger, "unable to send IPmeta update request to corsarotagger: %s", strerror(errno));
+        return -1;
+    }
+
+    while (!iserr) {
+        zmq_msg_init(&frame);
+
+        while (attempts < 10) {
+            if (zmq_msg_recv(&frame, state->zmq_taggersock, ZMQ_DONTWAIT) < 0) {
+                if (errno == EAGAIN) {
+                    attempts ++;
+                    usleep(100000);
+                    continue;
+                }
+
+                corsaro_log(logger, "unable to receive IPmeta update from corsarotagger: %s", strerror(errno));
+                zmq_msg_close(&frame);
+                return -1;
+            }
+            break;
+        }
+
+        if (attempts >= 10) {
+            corsaro_log(logger, "failed to get ipmeta label response in reasonable time frame");
+            zmq_msg_close(&frame);
+            return -1;
+        }
+
+        buffer = zmq_msg_data(&frame);
+        buflen = zmq_msg_size(&frame);
+
+        if (firstpass) {
+            reply = (corsaro_tagger_control_reply_t *)buffer;
+
+            state->last_label_update = ntohl(reply->ipmeta_version);
+            tocome = ntohl(reply->label_count);
+            firstpass = 0;
+
+            buffer += sizeof(corsaro_tagger_control_reply_t);
+            buflen -= sizeof(corsaro_tagger_control_reply_t);
+        }
+
+        while (buflen > 0) {
+            corsaro_tagger_label_hdr_t *hdr;
+            char *labelstr;
+            uint16_t labellen;
+            uint32_t index;
+
+            if (buflen < sizeof(corsaro_tagger_label_hdr_t)) {
+                corsaro_log(logger, "parsing error in received IPmeta update -- %d bytes left over in message, need at least %d",
+                        buflen, sizeof(corsaro_tagger_label_hdr_t));
+                goto drainmessage;
+            }
+
+            hdr = (corsaro_tagger_label_hdr_t *)buffer;
+            labellen = ntohs(hdr->label_len);
+            labelstr = calloc(labellen + 1, sizeof(char));
+
+            if (buflen < sizeof(corsaro_tagger_label_hdr_t) + labellen) {
+                corsaro_log(logger, "parsing error in received IPmeta update -- %d bytes left over in message, need at least %d",
+                        buflen, sizeof(corsaro_tagger_label_hdr_t) + labellen);
+                goto drainmessage;
+            }
+
+            memcpy(labelstr, buffer + sizeof(corsaro_tagger_label_hdr_t),
+                    labellen);
+
+            index = ntohl(hdr->subject_id);
+
+            if (hdr->subject_type == TAGGER_LABEL_COUNTRY) {
+                INSERT_IPMETA_LABEL(state->country_labels, index, labelstr);
+            }
+            if (hdr->subject_type == TAGGER_LABEL_REGION) {
+                INSERT_IPMETA_LABEL(state->region_labels, index, labelstr);
+            }
+
+            buffer += (sizeof(corsaro_tagger_label_hdr_t) + labellen);
+            buflen -= (sizeof(corsaro_tagger_label_hdr_t) + labellen);
+
+        }
+
+        more_size = sizeof(more);
+        if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+                    &more_size) < 0) {
+            corsaro_log(logger, "error while checking for more IPmeta update content: %s", strerror(errno));
+            return -1;
+        }
+
+        zmq_msg_close(&frame);
+        if (more == 0) {
+            break;
+        }
+    }
+
+    return 1;
+
+drainmessage:
+    /* Something went wrong with our IPmeta label parsing, so try to drain
+     * any remaining message parts from the queue before returning an error
+     * code.
+     */
+
+    zmq_msg_close(&frame);
+    if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+                &more_size) < 0) {
+        corsaro_log(logger, "error while draining bad IPmeta update content: %s", strerror(errno));
+        return -1;
+    }
+
+    while (more) {
+        zmq_msg_init(&frame);
+        if (zmq_msg_recv(state->zmq_taggersock, &frame, 0) < 0) {
+            corsaro_log(logger, "unable to receive IPmeta update from corsarotagger: %s", strerror(errno));
+            break;
+        }
+
+        if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+                    &more_size) < 0) {
+            corsaro_log(logger, "error while draining bad IPmeta update content: %s", strerror(errno));
+            break;
+        }
+    }
+    zmq_msg_close(&frame);
+    return -1;
+}
+
 /** Merge the metric tallies for a given interval into a single combined
  *  result and write it to our Avro output file.
  *
@@ -2649,6 +2788,13 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     /* Plugin result data is NULL, must be a partial interval */
     if (tomerge[0] == NULL) {
         return 0;
+    }
+
+    /* Now would be a good time to make sure we have a copy of all of the
+     * IPmeta labels that we need...
+     */
+    if (update_ipmeta_labels(m, p->logger) < 0) {
+        return -1;
     }
 
     /* All of the interim results should point at the same config, so we
