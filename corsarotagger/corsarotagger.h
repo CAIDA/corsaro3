@@ -77,6 +77,8 @@ typedef struct corsaro_tagger_glob {
     /** The name of the zeromq socket to publish tagged packets to */
     char *pubqueuename;
 
+    int sample_rate;
+
     /** The index of the input URI that we are currently reading from */
     int currenturi;
 
