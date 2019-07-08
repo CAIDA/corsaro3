@@ -43,7 +43,6 @@
 #include <Judy.h>
 
 #include "libcorsaro.h"
-#include "libcorsaro_memhandler.h"
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_avro.h"
 #include "libcorsaro_libtimeseries.h"
@@ -214,9 +213,6 @@ typedef struct corsaro_ip_hash {
     /** The IP address as a 32 bit integer */
     uint32_t ipaddr;
 
-    /** Pointer to the memory blob that this structure came from */
-    corsaro_memsource_t *memsrc;
-
     /** Number of metrics associated with this IP. */
     uint32_t metriccount;
 
@@ -244,8 +240,6 @@ typedef struct corsaro_metric_ip_hash_t {
     /** Number of IP-layer bytes in packets that were tagged with this metric */
     uint64_t bytes;
 
-    /** Pointer to the memory blob that this structure came from */
-    corsaro_memsource_t *memsrc;
 } PACKED corsaro_metric_ip_hash_t;
 
 /** Structure used to keep track of which processing threads have ended
@@ -300,11 +294,6 @@ typedef struct corsaro_report_iptracker {
      */
     Pvoid_t knownips_next;
 
-    /** Corsaro custom memory allocator for IP address structures */
-    corsaro_memhandler_t *ip_handler;
-    /** Corsaro custom memory allocator for metric tally structures */
-    corsaro_memhandler_t *metric_handler;
-
     /** Hash map containing the most recent complete metric tallies */
     Pvoid_t lastresult;
 
@@ -354,6 +343,14 @@ typedef struct corsaro_report_config {
     void **tracker_queues;
 } corsaro_report_config_t;
 
+typedef struct corsaro_report_msg_tag {
+    uint64_t tagid;
+
+    uint64_t bytes;
+
+    uint32_t packets;
+} PACKED corsaro_report_msg_tag_t;
+
 /** Structure describing all of the metrics that apply to an IP that was
  *  observed within a libtrace packet.
  */
@@ -362,19 +359,20 @@ typedef struct corsaro_report_msg_body {
     /** The IP address itself */
     uint32_t ipaddr;
 
-    /** Flag indicating whether the IP was observed as a source or dest IP */
+    /** Flag indicating whether the IP was observed as a source IP */
     uint8_t issrc;
 
     /** The number of metric tags that are in this message */
     uint8_t numtags;
 
-    /** Array containing the metric IDs for all of the tags that were
-     *  assigned to this packet.
-     */
-    uint64_t tags[CORSARO_MAX_SUPPORTED_TAGS];
-
     /** The number of IP-layer bytes that were in the packet. */
-    uint16_t size;
+    uint32_t size;
+
+    /** Map containing the metric IDs for all of the tags that were
+     *  seen matching this address.
+     */
+    Pvoid_t tags;
+
 } corsaro_report_msg_body_t;
 
 /* XXX could make this configurable? */
@@ -397,6 +395,7 @@ typedef struct corsaro_report_ip_message {
     /** The number of IP + tag updates included in this message */
     uint16_t bodycount;
 
+#if 0
     /** Pointer to the memory blob that this structure came from */
     corsaro_memsource_t *memsrc;
 
@@ -406,17 +405,18 @@ typedef struct corsaro_report_ip_message {
 
     /** Array of updates that the IP tracker needs to apply */
     corsaro_report_msg_body_t *update;
+#endif
 } PACKED corsaro_report_ip_message_t;
 
 
 /** Packet processing thread state for the report plugin */
 typedef struct corsaro_report_state {
 
-    /** Corsaro custom memory allocator for IP tracker messages */
-    corsaro_memhandler_t *msgbody_handler;
+    Pvoid_t *ipmetrics;
+    uint32_t *ipcounts;
 
     /** The current IP tracker message that this thread is working on */
-    corsaro_report_ip_message_t *nextmsg;
+    //corsaro_report_ip_message_t *nextmsg;
 
     /** An identifier for this packet processing thread */
     int threadid;
@@ -442,9 +442,6 @@ typedef struct corsaro_report_merge_state {
 
     /** A writer instance used for writing output in the Avro format */
     corsaro_avro_writer_t *writer;
-
-    /** Corsaro custom memory allocator for report result structures */
-    corsaro_memhandler_t *res_handler;
 
     /** Libtimeseries state variable */
     timeseries_t *timeseries;
@@ -501,9 +498,6 @@ typedef struct corsaro_report_result {
 
     /** A string representation of the metric value */
     char *metricval;
-
-    /** Pointer to the memory blob that this structure came from */
-    corsaro_memsource_t *memsrc;
 
 } PACKED corsaro_report_result_t;
 
@@ -667,19 +661,12 @@ static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
         Pvoid_t *knownips, uint32_t ipaddr) {
 
     corsaro_ip_hash_t *iphash;
-    corsaro_memsource_t *memsrc;
     PWord_t pval;
 
     JLG(pval, *knownips, (Word_t)ipaddr);
     if (pval == NULL) {
         /* New IP, so create a new entry in our map */
-        if (track->ip_handler) {
-            iphash = (corsaro_ip_hash_t *)get_corsaro_memhandler_item(
-                    track->ip_handler, &memsrc);
-            iphash->memsrc = memsrc;
-        } else {
-            iphash = calloc(1, sizeof(corsaro_ip_hash_t));
-        }
+        iphash = calloc(1, sizeof(corsaro_ip_hash_t));
         JLI(pval, *knownips, (Word_t)ipaddr);
         iphash->ipaddr = ipaddr;
         iphash->metricsseen = NULL;
@@ -755,11 +742,11 @@ static inline void update_metric_map(corsaro_ip_hash_t *iphash,
  */
 
 static void update_knownip_metric(corsaro_report_iptracker_t *track,
-        uint64_t metricid, corsaro_ip_hash_t *iphash, uint8_t issrc,
-        uint16_t iplen, Pvoid_t *metrictally) {
+        corsaro_report_msg_tag_t *tagptr, corsaro_ip_hash_t *iphash,
+        uint8_t issrc, Pvoid_t *metrictally) {
 
-    corsaro_memsource_t *memsrc;
     corsaro_metric_ip_hash_t *m;
+    uint64_t metricid = tagptr->tagid;
 
     PWord_t pval;
 
@@ -767,15 +754,8 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
     if (pval != NULL) {
         m = (corsaro_metric_ip_hash_t *)(*pval);
     } else {
-        if (track->metric_handler) {
-            m = (corsaro_metric_ip_hash_t *)get_corsaro_memhandler_item(
-                    track->metric_handler, &memsrc);
-            m->memsrc = memsrc;
-        } else {
-            m = (corsaro_metric_ip_hash_t *)calloc(1,
-                    sizeof(corsaro_metric_ip_hash_t));
-            m->memsrc = NULL;
-        }
+        m = (corsaro_metric_ip_hash_t *)calloc(1,
+                sizeof(corsaro_metric_ip_hash_t));
 
         JLI(pval, *metrictally, (Word_t)metricid);
         m->metricid = metricid;
@@ -788,9 +768,9 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
 
     /* An IP length of zero == the packet has already been tallied for
      * this metric, just update IP tallies only. */
-    if (iplen > 0) {
-        m->packets += 1;
-        m->bytes += iplen;
+    if (issrc) {
+        m->packets += tagptr->packets;
+        m->bytes += tagptr->bytes;
     }
 
     update_metric_map(iphash, metricid, issrc, m);
@@ -810,11 +790,7 @@ static void free_metrichash(corsaro_report_iptracker_t *track,
     JLF(pval, methash, index);
     while (pval) {
         ipiter = (corsaro_metric_ip_hash_t *)(*pval);
-        if (track->metric_handler) {
-            release_corsaro_memhandler_item(track->metric_handler, ipiter->memsrc);
-        } else {
-            free(ipiter);
-        }
+        free(ipiter);
         JLN(pval, methash, index);
     }
     JLFA(ret, methash);
@@ -836,11 +812,7 @@ static void free_knownips(corsaro_report_iptracker_t *track,
     while (pval) {
         ipiter = (corsaro_ip_hash_t *)(*pval);
         JLFA(ret, ipiter->metricsseen);
-        if (track->ip_handler) {
-            release_corsaro_memhandler_item(track->ip_handler, ipiter->memsrc);
-        } else {
-            free(ipiter);
-        }
+        free(ipiter);
 
         JLN(pval, knownips, index);
     }
@@ -875,6 +847,13 @@ static inline int sender_in_outstanding(libtrace_list_t *outl, uint8_t sender) {
     return 0;
 }
 
+#define ZEROMQ_CHECK_MORE \
+    moresize = sizeof(moresize); \
+    if (zmq_getsockopt(track->incoming, ZMQ_RCVMORE, &more, &moresize) < 0) { \
+        corsaro_log(track->logger, "error checking if there are more parts to a received ip tracker message: %s", strerror(errno)); \
+        goto trackerover; \
+    }
+
 /** Parses and actions an update message received by an IP tracker thread.
  *
  *  @param track        The state for this IP tracker thread
@@ -882,13 +861,21 @@ static inline int sender_in_outstanding(libtrace_list_t *outl, uint8_t sender) {
  *                      message.
  *  @param body         The contents of the received update message.
  */
-static void process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender,
-        corsaro_report_msg_body_t *body) {
+static int process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender) {
 
     int i;
     Pvoid_t *knownip = NULL;
     Pvoid_t *knowniptally = NULL;
     corsaro_ip_hash_t *thisip = NULL;
+    corsaro_report_msg_body_t ipdetails;
+    corsaro_report_msg_tag_t *tagptr;
+    char *buffer;
+    int more, blobsize;
+    size_t moresize;
+
+    if (zmq_recv(track->incoming, &ipdetails, sizeof(ipdetails), 0) < 0) {
+        return -1;
+    }
 
     /* figure out if our sender has finished the interval already; if
      * so, we need to update the next interval not the current one.
@@ -904,23 +891,47 @@ static void process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender,
         knowniptally = &(track->currentresult);
     }
 
-    for (i = 0; i < body->numtags; i++) {
+    buffer = calloc(ipdetails.numtags, sizeof(corsaro_report_msg_tag_t));
+    ZEROMQ_CHECK_MORE
+
+    if (more == 0) {
+        corsaro_log(track->logger,
+                "unexpected end of ip tracker message");
+        return -1;
+    }
+
+    blobsize = zmq_recv(track->incoming, buffer,
+            ipdetails.numtags * sizeof(corsaro_report_msg_tag_t), 0);
+    if (blobsize < 0) {
+        return -1;
+    }
+
+    if (blobsize < ipdetails.numtags * sizeof(corsaro_report_msg_tag_t)) {
+        corsaro_log(track->logger,
+                "received unexpected amount of tag metrics in ip tracker -- expected %u, got %d",
+                ipdetails.numtags * sizeof(corsaro_report_msg_tag_t), blobsize);
+        return -1;
+    }
+    tagptr = (corsaro_report_msg_tag_t *)buffer;
+
+    for (i = 0; i < ipdetails.numtags; i++) {
         /* Combined (which has a metric ID of 0) should always be the first
          * tag we see. */
-
-        if (i == 0) {
-            assert(body->tags[i] == 0);
-        }
 
         /* Save the IP hash map entry, so we don't end up trying to do
          * a hash lookup for every tag. */
         if (!thisip) {
-            thisip = update_iphash(track, knownip, body->ipaddr);
+            thisip = update_iphash(track, knownip, ipdetails.ipaddr);
         }
-        update_knownip_metric(track, body->tags[i], thisip,
-                body->issrc, body->size, knowniptally);
+        update_knownip_metric(track, tagptr, thisip,
+                ipdetails.issrc, knowniptally);
+        tagptr ++;
     }
+    free(buffer);
+    return ipdetails.numtags;
 
+trackerover:
+    return -1;
 }
 
 /** Updates an IP tracker thread's list of processing threads that have
@@ -1001,6 +1012,7 @@ static uint32_t update_outstanding(libtrace_list_t *outl, uint32_t ts,
 
 }
 
+
 /** Routine for the IP tracker threads
  *
  * @param tdata     The state for this IP tracker thread (initialised).
@@ -1010,6 +1022,9 @@ static void *start_iptracker(void *tdata) {
     corsaro_report_iptracker_t *track;
     corsaro_report_ip_message_t msg;
     int i;
+    int more;
+    size_t moresize;
+
 
     track = (corsaro_report_iptracker_t *)tdata;
 
@@ -1100,26 +1115,53 @@ static void *start_iptracker(void *tdata) {
         /* This is an update message with a batch of IP + metric tag
          * observations. */
         for (i = 0; i < msg.bodycount; i++) {
-            process_msg_body(track, msg.sender, &(msg.update[i]));
+            ZEROMQ_CHECK_MORE
+            if (more == 0) {
+                corsaro_log(track->logger, "missing ip tracker message parts? header suggests %u, but we have only got as far as %d", msg.bodycount, i);
+                break;
+            }
+
+            if (process_msg_body(track, msg.sender) < 0) {
+                break;
+            }
             track->since_interval ++;
         }
-        if (msg.handler) {
-            release_corsaro_memhandler_item(msg.handler, msg.memsrc);
-        } else {
-            free(msg.update);
-        }
-    }
 
-    while (zmq_recv(track->incoming, &msg, sizeof(msg), ZMQ_DONTWAIT) >= 0) {
-        if (msg.msgtype == CORSARO_IP_MESSAGE_UPDATE) {
-            if (msg.handler) {
-                release_corsaro_memhandler_item(msg.handler, msg.memsrc);
-            } else {
-                free(msg.update);
+        if (!more) {
+            continue;
+        }
+
+        /* Read the trailer from the multi-part message */
+        ZEROMQ_CHECK_MORE
+        if (more == 0) {
+            corsaro_log(track->logger, "missing ip tracker message parts? trailer appears to be missing?");
+        } else {
+            uint16_t trailer;
+            if (zmq_recv(track->incoming, &trailer,
+                        sizeof(trailer), 0) < 0) {
+
+                corsaro_log(track->logger,
+                        "error receiving trailer on tracker pull socket: %s",
+                        strerror(errno));
+                break;
+            }
+
+            if (trailer != msg.bodycount) {
+                corsaro_log(track->logger,
+                        "incorrect trailer value in ip tracker message: got %u, expected %u", trailer, msg.bodycount);
+            }
+
+            /* Now we should have no more parts to the message... */
+            ZEROMQ_CHECK_MORE
+            if (more) {
+                corsaro_log(track->logger, "expected end of ip tracker message but zeromq says there are more parts to come?");
+                goto trackerover;
             }
         }
+
     }
 
+trackerover:
     /* Thread is ending, tidy up everything */
     free_metrichash(track, (track->currentresult));
     free_metrichash(track, (track->nextresult));
@@ -1143,7 +1185,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_report_config_t *conf;
-    int i, j, ret = 0, rto=10;
+    int i, j, ret = 0, rto=10, hwm=0;
     char sockname[40];
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -1211,23 +1253,25 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         conf->iptrackers[i].outstanding = libtrace_list_init(
                sizeof(corsaro_report_out_interval_t));
 
-#ifdef HAVE_TCMALLOC
-        conf->iptrackers[i].ip_handler = NULL;
-        conf->iptrackers[i].metric_handler = NULL;
-#else
-        conf->iptrackers[i].ip_handler = (corsaro_memhandler_t *)malloc(
-                sizeof(corsaro_memhandler_t));
-        init_corsaro_memhandler(p->logger, conf->iptrackers[i].ip_handler,
-                sizeof(corsaro_ip_hash_t), 10000);
-        conf->iptrackers[i].metric_handler = (corsaro_memhandler_t *)malloc(
-                sizeof(corsaro_memhandler_t));
-        init_corsaro_memhandler(p->logger, conf->iptrackers[i].metric_handler,
-                sizeof(corsaro_metric_ip_hash_t), 10000);
-#endif
-
         snprintf(sockname, 40, "inproc://reporttracker%d", i);
 
         conf->iptrackers[i].incoming = zmq_socket(zmq_ctxt, ZMQ_PULL);
+        if (zmq_setsockopt(conf->iptrackers[i].incoming, ZMQ_RCVTIMEO, &rto,
+                    sizeof(rto)) < 0) {
+            corsaro_log(p->logger,
+                    "error while configuring ip tracker %d pull socket: %s", i,
+                    strerror(errno));
+            ret = -1;
+        }
+
+        if (zmq_setsockopt(conf->iptrackers[i].incoming, ZMQ_RCVHWM, &hwm,
+                    sizeof(hwm)) < 0) {
+            corsaro_log(p->logger,
+                    "error while configuring ip tracker %d pull socket: %s", i,
+                    strerror(errno));
+            ret = -1;
+        }
+
         if (zmq_bind(conf->iptrackers[i].incoming, sockname) < 0) {
             corsaro_log(p->logger,
                     "error while binding ip tracker %d pull socket: %s", i,
@@ -1235,23 +1279,23 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
             ret = -1;
         }
 
-	for (j = 0; j < conf->basic.procthreads; j++) {
+        for (j = 0; j < conf->basic.procthreads; j++) {
             int tq_id = i * conf->basic.procthreads + j;
-	    conf->tracker_queues[tq_id] = zmq_socket(zmq_ctxt, ZMQ_PUSH);
-            if (zmq_connect(conf->tracker_queues[tq_id], sockname) < 0) {
-	        corsaro_log(p->logger,
-                    "error while connecting ip tracker %d-%d push socket: %s",
-		    i, j, strerror(errno));
-	        ret = -1;
-	    }
-        }
+            conf->tracker_queues[tq_id] = zmq_socket(zmq_ctxt, ZMQ_PUSH);
+            if (zmq_setsockopt(conf->tracker_queues[tq_id], ZMQ_SNDHWM, &hwm,
+                        sizeof(hwm)) < 0) {
+                corsaro_log(p->logger,
+                        "error while configuring ip tracker %d push socket: %s", tq_id,
+                        strerror(errno));
+                ret = -1;
+            }
 
-        if (zmq_setsockopt(conf->iptrackers[i].incoming, ZMQ_RCVTIMEO, &rto,
-                    sizeof(rto)) < 0) {
-            corsaro_log(p->logger,
-                    "error while configuring ip tracker %d pull socket: %s", i,
-                    strerror(errno));
-            ret = -1;
+            if (zmq_connect(conf->tracker_queues[tq_id], sockname) < 0) {
+                corsaro_log(p->logger,
+                        "error while connecting ip tracker %d-%d push socket: %s",
+                        i, j, strerror(errno));
+                ret = -1;
+            }
         }
 
 
@@ -1278,12 +1322,6 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
         /* Hopefully the tracker threads have joined by this point... */
         if (conf->iptrackers) {
             for (i = 0; i < conf->tracker_count; i++) {
-                if (conf->iptrackers[i].metric_handler) {
-                    destroy_corsaro_memhandler(conf->iptrackers[i].metric_handler);
-                }
-                if (conf->iptrackers[i].ip_handler) {
-                    destroy_corsaro_memhandler(conf->iptrackers[i].ip_handler);
-                }
                 pthread_mutex_destroy(&(conf->iptrackers[i].mutex));
 
                 zmq_close(conf->iptrackers[i].incoming);
@@ -1306,6 +1344,7 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
 
 /** ------------------ PACKET PROCESSING API -------------------*/
 
+#if 0
 static inline void reset_nextmsg(corsaro_report_state_t *state,
         corsaro_report_ip_message_t *msg) {
 
@@ -1328,6 +1367,7 @@ static inline void reset_nextmsg(corsaro_report_state_t *state,
         msg->handler = NULL;
     }
 }
+#endif
 
 /** Creates and initialises packet processing thread state for the report
  *  plugin. This state must be passed into all subsequent packet processing
@@ -1358,31 +1398,133 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
                 i * conf->basic.procthreads + state->threadid];
     }
 
-#ifdef HAVE_TCMALLOC
-    state->msgbody_handler = NULL;
-#else
-    state->msgbody_handler = (corsaro_memhandler_t *)malloc(
-            sizeof(corsaro_memhandler_t));
-    init_corsaro_memhandler(p->logger, state->msgbody_handler,
-            sizeof(corsaro_report_msg_body_t) * REPORT_BATCH_SIZE,
-            10000);
-#endif
-
     /* Maintain a "message" for each of the IP tracker threads. As we
      * process packets, we'll fill each of the messages depending on which
      * IPs are seen in the processed packets. Once a message is full, it
      * will be pushed to the appropriate IP tracker thread and a new
      * message will replace it in the nextmsg array.
      */
+     /*
     state->nextmsg = (corsaro_report_ip_message_t *)calloc(
             conf->tracker_count, sizeof(corsaro_report_ip_message_t));
-
+    */
+    state->ipmetrics = (Pvoid_t *)calloc(conf->tracker_count, sizeof(Pvoid_t));
+    state->ipcounts = (uint32_t *)calloc(conf->tracker_count, sizeof(uint32_t));
+/*
     for (i = 0; i < conf->tracker_count; i++) {
         reset_nextmsg(state, &(state->nextmsg[i]));
         state->nextmsg[i].sender = state->threadid;
     }
+*/
 
     return state;
+}
+
+static int send_iptracker_message(corsaro_report_state_t *state,
+        void *socket, Pvoid_t ipmetrics, corsaro_logger_t *logger) {
+
+    corsaro_report_ip_message_t msg;
+    PWord_t pval;
+    PWord_t inval;
+    Word_t index;
+    Word_t rcword;
+    Word_t in_index;
+    int iserr = 0;
+    char *blob;
+
+    msg.msgtype = CORSARO_IP_MESSAGE_UPDATE;
+    msg.sender = state->threadid;
+    msg.bodycount = 0;
+    msg.timestamp = 0;
+
+#if 0
+    if (state->msgbody_handler) {
+        msg.update = (corsaro_report_msg_body_t *)
+            get_corsaro_memhandler_item(state->msgbody_handler, &memsrc);
+        msg.handler = state->msgbody_handler;
+        msg.memsrc = memsrc;
+    } else {
+        msg.update = (corsaro_report_msg_body_t *)
+            malloc(REPORT_BATCH_SIZE * sizeof(corsaro_report_msg_body_t));
+
+        msg.memsrc = NULL;
+        msg.handler = NULL;
+    }
+#endif
+
+    JLC(rcword, ipmetrics, 0, -1);
+    msg.bodycount = (uint16_t)rcword;
+
+    /* send "msg" with SNDMORE */
+    if (zmq_send(socket, (void *)(&msg), sizeof(msg), ZMQ_SNDMORE) < 0) {
+        iserr = 1;
+    }
+
+    index = 0;
+    blob = calloc(CORSARO_MAX_SUPPORTED_TAGS,
+            sizeof(corsaro_report_msg_tag_t));
+    JLF(pval, ipmetrics, index);
+    while (pval) {
+        corsaro_report_msg_body_t *body;
+        Pvoid_t saved;
+        corsaro_report_msg_tag_t *tagptr;
+        corsaro_report_msg_tag_t *result;
+
+        body = (corsaro_report_msg_body_t *)(*pval);
+        saved = body->tags;
+
+        body->tags = NULL;
+        /* send "body" with SNDMORE */
+        if (!iserr) {
+            if (zmq_send(socket, (void *)body,
+                    sizeof(corsaro_report_msg_body_t), ZMQ_SNDMORE) < 0) {
+                iserr = 1;
+            }
+        }
+
+        in_index = 0;
+        JLF(inval, saved, in_index);
+
+        if (!iserr) {
+            /* form tags into a single memory blob and send with SNDMORE */
+            tagptr = (corsaro_report_msg_tag_t *)blob;
+
+            while (inval) {
+                result = (corsaro_report_msg_tag_t *)(*inval);
+
+                tagptr->tagid = (uint64_t)in_index;
+                tagptr->packets = result->packets;
+                tagptr->bytes = result->bytes;
+                tagptr ++;
+                free(result);
+
+                JLN(inval, saved, in_index);
+            }
+            if (zmq_send(socket, (void *)blob, (((char *)tagptr) - blob),
+                    ZMQ_SNDMORE) < 0) {
+                iserr = 1;
+            }
+        }
+        JLFA(rcword, saved);
+
+        free(body);
+        JLN(pval, ipmetrics, index);
+    }
+
+    free(blob);
+    JLFA(rcword, ipmetrics);
+
+    /* send final counter to finish the message */
+    if (!iserr) {
+        if (zmq_send(socket, (void *)&(msg.bodycount), sizeof(msg.bodycount),
+                    0) < 0) {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
+
+    return msg.bodycount;
 }
 
 /** Tidies up packet processing thread state for the report plugin and
@@ -1413,8 +1555,18 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
 
     for (i = 0; i < conf->tracker_count; i++) {
         /* If there are any outstanding updates, send those first */
-        if (state->nextmsg[i].bodycount > 0) {
+        if (state->ipcounts[i] > 0) {
 
+            if (send_iptracker_message(state, state->tracker_queues[i],
+                    state->ipmetrics[i], p->logger) < 0) {
+
+                corsaro_log(p->logger,
+                        "error while pushing final IP result to tracker thread %d: %s",
+                        i, strerror(errno));
+            }
+            state->ipcounts[i] = 0;
+        }
+#if 0
             if (zmq_send(state->tracker_queues[i],
                     (void *)(&(state->nextmsg[i])),
                     sizeof(corsaro_report_ip_message_t), 0) < 0) {
@@ -1431,6 +1583,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         } else {
             free(state->nextmsg[i].update);
         }
+#endif
 
         /* Send the halt message */
         if (zmq_send(state->tracker_queues[i],
@@ -1449,14 +1602,12 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         }
     }
 
+    free(state->ipcounts);
+    free(state->ipmetrics);
     if (state->tracker_queues) {
         free(state->tracker_queues);
     }
 
-    if (state->msgbody_handler) {
-        destroy_corsaro_memhandler(state->msgbody_handler);
-    }
-    free(state->nextmsg);
     free(state);
 
     return 0;
@@ -1572,16 +1723,26 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     msg.sender = state->threadid;
 
     for (i = 0; i < conf->tracker_count; i++) {
-        if (state->nextmsg[i].bodycount > 0) {
-            if (zmq_send(state->tracker_queues[i],
-                    (void *)(&(state->nextmsg[i])),
-                    sizeof(corsaro_report_ip_message_t), 0) < 0) {
+        if (state->ipcounts[i] > 0) {
+            if (send_iptracker_message(state, state->tracker_queues[i],
+                    state->ipmetrics[i], p->logger) < 0) {
                 corsaro_log(p->logger,
                         "error while pushing end-interval result to tracker thread %d: %s",
                         i, strerror(errno));
             }
+            state->ipcounts[i] = 0;
+            state->ipmetrics[i] = 0;
+        }
+
+        /*
+        if (state->nextmsg[i].bodycount > 0) {
+            if (zmq_send(state->tracker_queues[i],
+                    (void *)(&(state->nextmsg[i])),
+                    sizeof(corsaro_report_ip_message_t), 0) < 0) {
+            }
             reset_nextmsg(state, &(state->nextmsg[i]));
         }
+        */
         if (zmq_send(state->tracker_queues[i],
                 (void *)(&msg), sizeof(corsaro_report_ip_message_t), 0) < 0) {
             corsaro_log(p->logger,
@@ -1747,9 +1908,11 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
 static inline void process_single_tag(corsaro_report_metric_class_t class,
         uint32_t tagval, uint32_t maxtagval,
         corsaro_report_state_t *state, corsaro_report_msg_body_t *body,
-        corsaro_logger_t *logger) {
+        corsaro_logger_t *logger, uint16_t pktbytes) {
 
     uint64_t metricid;
+    PWord_t pval;
+    corsaro_report_msg_tag_t *tag;
 
     /* Sanity checking for metrics that have clearly defined bounds */
     if (maxtagval > 0 && tagval >= maxtagval) {
@@ -1759,10 +1922,25 @@ static inline void process_single_tag(corsaro_report_metric_class_t class,
     }
 
     metricid = GEN_METRICID(class, tagval);
-    assert(body->numtags < CORSARO_MAX_SUPPORTED_TAGS);
 
-    body->tags[body->numtags] = metricid;
-    body->numtags ++;
+    JLG(pval, body->tags, metricid);
+
+    if (pval == NULL) {
+        tag = calloc(1, sizeof(corsaro_report_msg_tag_t));
+
+        tag->tagid = metricid;
+        tag->packets = 1;
+        tag->bytes = pktbytes;
+
+        JLI(pval, body->tags, metricid);
+        *pval = (Word_t)tag;
+        body->numtags ++;
+    } else {
+        tag = (corsaro_report_msg_tag_t *)(*pval);
+        tag->packets ++;
+        tag->bytes += pktbytes;
+    }
+
 }
 
 
@@ -1782,18 +1960,7 @@ static inline void process_single_tag(corsaro_report_metric_class_t class,
  */
 static void process_tags(corsaro_packet_tags_t *tags, uint16_t iplen,
         corsaro_report_msg_body_t *body, corsaro_report_state_t *state,
-        corsaro_logger_t *logger, uint32_t addr, uint8_t issrc) {
-
-    body->ipaddr = addr;
-    body->issrc = issrc;
-    body->numtags = 0;
-
-    /* Be careful not to count the packet twice per metric */ 
-    if (body->issrc) {
-        body->size = iplen;
-    } else {
-        body->size = 0;
-    }
+        corsaro_logger_t *logger, uint32_t addr) {
 
     /* "Combined" is simply a total across all metrics, i.e. the total
      * number of packets, source IPs etc. Every IP packet should add to
@@ -1801,50 +1968,50 @@ static void process_tags(corsaro_packet_tags_t *tags, uint16_t iplen,
      */
 
     process_single_tag(CORSARO_METRIC_CLASS_COMBINED, 0, 0, state, body,
-            logger);
+            logger, iplen);
 
     if (!tags || tags->providers_used == 0) {
         return;
     }
 
     process_single_tag(CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
-            METRIC_IPPROTOS_MAX, state, body, logger);
+            METRIC_IPPROTOS_MAX, state, body, logger, iplen);
 
     if (tags->protocol == TRACE_IPPROTO_ICMP) {
         process_single_tag(CORSARO_METRIC_CLASS_ICMP_TYPE, tags->src_port,
-                METRIC_ICMP_MAX, state, body, logger);
+                METRIC_ICMP_MAX, state, body, logger, iplen);
         process_single_tag(CORSARO_METRIC_CLASS_ICMP_CODE, tags->dest_port,
-                METRIC_ICMP_MAX, state, body, logger);
+                METRIC_ICMP_MAX, state, body, logger, iplen);
 
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         process_single_tag(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT, tags->src_port,
-                METRIC_PORT_MAX, state, body, logger);
+                METRIC_PORT_MAX, state, body, logger, iplen);
         process_single_tag(CORSARO_METRIC_CLASS_TCP_DEST_PORT, tags->dest_port,
-                METRIC_PORT_MAX, state, body, logger);
+                METRIC_PORT_MAX, state, body, logger, iplen);
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
         process_single_tag(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, tags->src_port,
-                METRIC_PORT_MAX, state, body, logger);
+                METRIC_PORT_MAX, state, body, logger, iplen);
         process_single_tag(CORSARO_METRIC_CLASS_UDP_DEST_PORT, tags->dest_port,
-                METRIC_PORT_MAX, state, body, logger);
+                METRIC_PORT_MAX, state, body, logger, iplen);
     }
 
     if (maxmind_tagged(tags)) {
         process_single_tag(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
-                tags->maxmind_continent, 0, state, body, logger);
+                tags->maxmind_continent, 0, state, body, logger, iplen);
         process_single_tag(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
-                tags->maxmind_country, 0, state, body, logger);
+                tags->maxmind_country, 0, state, body, logger, iplen);
     }
 
     if (netacq_tagged(tags)) {
         process_single_tag(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
-                tags->netacq_continent, 0, state, body, logger);
+                tags->netacq_continent, 0, state, body, logger, iplen);
         process_single_tag(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
-                tags->netacq_country, 0, state, body, logger);
+                tags->netacq_country, 0, state, body, logger, iplen);
     }
 
     if (pfx2as_tagged(tags)) {
         process_single_tag(CORSARO_METRIC_CLASS_PREFIX_ASN,
-                tags->prefixasn, 0, state, body, logger);
+                tags->prefixasn, 0, state, body, logger, iplen);
     }
 
 }
@@ -1870,6 +2037,9 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
     corsaro_report_msg_body_t *body;
     corsaro_report_ip_message_t *msg;
     int trackerhash;
+    PWord_t pval;
+    Word_t index;
+    uint64_t key;
 
     /* Hash IPs to IP tracker threads based on the suffix octet of the IP
      * address -- should be reasonably balanced + easy to calculate.
@@ -1878,32 +2048,76 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
 
     /* Add the IP and its tagged metrics to the next IP update message that
      * we are sending to the IP tracker thread. */
-    msg = &(state->nextmsg[trackerhash]);
-    body = &(msg->update[msg->bodycount]);
-    process_tags(tags, iplen, body, state, logger, addr, issrc);
-    msg->bodycount ++;
+
+    if (issrc) {
+        key = addr;
+    } else {
+        key = ((uint64_t)addr | 0x100000000);
+    }
+
+    index = addr;
+    JLG(pval, state->ipmetrics[trackerhash], key);
+    if (pval == NULL) {
+        JLI(pval, state->ipmetrics[trackerhash], key);
+        body = calloc(1, sizeof(corsaro_report_msg_body_t));
+        *pval = (Word_t)body;
+
+        body->ipaddr = addr;
+        body->issrc = issrc;
+        body->numtags = 0;
+        body->size = 0;
+        body->tags = NULL;
+        state->ipcounts[trackerhash] ++;
+    } else {
+        body = (corsaro_report_msg_body_t *)*pval;
+    }
+
+    process_tags(tags, iplen, body, state, logger, addr);
 
     /* Putting messages onto a queue is moderately expensive so it is better
      * for us to enqueue messages that contain multiple IP updates. That
      * allows us to do 1 queue operation for every REPORT_BATCH_SIZE updates,
      * just have to be careful about ensuring unfinished batches still get
      * pushed through when necessary (i.e. the end of an interval).
+     *
+     * To make life easier for the tracker threads receiving our messages,
+     * we'll also automatically send the message as soon as we see a whole
+     * bunch of tags for a single address -- this means we don't have to
+     * worry about our tags map being stupidly large and difficult to receive.
      */
+    if (body->numtags < CORSARO_MAX_SUPPORTED_TAGS &&
+            state->ipcounts[trackerhash] < REPORT_BATCH_SIZE) {
+        return;
+    }
+
+    if (send_iptracker_message(state, state->tracker_queues[trackerhash],
+           state->ipmetrics[trackerhash], logger) < 0) {
+        corsaro_log(logger,
+                "error while pushing result to tracker thread %d: %s",
+                trackerhash, strerror(errno));
+    }
+    state->ipcounts[trackerhash] = 0;
+    state->ipmetrics[trackerhash] = NULL;
+
+#if 0
+    msg = &(state->nextmsg[trackerhash]);
+    body = &(msg->update[msg->bodycount]);
+    process_tags(tags, iplen, body, state, logger, addr, issrc);
+    msg->bodycount ++;
+
     if (msg->bodycount < REPORT_BATCH_SIZE) {
         return;
     }
 
     if (zmq_send(state->tracker_queues[trackerhash], msg,
                 sizeof(corsaro_report_ip_message_t), 0) < 0) {
-        corsaro_log(logger,
-                "error while pushing result to tracker thread %d: %s",
-                trackerhash, strerror(errno));
     }
 
     /* Now that message has been sent, start a new one for the next lot
      * of IPs and metrics that we're going to send to that IP tracker thread.
      */
     reset_nextmsg(state, msg);
+#endif
 
 }
 
@@ -2018,15 +2232,6 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
 
     m->metrickp_keys = (Pvoid_t) NULL;
 
-#ifdef HAVE_TCMALLOC
-    m->res_handler = NULL;
-#else
-    m->res_handler = (corsaro_memhandler_t *)malloc(
-            sizeof(corsaro_memhandler_t));
-    init_corsaro_memhandler(p->logger, m->res_handler,
-            sizeof(corsaro_report_result_t), 10000);
-#endif
-
     return m;
 }
 
@@ -2056,10 +2261,6 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
 
     if (m->timeseries) {
         timeseries_free(&(m->timeseries));
-    }
-
-    if (m->res_handler) {
-        destroy_corsaro_memhandler(m->res_handler);
     }
 
     JLFA(judyret, m->metrickp_keys);
@@ -2225,14 +2426,11 @@ static int write_single_metric_avro(corsaro_logger_t *logger,
  *  @param logger       A reference to a corsaro logger for error reporting.
  *  @param writer       The corsaro Avro writer that will be writing the output.
  *  @param resultmap    The hash map containing the combined metric tallies.
- *  @param handler      The corsaro memory handler that was used to allocate
- *                      the results in the result map.
  *  @return 0 if successful, -1 if an error occurred.
  */
 
 static int write_all_metrics_avro(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
-        corsaro_memhandler_t *handler) {
+        corsaro_avro_writer_t *writer, Pvoid_t *resultmap) {
 
     corsaro_report_result_t *r, *tmpres;
     int writeret = 0;
@@ -2257,11 +2455,7 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
                 haderror = 1;
             }
         }
-        if (handler) {
-            release_corsaro_memhandler_item(handler, r->memsrc);
-        } else {
-            free(r);
-        }
+        free(r);
 
         JLN(pval, *resultmap, index);
     }
@@ -2341,11 +2535,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
         timeseries_kp_set(m->kp, (*pval) + 2, r->pkt_cnt);
         timeseries_kp_set(m->kp, (*pval) + 3, r->bytes);
 
-        if (m->res_handler) {
-            release_corsaro_memhandler_item(m->res_handler, r->memsrc);
-        } else {
-            free(r);
-        }
+        free(r);
         JLN(pval, *results, index);
     }
 
@@ -2358,29 +2548,17 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
 /** Allocate and initialise a new report plugin result.
  *
  *  @param metricid         The ID of the metric that this result is for
- *  @param reshandler       The corsaro memory handler that will be allocating
- *                          the memory for this result.
  *  @param outlabel         The additional label to append to this result.
  *  @param ts               The timestamp of the interval that this result will
  *                          belong to.
  *  @return a pointer to a freshly created report plugin result.
  */
 static inline corsaro_report_result_t *new_result(uint64_t metricid,
-        corsaro_memhandler_t *reshandler, char *outlabel, uint32_t ts) {
+        char *outlabel, uint32_t ts) {
 
     corsaro_report_result_t *r;
-    corsaro_memsource_t *memsrc;
 
-    if (reshandler) {
-        r = (corsaro_report_result_t *)get_corsaro_memhandler_item(
-                reshandler, &memsrc);
-        r->memsrc = memsrc;
-    } else {
-        r = (corsaro_report_result_t *)calloc(1,
-                sizeof(corsaro_report_result_t));
-        r->memsrc = NULL;
-    }
-
+    r = (corsaro_report_result_t *)calloc(1, sizeof(corsaro_report_result_t));
     r->metricid = metricid;
     r->pkt_cnt = 0;
     r->bytes = 0;
@@ -2402,12 +2580,10 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
  *  @param ts               The timestamp of the interval which this tally
  *                          applies to.
  *  @param conf             The global configuration for this report plugin.
- *  @param reshandler       The corsaro memory handler that will be allocating
- *                          the memory for any new metrics in the tally.
  */
 static void update_tracker_results(Pvoid_t *results,
         corsaro_report_iptracker_t *tracker, uint32_t ts,
-        corsaro_report_config_t *conf, corsaro_memhandler_t *reshandler) {
+        corsaro_report_config_t *conf) {
 
     corsaro_report_result_t *r;
     corsaro_metric_ip_hash_t *iter;
@@ -2425,7 +2601,7 @@ static void update_tracker_results(Pvoid_t *results,
         JLG(pval2, *results, iter->metricid);
         if (pval2 == NULL) {
             /* This is a new metric, add it to our result hash map */
-            r = new_result(iter->metricid, reshandler, conf->outlabel, ts);
+            r = new_result(iter->metricid, conf->outlabel, ts);
             JLI(pval2, *results, iter->metricid);
             *pval2 = (Word_t)r;
         } else {
@@ -2438,12 +2614,7 @@ static void update_tracker_results(Pvoid_t *results,
         r->bytes += iter->bytes;
 
         /* Don't forget to release the metric tally back to the IP tracker */
-        if (tracker->metric_handler) {
-            release_corsaro_memhandler_item(tracker->metric_handler,
-                    iter->memsrc);
-        } else {
-            free(iter);
-        }
+        free(iter);
 
         JLN(pval, tracker->lastresult, index);
     }
@@ -2481,8 +2652,7 @@ static int report_write_avro_output(corsaro_plugin_t *p,
         free(outname);
     }
 
-    if (write_all_metrics_avro(p->logger, m->writer, results, m->res_handler)
-        < 0) {
+    if (write_all_metrics_avro(p->logger, m->writer, results) < 0) {
         return -1;
     }
 
@@ -2491,7 +2661,7 @@ static int report_write_avro_output(corsaro_plugin_t *p,
 
 #define ADD_EMPTY_RESULT(metricclass, metricval) \
     metricid = GEN_METRICID(metricclass, metricval); \
-    r = new_result(metricid, res_handler, conf->outlabel, ts); \
+    r = new_result(metricid, conf->outlabel, ts); \
     JLI(pval, *results, (Word_t)metricid); \
     *pval = (Word_t)r;
 
@@ -2502,14 +2672,12 @@ static int report_write_avro_output(corsaro_plugin_t *p,
  *
  *  @param p            A reference to the running instance of the report plugin
  *  @param results      The Judy array that will be used to store the tallies
- *  @param res_handler  A corsaro memory handler to use for allocating result
- *                      structures
  *  @param ts           The timestamp for the current interval
  *
  *  @return -1 if an error occurs, 0 otherwise.
  */
 static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
-        corsaro_memhandler_t *res_handler, uint32_t ts) {
+        uint32_t ts) {
 
     uint64_t metricid, i;
     Word_t *pval;
@@ -2605,7 +2773,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     trackers_done = (uint8_t *)calloc(procconf->tracker_count, sizeof(uint8_t));
 
-    if (initialise_results(p, &results, m->res_handler, fin->timestamp) < 0) {
+    if (initialise_results(p, &results, fin->timestamp) < 0) {
         return -1;
     }
 
@@ -2625,7 +2793,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
                     update_tracker_results(&results, &(procconf->iptrackers[i]),
-                            fin->timestamp, conf, m->res_handler);
+                            fin->timestamp, conf);
                     trackers_done[i] = 1;
                     totaldone ++;
                 } else if (procconf->iptrackers[i].haltphase == 2) {

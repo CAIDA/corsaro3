@@ -41,7 +41,7 @@
  *  Used for array sizing, feel free to increase if we end up adding
  *  more tags.
  */
-#define CORSARO_MAX_SUPPORTED_TAGS 16
+#define CORSARO_MAX_SUPPORTED_TAGS 2000
 
 /** Each value in this enum represents a bit that can be set to indicate
  *  whether a packet matched a filter condition or not.
