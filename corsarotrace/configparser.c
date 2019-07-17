@@ -372,7 +372,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->subqueuename = NULL;
     glob->control_uri = NULL;
     glob->zmq_ctxt = zmq_ctx_new();
-    glob->zmq_subsock = NULL;
 
     pthread_mutex_init(&(glob->mutex), NULL);
 

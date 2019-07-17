@@ -141,7 +141,7 @@ const char *alpha2_continents[] = {
 };
 
 /* Pre-defined alpha-2 codes for countries */
-#define CORSAROTRACE_NUM_COUNTRIES (250)
+#define CORSAROTRACE_NUM_COUNTRIES (255)
 const char *alpha2_countries[] = {
     "??", "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS",
     "AT", "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH",
@@ -164,6 +164,7 @@ const char *alpha2_countries[] = {
     "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV",
     "TW", "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG",
     "VI", "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+    "A1", "A2", "O1", "AP", "EU",
 };
 
 /** Common plugin information and function callbacks */
@@ -440,6 +441,9 @@ typedef struct corsaro_report_state {
 /** Merge thread state for the report plugin */
 typedef struct corsaro_report_merge_state {
 
+    /** ZeroMQ socket used for requesting IPmeta labels from the tagger */
+    void *zmq_taggersock;
+
     /** A writer instance used for writing output in the Avro format */
     corsaro_avro_writer_t *writer;
 
@@ -453,6 +457,12 @@ typedef struct corsaro_report_merge_state {
      *  libtimeseries instance.
      */
     Pvoid_t metrickp_keys;
+
+    uint32_t last_label_update;
+
+    Pvoid_t country_labels;
+
+    Pvoid_t region_labels;
 } corsaro_report_merge_state_t;
 
 
@@ -494,10 +504,10 @@ typedef struct corsaro_report_result {
     char *label;
 
     /** A string representation of the metric class */
-    char *metrictype;
+    char metrictype[256];
 
     /** A string representation of the metric value */
-    char *metricval;
+    char metricval[128];
 
 } PACKED corsaro_report_result_t;
 
@@ -1082,13 +1092,17 @@ static void *start_iptracker(void *tdata) {
             pthread_mutex_unlock(&(track->mutex));
 
             /* End of interval, take final tally and update lastresults */
-            if (track->lastresult != NULL) {
-                corsaro_log(track->logger,
-                        "error, ended report interval before we had dealt with the results from the previous one!");
-                assert(0);
-            }
+            do {
+                pthread_mutex_lock(&(track->mutex));
+                if (track->lastresult == NULL) {
+                    break;
+                }
+                pthread_mutex_unlock(&(track->mutex));
+                /* TODO use a proper condition variable here */
+                sleep(1);
+            } while (1);
 
-            pthread_mutex_lock(&(track->mutex));
+            //pthread_mutex_lock(&(track->mutex));
             if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
                 track->lastresult = track->currentresult;
                 track->lastresultts = complete;
@@ -1581,7 +1595,9 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
             state->nextmsg[i].handler = NULL;
 
         } else {
-            free(state->nextmsg[i].update);
+            if (state->nextmsg[i].update) {
+                free(state->nextmsg[i].update);
+            }
         }
 #endif
 
@@ -2167,7 +2183,8 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
  *                  feeding into the merging thread.
  *  @return A pointer to the newly create report merging state.
  */
-void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
+void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources,
+        void *tagsock) {
 
     corsaro_report_merge_state_t *m;
     corsaro_report_config_t *conf;
@@ -2181,6 +2198,9 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
                 "corsaro_report_init_merging: out of memory while allocating merge state.");
         return NULL;
     }
+
+    m->zmq_taggersock = tagsock;
+    m->last_label_update = 0;
 
     if (conf->outformat == CORSARO_OUTPUT_AVRO) {
         m->writer = corsaro_create_avro_writer(p->logger, REPORT_RESULT_SCHEMA);
@@ -2231,6 +2251,8 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
     }
 
     m->metrickp_keys = (Pvoid_t) NULL;
+    m->country_labels = (Pvoid_t) NULL;
+    m->region_labels = (Pvoid_t) NULL;
 
     return m;
 }
@@ -2264,6 +2286,8 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
     }
 
     JLFA(judyret, m->metrickp_keys);
+    corsaro_free_ipmeta_label_map(m->country_labels, 1);
+    corsaro_free_ipmeta_label_map(m->region_labels, 1);
 
     free(m);
     return 0;
@@ -2272,8 +2296,34 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
 #define AVRO_CONVERSION_FAILURE -1
 #define AVRO_WRITE_FAILURE -2
 
-static inline void metric_to_strings(corsaro_report_result_t *res) {
-    char valspace[2048];
+#define LOOKUP_COUNTRY_CONTINENT(contmap, metricid) \
+    lookup = metricid & 0xffffffff; \
+    JLF(pval, contmap, lookup); \
+    if (pval == NULL) { \
+        contkey = "notfound"; \
+    } else { \
+        contkey = (const char *)*pval; \
+    }
+
+#define STRIP_METRIC_VALUE(foundkey, dest, len) \
+    { \
+        char *rstr = strrchr(foundkey, '.'); \
+        if (rstr == NULL || rstr - foundkey >= len) { \
+            memcpy(dest, foundkey, len - 1); \
+            metrickey[len - 1] = '\0'; \
+        } else { \
+            memcpy(dest, foundkey, rstr - foundkey); \
+            metrickey[rstr - foundkey] = '\0'; \
+        } \
+    }
+
+static inline void metric_to_strings(corsaro_report_merge_state_t *m,
+        corsaro_report_result_t *res) {
+
+    Word_t *pval;
+    const char *contkey = NULL;
+    char metrickey[128];
+    uint64_t lookup;
 
     /* Convert the 64 bit metric ID into printable strings that we can
      * put in our result output.
@@ -2283,72 +2333,64 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
      */
     switch(res->metricid >> 32) {
         case CORSARO_METRIC_CLASS_COMBINED:
-            res->metrictype = "overall";
-            res->metricval = "";
+            strncpy(res->metrictype, "overall", 128);
+            res->metricval[0] = '\0';
             break;
         case CORSARO_METRIC_CLASS_IP_PROTOCOL:
-            res->metrictype = "traffic.protocol";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.protocol", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_ICMP_CODE:
-            res->metrictype = "traffic.icmp.code";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.icmp.code", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_ICMP_TYPE:
-            res->metrictype = "traffic.icmp.type";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.icmp.type", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
-            res->metrictype = "traffic.port.tcp.src_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.tcp.src_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_TCP_DEST_PORT:
-            res->metrictype = "traffic.port.tcp.dst_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.tcp.dst_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_UDP_SOURCE_PORT:
-            res->metrictype = "traffic.port.udp.src_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.udp.src_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_UDP_DEST_PORT:
-            res->metrictype = "traffic.port.udp.dst_port";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype, "traffic.port.udp.dst_port", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_CONTINENT:
-            res->metrictype = "geo.maxmind.continent";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            strncpy(res->metrictype, "geo.maxmind", 128);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
-            res->metrictype = "geo.maxmind.country";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            LOOKUP_COUNTRY_CONTINENT(m->country_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, 128);
+            snprintf(res->metrictype, 256, "geo.maxmind.%s", metrickey);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_NETACQ_CONTINENT:
-            res->metrictype = "geo.netacuity.continent";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            strncpy(res->metrictype, "geo.netacuity", 128);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
-            res->metrictype = "geo.netacuity.country";
-            snprintf(valspace, 2048, "%c%c", (int)(res->metricid & 0xff),
+            LOOKUP_COUNTRY_CONTINENT(m->country_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, 128);
+            snprintf(res->metrictype, 256, "geo.netacuity.%s", metrickey);
+            snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
-            res->metricval = valspace;
             break;
         case CORSARO_METRIC_CLASS_PREFIX_ASN:
-            res->metrictype = "routing.asn";
-            snprintf(valspace, 2048, "%lu", res->metricid & 0xffffffff);
-            res->metricval = valspace;
+            strncpy(res->metrictype , "routing.asn", 128);
+            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
     }
 }
@@ -2365,12 +2407,13 @@ static inline void metric_to_strings(corsaro_report_result_t *res) {
  *  @return the length of the resulting key string.
  */
 static inline int derive_libts_keyname(corsaro_plugin_t *p,
+        corsaro_report_merge_state_t *m,
         char *keyspace, int keylen, corsaro_report_result_t *res) {
 
     int ret;
     corsaro_report_config_t *config = (corsaro_report_config_t *)p->config;
 
-    metric_to_strings(res);
+    metric_to_strings(m, res);
     /* 'overall' metrics have no suitable metric value, so we need to
      * account for this case.
      */
@@ -2400,12 +2443,13 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
  *  @param res          The report plugin result to be written.
  *  @return 0 if the write is successful, -1 if an error occurs.
  */
-static int write_single_metric_avro(corsaro_logger_t *logger,
+static int write_single_metric_avro(corsaro_report_merge_state_t *m,
+        corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, corsaro_report_result_t *res) {
 
     avro_value_t *avro;
 
-    metric_to_strings(res);
+    metric_to_strings(m, res);
     avro = corsaro_populate_avro_item(writer, res, report_result_to_avro);
     if (avro == NULL) {
         corsaro_log(logger,
@@ -2426,11 +2470,14 @@ static int write_single_metric_avro(corsaro_logger_t *logger,
  *  @param logger       A reference to a corsaro logger for error reporting.
  *  @param writer       The corsaro Avro writer that will be writing the output.
  *  @param resultmap    The hash map containing the combined metric tallies.
+ *  @param subtreemask  A bitmask showing which metric classes were actively
+ *                      measured during the last interval
  *  @return 0 if successful, -1 if an error occurred.
  */
 
 static int write_all_metrics_avro(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, Pvoid_t *resultmap) {
+        corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
+        corsaro_report_merge_state_t *m, uint32_t subtreemask) {
 
     corsaro_report_result_t *r, *tmpres;
     int writeret = 0;
@@ -2443,11 +2490,21 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
 
+        /* Don't write metrics for sub-trees that have never been
+         * looked at by the upstream tagger, e.g. if we have no
+         * maxmind tagging, don't write a bunch of 0s for each
+         * country.
+         */
+        if ((subtreemask & (1 << (r->metricid >> 32))) == 0) {
+            JLN(pval, *resultmap, index);
+            continue;
+        }
+
         /* If we run into an error while writing, maybe don't try to write
          * anymore.
          */
         if (!stopwriting) {
-            writeret = write_single_metric_avro(logger, writer, r);
+            writeret = write_single_metric_avro(m, logger, writer, r);
             if (writeret == AVRO_WRITE_FAILURE) {
                 stopwriting = 1;
             }
@@ -2482,11 +2539,14 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
  *  @param timestamp    The timestamp for the interval that the tallies
  *                      correspond to
  *  @param results      A Judy array containing the tallies
+ *  @param subtreemask  A bitmask showing which metric classes were actively
+ *                      measured during the last interval
  *
  *  @return -1 if an error occurs, 0 if successful
  */
 static int report_write_libtimeseries(corsaro_plugin_t *p,
-        corsaro_report_merge_state_t *m, uint32_t timestamp, Pvoid_t *results)
+        corsaro_report_merge_state_t *m, uint32_t timestamp, Pvoid_t *results,
+        uint32_t subtreemask)
 {
     corsaro_report_result_t *r;
     Word_t index = 0, judyret;
@@ -2498,6 +2558,16 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
 
+        /* Don't write metrics for sub-trees that have never been
+         * looked at by the upstream tagger, e.g. if we have no
+         * maxmind tagging, don't write a bunch of 0s for each
+         * country.
+         */
+        if ((subtreemask & (1 << (r->metricid >> 32))) == 0) {
+            JLN(pval, *results, index);
+            continue;
+        }
+
         JLG(pval, m->metrickp_keys, r->metricid);
         if (pval == NULL) {
             /* This is a metric ID that we haven't seen before so we need
@@ -2507,7 +2577,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
             char fullkeyname[5000];
             int keyid = -1;
 
-            if (derive_libts_keyname(p, keyname, 4096, r) <= 0) {
+            if (derive_libts_keyname(p, m, keyname, 4096, r) <= 0) {
                 corsaro_log(p->logger,
                         "error deriving suitable keyname from metricid %lu",
                         r->metricid);
@@ -2566,8 +2636,8 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
     r->uniq_dst_ips = 0;
     r->attimestamp = ts;
     r->label = outlabel;
-    r->metrictype = NULL;
-    r->metricval = NULL;
+    r->metrictype[0] = '\0';
+    r->metricval[0] = '\0';
     return r;
 }
 
@@ -2583,7 +2653,7 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
  */
 static void update_tracker_results(Pvoid_t *results,
         corsaro_report_iptracker_t *tracker, uint32_t ts,
-        corsaro_report_config_t *conf) {
+        corsaro_report_config_t *conf,  uint32_t *subtrees_seen) {
 
     corsaro_report_result_t *r;
     corsaro_metric_ip_hash_t *iter;
@@ -2597,6 +2667,8 @@ static void update_tracker_results(Pvoid_t *results,
     JLF(pval, tracker->lastresult, index);
     while (pval) {
         iter = (corsaro_metric_ip_hash_t *)(*pval);
+
+        *subtrees_seen = (*subtrees_seen) | (1 << (iter->metricid >> 32));
 
         JLG(pval2, *results, iter->metricid);
         if (pval2 == NULL) {
@@ -2635,7 +2707,7 @@ static void update_tracker_results(Pvoid_t *results,
  */
 static int report_write_avro_output(corsaro_plugin_t *p,
         corsaro_report_merge_state_t *m, uint32_t timestamp,
-        Pvoid_t *results) {
+        Pvoid_t *results, uint32_t subtreemask) {
 
     char *outname;
 
@@ -2652,7 +2724,8 @@ static int report_write_avro_output(corsaro_plugin_t *p,
         free(outname);
     }
 
-    if (write_all_metrics_avro(p->logger, m->writer, results) < 0) {
+    if (write_all_metrics_avro(p->logger, m->writer, results,
+                m, subtreemask) < 0) {
         return -1;
     }
 
@@ -2731,6 +2804,162 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
     return 0;
 }
 
+#define INSERT_IPMETA_LABEL(labelmap, index, labelstr) \
+    { \
+    PWord_t pval; \
+    JLI(pval, labelmap, index); \
+    if ((char *)(*pval) != NULL) { \
+        free((char *)(*pval)); \
+    } \
+    *pval = (Word_t)labelstr; \
+    }
+
+
+static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
+        corsaro_logger_t *logger) {
+
+    corsaro_tagger_control_request_t req;
+    corsaro_tagger_control_reply_t *reply;
+    zmq_msg_t frame;
+    char *buffer;
+    int buflen;
+    int firstpass = 1;
+    int iserr = 0;
+    uint32_t tocome = 0;
+    int more;
+    size_t more_size;
+    int attempts = 0;
+
+    req.request_type = TAGGER_REQUEST_IPMETA_UPDATE;
+    req.data.last_version = htonl(state->last_label_update);
+
+    if (zmq_send(state->zmq_taggersock, &req, sizeof(req), 0) < 0) {
+        corsaro_log(logger, "unable to send IPmeta update request to corsarotagger: %s", strerror(errno));
+        return -1;
+    }
+
+    while (!iserr) {
+        zmq_msg_init(&frame);
+
+        while (attempts < 10) {
+            if (zmq_msg_recv(&frame, state->zmq_taggersock, ZMQ_DONTWAIT) < 0) {
+                if (errno == EAGAIN) {
+                    attempts ++;
+                    usleep(100000);
+                    continue;
+                }
+
+                corsaro_log(logger, "unable to receive IPmeta update from corsarotagger: %s", strerror(errno));
+                zmq_msg_close(&frame);
+                return -1;
+            }
+            break;
+        }
+
+        if (attempts >= 10) {
+            corsaro_log(logger, "failed to get ipmeta label response in reasonable time frame");
+            zmq_msg_close(&frame);
+            return -1;
+        }
+
+        buffer = zmq_msg_data(&frame);
+        buflen = zmq_msg_size(&frame);
+
+        if (firstpass) {
+            reply = (corsaro_tagger_control_reply_t *)buffer;
+
+            state->last_label_update = ntohl(reply->ipmeta_version);
+            tocome = ntohl(reply->label_count);
+            firstpass = 0;
+
+            buffer += sizeof(corsaro_tagger_control_reply_t);
+            buflen -= sizeof(corsaro_tagger_control_reply_t);
+        }
+
+        while (buflen > 0) {
+            corsaro_tagger_label_hdr_t *hdr;
+            char *labelstr;
+            uint16_t labellen;
+            uint32_t index;
+
+            if (buflen < sizeof(corsaro_tagger_label_hdr_t)) {
+                corsaro_log(logger, "parsing error in received IPmeta update -- %d bytes left over in message, need at least %d",
+                        buflen, sizeof(corsaro_tagger_label_hdr_t));
+                goto drainmessage;
+            }
+
+            hdr = (corsaro_tagger_label_hdr_t *)buffer;
+            labellen = ntohs(hdr->label_len);
+            labelstr = calloc(labellen + 1, sizeof(char));
+
+            if (buflen < sizeof(corsaro_tagger_label_hdr_t) + labellen) {
+                corsaro_log(logger, "parsing error in received IPmeta update -- %d bytes left over in message, need at least %d",
+                        buflen, sizeof(corsaro_tagger_label_hdr_t) + labellen);
+                goto drainmessage;
+            }
+
+            memcpy(labelstr, buffer + sizeof(corsaro_tagger_label_hdr_t),
+                    labellen);
+
+            index = ntohl(hdr->subject_id);
+
+            if (hdr->subject_type == TAGGER_LABEL_COUNTRY) {
+                INSERT_IPMETA_LABEL(state->country_labels, index, labelstr);
+            }
+            if (hdr->subject_type == TAGGER_LABEL_REGION) {
+                INSERT_IPMETA_LABEL(state->region_labels, index, labelstr);
+            }
+
+            buffer += (sizeof(corsaro_tagger_label_hdr_t) + labellen);
+            buflen -= (sizeof(corsaro_tagger_label_hdr_t) + labellen);
+
+        }
+
+        more_size = sizeof(more);
+        if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+                    &more_size) < 0) {
+            corsaro_log(logger, "error while checking for more IPmeta update content: %s", strerror(errno));
+            return -1;
+        }
+
+        zmq_msg_close(&frame);
+        if (more == 0) {
+            break;
+        }
+    }
+
+    return 1;
+
+drainmessage:
+    /* Something went wrong with our IPmeta label parsing, so try to drain
+     * any remaining message parts from the queue before returning an error
+     * code.
+     */
+
+    zmq_msg_close(&frame);
+    if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+                &more_size) < 0) {
+        corsaro_log(logger, "error while draining bad IPmeta update content: %s", strerror(errno));
+        return -1;
+    }
+
+    while (more) {
+        zmq_msg_init(&frame);
+        if (zmq_msg_recv(state->zmq_taggersock, &frame, 0) < 0) {
+            corsaro_log(logger, "unable to receive IPmeta update from corsarotagger: %s", strerror(errno));
+            break;
+        }
+
+        if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+                    &more_size) < 0) {
+            corsaro_log(logger, "error while draining bad IPmeta update content: %s", strerror(errno));
+            break;
+        }
+    }
+    zmq_msg_close(&frame);
+    return -1;
+}
+
 /** Merge the metric tallies for a given interval into a single combined
  *  result and write it to our Avro output file.
  *
@@ -2751,6 +2980,8 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
 
+    uint32_t subtrees_seen = 0;
+
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
         return -1;
@@ -2759,6 +2990,13 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     /* Plugin result data is NULL, must be a partial interval */
     if (tomerge[0] == NULL) {
         return 0;
+    }
+
+    /* Now would be a good time to make sure we have a copy of all of the
+     * IPmeta labels that we need...
+     */
+    if (update_ipmeta_labels(m, p->logger) < 0) {
+        return -1;
     }
 
     /* All of the interim results should point at the same config, so we
@@ -2793,7 +3031,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
                     update_tracker_results(&results, &(procconf->iptrackers[i]),
-                            fin->timestamp, conf);
+                            fin->timestamp, conf, &subtrees_seen);
                     trackers_done[i] = 1;
                     totaldone ++;
                 } else if (procconf->iptrackers[i].haltphase == 2) {
@@ -2829,13 +3067,15 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
      * been merged into a single result -- write it out!
      */
     if (conf->outformat == CORSARO_OUTPUT_AVRO) {
-        if (report_write_avro_output(p, m, fin->timestamp, &results) < 0) {
+        if (report_write_avro_output(p, m, fin->timestamp, &results,
+                subtrees_seen) < 0) {
             return -1;
         }
     }
 
     if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
-        if (report_write_libtimeseries(p, m, fin->timestamp, &results) < 0) {
+        if (report_write_libtimeseries(p, m, fin->timestamp, &results,
+                subtrees_seen) < 0) {
             return -1;
         }
     }

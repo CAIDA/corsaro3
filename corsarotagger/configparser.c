@@ -326,6 +326,18 @@ static int parse_config(corsaro_tagger_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "samplerate")) {
+
+        int rate = (int)strtol((char *)value->data.scalar.value, NULL, 10);
+        if (rate <= 0) {
+            corsaro_log(glob->logger, "sample rate must be greater than zero, setting to 1.");
+            rate = 1;
+        }
+
+        glob->sample_rate = rate;
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "basicfilter")) {
         glob->filterstring = strdup((char *)value->data.scalar.value);
     }
@@ -398,6 +410,12 @@ static void log_configuration(corsaro_tagger_global_t *glob) {
     if (glob->netacqtagopts.enabled) {
         corsaro_log(glob->logger,
                 "netacq-edge geo-location tagging will be applied to all packets");
+    }
+
+    if (glob->sample_rate > 1) {
+        corsaro_log(glob->logger,
+                "WARNING: only publishing 1 in every %d tagged packets",
+                glob->sample_rate);
     }
 
 }
@@ -497,6 +515,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->logger = NULL;
 
     glob->output_hashbins = 4;
+    glob->sample_rate = 1;
 
     glob->threaddata = NULL;
     glob->hasher = NULL;

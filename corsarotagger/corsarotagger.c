@@ -343,6 +343,41 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
     return 0;
 }
 
+static void load_maxmind_country_labels(corsaro_tagger_global_t *glob,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    const char **countries;
+    const char **continents;
+    int count, ret, i;
+    char build[16];
+    uint32_t index;
+    PWord_t pval;
+    char *fqdn;
+
+    count = ipmeta_provider_maxmind_get_iso2_list(&countries);
+    ret = ipmeta_provider_maxmind_get_country_continent_list(&continents);
+
+    if (count != ret) {
+        corsaro_log(glob->logger, "libipmeta error: maxmind country array is notthe same length as the maxmind continent array?");
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        index = (countries[i][0] & 0xff) + ((countries[i][1] & 0xff) << 8);
+        snprintf(build, 16, "%s.%s", continents[i], countries[i]);
+
+        JLI(pval, ipmeta_state->country_labels, index);
+        if (*pval) {
+            continue;
+        }
+        fqdn = strdup(build);
+        *pval = (Word_t) fqdn;
+
+        JLI(pval, ipmeta_state->recently_added_country_labels, index);
+        *pval = (Word_t) fqdn;
+    }
+}
+
 /** Creates and populates an IPMeta data structure, based on the contents
  *  of the files listed in the configuration file.
  *
@@ -354,7 +389,6 @@ static void load_ipmeta_data(corsaro_tagger_global_t *glob,
         corsaro_ipmeta_state_t *ipmeta_state) {
 
     ipmeta_provider_t *prov;
-
     ipmeta_state->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
     if (glob->pfxtagopts.enabled) {
         /* Prefix to ASN mapping */
@@ -379,7 +413,10 @@ static void load_ipmeta_data(corsaro_tagger_global_t *glob,
         } else {
             ipmeta_state->maxmindipmeta = prov;
         }
+
+        load_maxmind_country_labels(glob, ipmeta_state);
     }
+
     if (glob->netacqtagopts.enabled) {
         /* Netacq Edge geolocation */
         prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
@@ -500,6 +537,165 @@ void usage(char *prog) {
     printf("\tterminal\n\tfile\n\tsyslog\n\tdisabled\n");
 }
 
+static inline char *send_ipmeta_labels(Pvoid_t labelmap, char *buffer,
+        char *rptr, int bufsize, void *sock, uint8_t labeltype) {
+
+    corsaro_tagger_label_hdr_t *hdr;
+    Word_t index;
+    PWord_t pval;
+
+    index = 0;
+    JLF(pval, labelmap, index);
+    while (pval) {
+        char *label = (char *)(*pval);
+        uint32_t subjid = (uint32_t) index;
+        int labellen = strlen(label);
+
+        int needed = labellen + sizeof(corsaro_tagger_label_hdr_t);
+
+        if (bufsize - (rptr - buffer) < needed) {
+            /* send what we've got */
+            if (zmq_send(sock, buffer, rptr-buffer, ZMQ_SNDMORE) < 0) {
+                /* TODO log an error? */
+
+            }
+            rptr = buffer;
+        }
+
+        hdr = (corsaro_tagger_label_hdr_t *)rptr;
+        hdr->subject_type = labeltype;
+        hdr->subject_id = ntohl(subjid);
+        hdr->label_len = ntohs((uint16_t)labellen);
+
+        rptr += sizeof(corsaro_tagger_label_hdr_t);
+        memcpy(rptr, label, labellen);
+        rptr += labellen;
+
+        JLN(pval, labelmap, index);
+    }
+
+    return rptr;
+}
+
+static char *send_all_ipmeta_labels(corsaro_ipmeta_state_t *state,
+        char *buffer, char *rptr, int bufsize, void *sock) {
+
+    rptr = send_ipmeta_labels(state->country_labels, buffer, rptr, bufsize,
+            sock, TAGGER_LABEL_COUNTRY);
+    rptr = send_ipmeta_labels(state->region_labels, buffer, rptr, bufsize,
+            sock, TAGGER_LABEL_REGION);
+
+    return rptr;
+}
+
+static char *send_new_ipmeta_labels(corsaro_ipmeta_state_t *state,
+        char *buffer, char *rptr, int bufsize, void *sock) {
+
+    rptr = send_ipmeta_labels(state->recently_added_country_labels, buffer,
+            rptr, bufsize, sock, TAGGER_LABEL_COUNTRY);
+    rptr = send_ipmeta_labels(state->recently_added_region_labels, buffer,
+            rptr, bufsize, sock, TAGGER_LABEL_REGION);
+
+    return rptr;
+
+}
+
+static int process_control_request(corsaro_tagger_global_t *glob) {
+
+    corsaro_tagger_control_request_t req;
+    corsaro_tagger_control_reply_t *reply;
+    char reply_buffer[10000];
+    char *rptr = reply_buffer;
+    Word_t rc_word;
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    if (zmq_recv(glob->zmq_control, &req, sizeof(req), 0) < 0) {
+        if (errno == EINTR) {
+            return 0;
+        }
+        corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
+        return -1;
+    }
+
+    if (tv.tv_sec - glob->ipmeta_state->last_reload >= 300) {
+
+        if (glob->ipmeta_state->recently_added_country_labels) {
+            corsaro_free_ipmeta_label_map(
+                    glob->ipmeta_state->recently_added_country_labels, 0);
+            glob->ipmeta_state->recently_added_country_labels = NULL;
+        }
+
+        if (glob->ipmeta_state->recently_added_region_labels) {
+            corsaro_free_ipmeta_label_map(
+                    glob->ipmeta_state->recently_added_region_labels, 0);
+            glob->ipmeta_state->recently_added_region_labels = NULL;
+        }
+    }
+
+    switch(req.request_type) {
+        case TAGGER_REQUEST_HELLO:
+            reply = (corsaro_tagger_control_reply_t *)reply_buffer;
+            reply->hashbins = glob->output_hashbins;
+            reply->ipmeta_version = htonl(glob->ipmeta_version);
+            reply->label_count = 0;
+
+            rptr = reply_buffer + sizeof(corsaro_tagger_control_reply_t);
+
+            break;
+        case TAGGER_REQUEST_IPMETA_UPDATE:
+            reply = (corsaro_tagger_control_reply_t *)reply_buffer;
+            reply->hashbins = glob->output_hashbins;
+            reply->ipmeta_version = htonl(glob->ipmeta_version);
+            reply->label_count = 0;
+
+            rptr = reply_buffer + sizeof(corsaro_tagger_control_reply_t);
+            if (req.data.last_version == 0) {
+                JLC(rc_word, glob->ipmeta_state->country_labels, 0, -1);
+                reply->label_count += (uint32_t)rc_word;
+                JLC(rc_word, glob->ipmeta_state->region_labels, 0, -1);
+                reply->label_count += (uint32_t)rc_word;
+                reply->label_count = htonl(reply->label_count);
+
+                rptr = send_all_ipmeta_labels(glob->ipmeta_state, reply_buffer,
+                        rptr, 10000, glob->zmq_control);
+            } else {
+                JLC(rc_word, glob->ipmeta_state->recently_added_country_labels,
+                        0, -1);
+                reply->label_count += (uint32_t)rc_word;
+                JLC(rc_word, glob->ipmeta_state->recently_added_region_labels,
+                        0, -1);
+                reply->label_count += (uint32_t)rc_word;
+                reply->label_count = htonl(reply->label_count);
+                rptr = send_new_ipmeta_labels(glob->ipmeta_state, reply_buffer,
+                        rptr, 10000, glob->zmq_control);
+            }
+
+            break;
+        default:
+            corsaro_log(glob->logger, "unexpected control request type: %u",
+                    req.request_type);
+            return -1;
+    }
+    if (rptr == reply_buffer) {
+        corsaro_log(glob->logger, "warning: no outstanding content in buffer at end of request processing loop?");
+    }
+
+    while (rptr - reply_buffer > 0) {
+        if (zmq_send(glob->zmq_control, reply_buffer, rptr - reply_buffer,
+                0) < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            corsaro_log(glob->logger, "error while sending control message: %s", strerror(errno));
+            /* carry on, don't die because of a bad client */
+        }
+        break;
+    }
+    return 1;
+}
+
 /** Checks for any messages that are sent to the main corsarotagger
  *  thread and acts upon them.
  *
@@ -507,10 +703,10 @@ void usage(char *prog) {
  *  @return -1 if an error occurs, 0 otherwise.
  */
 static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
-    char controlin[100];
     uint8_t reply;
     zmq_pollitem_t items[2];
     int rc;
+    struct timeval tv;
 
     if (ipmeta_reload) {
         /* We got a SIGHUP, trigger a reload of IPmeta data */
@@ -544,27 +740,8 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
     }
 
     if (items[0].revents & ZMQ_POLLIN) {
-        /* The message contents don't matter, just the fact that we got a
-         * message.
-         */
-        if (zmq_recv(glob->zmq_control, controlin, sizeof(controlin), 0) < 0) {
-            if (errno == EINTR) {
-                return 0;
-            }
-            corsaro_log(glob->logger, "error while reading message from control socket: %s", strerror(errno));
-            return -1;
-        }
-        /* Send our hash bin number back */
-        reply = glob->output_hashbins;
-        while (1) {
-            if (zmq_send(glob->zmq_control, &reply, sizeof(reply), 0) < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                corsaro_log(glob->logger, "error while sending control message: %s", strerror(errno));
-                /* carry on, don't die because of a bad client */
-            }
-            break;
+        if ((rc = process_control_request(glob)) <= 0) {
+            return rc;
         }
     }
 
@@ -595,7 +772,10 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
             pthread_mutex_unlock(&(glob->ipmeta_state->mutex));
         }
 
+        gettimeofday(&tv, NULL);
         glob->ipmeta_state = replace;
+        glob->ipmeta_version = tv.tv_sec;
+        glob->ipmeta_state->last_reload = tv.tv_sec;
 
     }
 
@@ -612,6 +792,7 @@ int main(int argc, char *argv[]) {
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
     pthread_t proxythreads[2];
+    struct timeval tv;
 
     corsaro_tagger_proxy_data_t internalproxy;
     corsaro_tagger_proxy_data_t externalproxy;
@@ -729,6 +910,9 @@ int main(int argc, char *argv[]) {
     /* Load the libipmeta provider data */
     glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
     load_ipmeta_data(glob, glob->ipmeta_state);
+    gettimeofday(&tv, NULL);
+    glob->ipmeta_version = tv.tv_sec;
+    glob->ipmeta_state->last_reload = tv.tv_sec;
 
     glob->threaddata = calloc(glob->tag_threads, sizeof(corsaro_tagger_local_t));
     glob->packetdata = calloc(glob->pkt_threads, sizeof(corsaro_packet_local_t));
