@@ -1473,7 +1473,6 @@ static int send_iptracker_message(corsaro_report_state_t *state,
     int iserr = 0;
     char *blob;
     int blobsize = 0;
-    uint32_t n = 0;
 
     msg.msgtype = CORSARO_IP_MESSAGE_UPDATE;
     msg.sender = state->threadid;
@@ -1512,8 +1511,6 @@ static int send_iptracker_message(corsaro_report_state_t *state,
         Pvoid_t saved;
         corsaro_report_msg_tag_t *tagptr;
         corsaro_report_msg_tag_t *result;
-
-        n++;
 
         body = (corsaro_report_msg_body_t *)(*pval);
         saved = body->tags;
