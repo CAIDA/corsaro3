@@ -44,6 +44,7 @@
 
 #include "libcorsaro.h"
 #include "libcorsaro_plugin.h"
+#include "libcorsaro_common.h"
 #include "libcorsaro_avro.h"
 #include "libcorsaro_libtimeseries.h"
 #include "corsaro_report.h"
@@ -648,11 +649,11 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
 
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                     && strcmp((char *)key->data.scalar.value,
-                    "query_tagger_labels") == 0) {
+                    "querytaggerlabels") == 0) {
 
             if (parse_onoff_option(p->logger, (char *)value->data.scalar.value,
                     &(conf->query_tagger_labels), "query_tagger_labels") < 0) {
-                corsaro_logger(p->logger, "setting query_tagger_labels to disabled");
+                corsaro_log(p->logger, "setting query_tagger_labels to disabled");
                 conf->query_tagger_labels = 0;
             }
         }
