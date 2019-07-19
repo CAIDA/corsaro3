@@ -380,6 +380,11 @@ typedef struct corsaro_report_msg_body {
     /** The number of IP-layer bytes that were in the packet. */
     uint32_t size;
 
+    /** Flag indicating whether this IP address has been seen since the
+     *  last interval boundary.
+     */
+    uint8_t seenthisinterval;
+
     /** Map containing the metric IDs for all of the tags that were
      *  seen matching this address.
      */
@@ -405,7 +410,7 @@ typedef struct corsaro_report_ip_message {
     uint32_t timestamp;
 
     /** The number of IP + tag updates included in this message */
-    uint16_t bodycount;
+    uint32_t bodycount;
 
 #if 0
     /** Pointer to the memory blob that this structure came from */
@@ -426,9 +431,6 @@ typedef struct corsaro_report_state {
 
     Pvoid_t *ipmetrics;
     uint32_t *ipcounts;
-
-    /** The current IP tracker message that this thread is working on */
-    //corsaro_report_ip_message_t *nextmsg;
 
     /** An identifier for this packet processing thread */
     int threadid;
@@ -1128,7 +1130,6 @@ static void *start_iptracker(void *tdata) {
                 sleep(1);
             } while (1);
 
-            //pthread_mutex_lock(&(track->mutex));
             if (msg.msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
                 track->lastresult = track->currentresult;
                 track->lastresultts = complete;
@@ -1175,7 +1176,7 @@ static void *start_iptracker(void *tdata) {
         if (more == 0) {
             corsaro_log(track->logger, "missing ip tracker message parts? trailer appears to be missing?");
         } else {
-            uint16_t trailer;
+            uint32_t trailer;
             if (zmq_recv(track->incoming, &trailer,
                         sizeof(trailer), 0) < 0) {
 
@@ -1427,8 +1428,31 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
     return state;
 }
 
+static void clean_ipmetrics_array(corsaro_logger_t *logger, Pvoid_t ipmetrics,
+        corsaro_report_state_t *state) {
+
+    PWord_t pval;
+    Word_t index = 0;
+    Word_t rcword;
+
+    JLF(pval, ipmetrics, index);
+    while (pval) {
+        corsaro_report_msg_body_t *body;
+
+        body = (corsaro_report_msg_body_t *)(*pval);
+        if (body->tags) {
+            corsaro_log(logger, "should this also really happen?");
+        }
+        free(body);
+        JLN(pval, ipmetrics, index);
+    }
+
+    JLFA(rcword, ipmetrics);
+}
+
 static int send_iptracker_message(corsaro_report_state_t *state,
-        void *socket, Pvoid_t ipmetrics, corsaro_logger_t *logger) {
+        void *socket, Pvoid_t *ipmetrics, corsaro_logger_t *logger,
+        uint32_t ipcount) {
 
     corsaro_report_ip_message_t msg;
     PWord_t pval;
@@ -1445,8 +1469,7 @@ static int send_iptracker_message(corsaro_report_state_t *state,
     msg.bodycount = 0;
     msg.timestamp = 0;
 
-    JLC(rcword, ipmetrics, 0, -1);
-    msg.bodycount = (uint16_t)rcword;
+    msg.bodycount = ipcount;
 
     /* send "msg" with SNDMORE */
     if (zmq_send(socket, (void *)(&msg), sizeof(msg), ZMQ_SNDMORE) < 0) {
@@ -1454,9 +1477,10 @@ static int send_iptracker_message(corsaro_report_state_t *state,
     }
 
     index = 0;
-    JLF(pval, ipmetrics, index);
+    JLF(pval, *ipmetrics, index);
     blob = calloc(CORSARO_MAX_SUPPORTED_TAGS, sizeof(corsaro_report_msg_tag_t));
     blobsize = CORSARO_MAX_SUPPORTED_TAGS;
+
     while (pval) {
         corsaro_report_msg_body_t *body;
         Pvoid_t saved;
@@ -1464,6 +1488,17 @@ static int send_iptracker_message(corsaro_report_state_t *state,
         corsaro_report_msg_tag_t *result;
 
         body = (corsaro_report_msg_body_t *)(*pval);
+
+        if (!(body->seenthisinterval)) {
+            if (body->tags) {
+                corsaro_log(logger, "should this really happen?");
+            }
+            free(body);
+            JLD(rcword, *ipmetrics, index);
+            JLN(pval, *ipmetrics, index);
+            continue;
+        }
+
         saved = body->tags;
 
         body->tags = NULL;
@@ -1494,6 +1529,9 @@ static int send_iptracker_message(corsaro_report_state_t *state,
                 tagptr->packets = result->packets;
                 tagptr->bytes = result->bytes;
                 tagptr ++;
+
+                result->packets = 0;
+                result->bytes = 0;
                 free(result);
 
                 JLN(inval, saved, in_index);
@@ -1502,15 +1540,17 @@ static int send_iptracker_message(corsaro_report_state_t *state,
                     ZMQ_SNDMORE) < 0) {
                 iserr = 1;
             }
+
         }
         JLFA(rcword, saved);
 
-        free(body);
-        JLN(pval, ipmetrics, index);
+        body->numtags = 0;
+        body->size = 0;
+        body->seenthisinterval = 0;
+        JLN(pval, *ipmetrics, index);
     }
 
     free(blob);
-    JLFA(rcword, ipmetrics);
 
     /* send final counter to finish the message */
     if (!iserr) {
@@ -1556,7 +1596,7 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
         if (state->ipcounts[i] > 0) {
 
             if (send_iptracker_message(state, state->tracker_queues[i],
-                    state->ipmetrics[i], p->logger) < 0) {
+                    &(state->ipmetrics[i]), p->logger, state->ipcounts[i]) < 0) {
 
                 corsaro_log(p->logger,
                         "error while pushing final IP result to tracker thread %d: %s",
@@ -1572,6 +1612,8 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
                     "error while pushing halt to tracker thread %d: %s",
                     i, strerror(errno));
         }
+
+        clean_ipmetrics_array(p->logger, state->ipmetrics[i], state);
     }
 
     /* Wait for the tracker threads to stop */
@@ -1705,13 +1747,12 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     for (i = 0; i < conf->tracker_count; i++) {
         if (state->ipcounts[i] > 0) {
             if (send_iptracker_message(state, state->tracker_queues[i],
-                    state->ipmetrics[i], p->logger) < 0) {
+                    &(state->ipmetrics[i]), p->logger, state->ipcounts[i]) < 0) {
                 corsaro_log(p->logger,
                         "error while pushing end-interval result to tracker thread %d: %s",
                         i, strerror(errno));
             }
             state->ipcounts[i] = 0;
-            state->ipmetrics[i] = NULL;
         }
 
         if (zmq_send(state->tracker_queues[i],
@@ -2038,9 +2079,15 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
         body->numtags = 0;
         body->size = 0;
         body->tags = NULL;
+        body->seenthisinterval = 1;
         state->ipcounts[trackerhash] ++;
     } else {
         body = (corsaro_report_msg_body_t *)*pval;
+
+        if (body->seenthisinterval == 0) {
+            body->seenthisinterval = 1;
+            state->ipcounts[trackerhash] ++;
+        }
     }
 
     process_tags(tags, iplen, body, state, logger, addr);
@@ -2062,13 +2109,13 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
     }
 
     if (send_iptracker_message(state, state->tracker_queues[trackerhash],
-           state->ipmetrics[trackerhash], logger) < 0) {
+           &(state->ipmetrics[trackerhash]), logger,
+           state->ipcounts[trackerhash]) < 0) {
         corsaro_log(logger,
                 "error while pushing result to tracker thread %d: %s",
                 trackerhash, strerror(errno));
     }
     state->ipcounts[trackerhash] = 0;
-    state->ipmetrics[trackerhash] = NULL;
 
 }
 
@@ -2933,7 +2980,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
      * IPmeta labels that we need...
      */
     if (conf->query_tagger_labels && update_ipmeta_labels(m, p->logger) < 0) {
-        return -1;
+        corsaro_log(p->logger, "unable to fetch labels for IPmeta metrics: metric names may not be up to date...");
     }
 
     /* All of the interim results should point at the same config, so we
