@@ -313,7 +313,6 @@ typedef struct corsaro_report_iptracker {
      */
     libtrace_list_t *outstanding;
 
-    uint64_t since_interval;
 } corsaro_report_iptracker_t;
 
 /** Structure describing configuration specific to the report plugin */
@@ -342,6 +341,17 @@ typedef struct corsaro_report_config {
      *  and IP tracker threads.
      */
     void **tracker_queues;
+
+    /** Flag that can be used to disable making queries to the tagger for
+     *  fully qualified metric labels, especially for geo-tagging metrics.
+     *  Intended as a transitional feature until all existing taggers are
+     *  updated to support these queries -- having this enabled when
+     *  receiving packets from a tagger that does not support it can lead to
+     *  a failure to produce merged output if the tagger is under load.
+     *
+     *  TODO remove this option once it is no longer needed
+     */
+    uint8_t query_tagger_labels;
 } corsaro_report_config_t;
 
 typedef struct corsaro_report_msg_tag {
@@ -364,7 +374,7 @@ typedef struct corsaro_report_msg_body {
     uint8_t issrc;
 
     /** The number of metric tags that are in this message */
-    uint8_t numtags;
+    uint16_t numtags;
 
     /** The number of IP-layer bytes that were in the packet. */
     uint32_t size;
@@ -379,7 +389,7 @@ typedef struct corsaro_report_msg_body {
 /* XXX could make this configurable? */
 /** The number of IP tag updates to include in a single enqueued message
  *  to an IP tracker thread. */
-#define REPORT_BATCH_SIZE (100)
+#define REPORT_BATCH_SIZE (10000)
 
 /** A message sent from a packet processing thread to an IP tracker thread */
 typedef struct corsaro_report_ip_message {
@@ -593,6 +603,7 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     conf->outlabel = NULL;
     conf->outformat = CORSARO_OUTPUT_AVRO;
     conf->tracker_count = 4;
+    conf->query_tagger_labels = 1;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -632,6 +643,17 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
             if (conf->tracker_count > CORSARO_REPORT_MAX_IPTRACKERS) {
                 corsaro_log(p->logger, "report plugin: iptracker thread count is currently capped at %d", CORSARO_REPORT_MAX_IPTRACKERS);
                 conf->tracker_count = CORSARO_REPORT_MAX_IPTRACKERS;
+            }
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                    "query_tagger_labels") == 0) {
+
+            if (parse_onoff_option(p->logger, (char *)value->data.scalar.value,
+                    &(conf->query_tagger_labels), "query_tagger_labels") < 0) {
+                corsaro_logger(p->logger, "setting query_tagger_labels to disabled");
+                conf->query_tagger_labels = 0;
             }
         }
 
@@ -879,7 +901,7 @@ static int process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender) {
     corsaro_ip_hash_t *thisip = NULL;
     corsaro_report_msg_body_t ipdetails;
     corsaro_report_msg_tag_t *tagptr;
-    char *buffer;
+    char *buffer = NULL;
     int more, blobsize;
     size_t moresize;
 
@@ -901,18 +923,20 @@ static int process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender) {
         knowniptally = &(track->currentresult);
     }
 
-    buffer = calloc(ipdetails.numtags, sizeof(corsaro_report_msg_tag_t));
     ZEROMQ_CHECK_MORE
+    buffer = calloc(ipdetails.numtags, sizeof(corsaro_report_msg_tag_t));
 
     if (more == 0) {
         corsaro_log(track->logger,
                 "unexpected end of ip tracker message");
+        free(buffer);
         return -1;
     }
 
     blobsize = zmq_recv(track->incoming, buffer,
             ipdetails.numtags * sizeof(corsaro_report_msg_tag_t), 0);
     if (blobsize < 0) {
+        free(buffer);
         return -1;
     }
 
@@ -920,6 +944,7 @@ static int process_msg_body(corsaro_report_iptracker_t *track, uint8_t sender) {
         corsaro_log(track->logger,
                 "received unexpected amount of tag metrics in ip tracker -- expected %u, got %d",
                 ipdetails.numtags * sizeof(corsaro_report_msg_tag_t), blobsize);
+        free(buffer);
         return -1;
     }
     tagptr = (corsaro_report_msg_tag_t *)buffer;
@@ -1138,7 +1163,6 @@ static void *start_iptracker(void *tdata) {
             if (process_msg_body(track, msg.sender) < 0) {
                 break;
             }
-            track->since_interval ++;
         }
 
         if (!more) {
@@ -1238,6 +1262,10 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
     corsaro_log(p->logger,
             "report plugin: starting %d IP tracker threads",
             conf->tracker_count);
+    if (conf->query_tagger_labels == 0) {
+        corsaro_log(p->logger,
+                "report plugin: NOT querying the tagger for FQ geo-location labels");
+    }
 
     /* Create and start the IP tracker threads.
      *
@@ -1255,7 +1283,6 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         pthread_mutex_init(&(conf->iptrackers[i].mutex), NULL);
         conf->iptrackers[i].lastresultts = 0;
 
-        conf->iptrackers[i].since_interval = 0;
         conf->iptrackers[i].knownips = NULL;
         conf->iptrackers[i].knownips_next = NULL;
         conf->iptrackers[i].lastresult = NULL;
@@ -1445,6 +1472,8 @@ static int send_iptracker_message(corsaro_report_state_t *state,
     Word_t in_index;
     int iserr = 0;
     char *blob;
+    int blobsize = 0;
+    uint32_t n = 0;
 
     msg.msgtype = CORSARO_IP_MESSAGE_UPDATE;
     msg.sender = state->threadid;
@@ -1475,14 +1504,16 @@ static int send_iptracker_message(corsaro_report_state_t *state,
     }
 
     index = 0;
-    blob = calloc(CORSARO_MAX_SUPPORTED_TAGS,
-            sizeof(corsaro_report_msg_tag_t));
     JLF(pval, ipmetrics, index);
+    blob = calloc(CORSARO_MAX_SUPPORTED_TAGS, sizeof(corsaro_report_msg_tag_t));
+    blobsize = CORSARO_MAX_SUPPORTED_TAGS;
     while (pval) {
         corsaro_report_msg_body_t *body;
         Pvoid_t saved;
         corsaro_report_msg_tag_t *tagptr;
         corsaro_report_msg_tag_t *result;
+
+        n++;
 
         body = (corsaro_report_msg_body_t *)(*pval);
         saved = body->tags;
@@ -1498,6 +1529,11 @@ static int send_iptracker_message(corsaro_report_state_t *state,
 
         in_index = 0;
         JLF(inval, saved, in_index);
+
+        if (body->numtags > blobsize) {
+            blobsize = body->numtags;
+            blob = realloc(blob, blobsize * sizeof(corsaro_report_msg_tag_t));
+        }
 
         if (!iserr) {
             /* form tags into a single memory blob and send with SNDMORE */
@@ -1747,7 +1783,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
                         i, strerror(errno));
             }
             state->ipcounts[i] = 0;
-            state->ipmetrics[i] = 0;
+            state->ipmetrics[i] = NULL;
         }
 
         /*
@@ -2066,7 +2102,7 @@ static inline void update_metrics_for_address(corsaro_report_config_t *conf,
      * we are sending to the IP tracker thread. */
 
     if (issrc) {
-        key = addr;
+        key = (uint64_t)addr;
     } else {
         key = ((uint64_t)addr | 0x100000000);
     }
@@ -2653,7 +2689,8 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
  */
 static void update_tracker_results(Pvoid_t *results,
         corsaro_report_iptracker_t *tracker, uint32_t ts,
-        corsaro_report_config_t *conf,  uint32_t *subtrees_seen) {
+        corsaro_report_config_t *conf,  uint32_t *subtrees_seen,
+        corsaro_logger_t *logger) {
 
     corsaro_report_result_t *r;
     corsaro_metric_ip_hash_t *iter;
@@ -2992,10 +3029,11 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
         return 0;
     }
 
+    conf = (corsaro_report_config_t *)(p->config);
     /* Now would be a good time to make sure we have a copy of all of the
      * IPmeta labels that we need...
      */
-    if (update_ipmeta_labels(m, p->logger) < 0) {
+    if (conf->query_tagger_labels && update_ipmeta_labels(m, p->logger) < 0) {
         return -1;
     }
 
@@ -3007,7 +3045,6 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
      * that was used to run the processing threads.
      */
     procconf = ((corsaro_report_interim_t *)(tomerge[0]))->baseconf;
-    conf = (corsaro_report_config_t *)(p->config);
 
     trackers_done = (uint8_t *)calloc(procconf->tracker_count, sizeof(uint8_t));
 
@@ -3031,7 +3068,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
                 assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
                 if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
                     update_tracker_results(&results, &(procconf->iptrackers[i]),
-                            fin->timestamp, conf, &subtrees_seen);
+                            fin->timestamp, conf, &subtrees_seen, p->logger);
                     trackers_done[i] = 1;
                     totaldone ++;
                 } else if (procconf->iptrackers[i].haltphase == 2) {
