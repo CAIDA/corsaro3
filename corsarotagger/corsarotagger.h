@@ -77,6 +77,8 @@ typedef struct corsaro_tagger_glob {
     /** The name of the zeromq socket to publish tagged packets to */
     char *pubqueuename;
 
+    int sample_rate;
+
     /** The index of the input URI that we are currently reading from */
     int currenturi;
 
@@ -115,6 +117,7 @@ typedef struct corsaro_tagger_glob {
     netacq_opts_t netacqtagopts;
 
     corsaro_ipmeta_state_t *ipmeta_state;
+    uint32_t ipmeta_version;
 
     /** A libtrace hasher function that can be used to distribute received
      *  packets to processing threads.

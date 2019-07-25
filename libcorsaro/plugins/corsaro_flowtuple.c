@@ -588,7 +588,8 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
-void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
+void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources,
+        void *tagsock) {
     struct corsaro_flowtuple_merge_state_t *m;
 
     m = (struct corsaro_flowtuple_merge_state_t *)calloc(1,

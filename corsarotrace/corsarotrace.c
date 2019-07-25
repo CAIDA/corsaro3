@@ -335,6 +335,13 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
             tls->current_interval.time);
         tls->next_report += tls->glob->interval;
         tls->pkts_outstanding = 0;
+
+        if (tls->pkts_from_prev_interval > 0) {
+            corsaro_log(tls->glob->logger, "worker thread %d has observed %u packets from previous interval during interval %u",
+                    tls->workerid, tls->pkts_from_prev_interval,
+                    tls->current_interval.number - 1);
+            tls->pkts_from_prev_interval = 0;
+        }
     }
 
     fbits = ntohs(taghdr->filterbits);
@@ -348,6 +355,10 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
 
     if (tls->glob->removerouted && !(fbits & CORSARO_FILTERBIT_NONROUTABLE)) {
         goto filtered;
+    }
+
+    if (taghdr->ts_sec < tls->current_interval.time) {
+        tls->pkts_from_prev_interval ++;
     }
 
     tls->pkts_outstanding ++;
@@ -573,8 +584,24 @@ static void *start_merger(void *tdata) {
     corsaro_result_msg_t res;
     corsaro_fin_interval_t *fin;
 
+    merge->zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
+    merge->zmq_taggersock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+
+    if (zmq_bind(merge->zmq_pullsock, "inproc://pluginresults") != 0) {
+        corsaro_log(glob->logger,
+                "unable to bind pull socket for merger: %s",
+                strerror(errno));
+        goto endmerger;
+    }
+
+    if (zmq_connect(merge->zmq_taggersock, glob->control_uri) < 0) {
+        corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
+        goto endmerger;
+    }
+
     merge->pluginset = corsaro_start_merging_plugins(glob->logger,
-            glob->active_plugins, glob->plugincount, glob->threads);
+            glob->active_plugins, glob->plugincount, glob->threads,
+            merge->zmq_taggersock);
 
     while (1) {
         if (zmq_recv(merge->zmq_pullsock, &res, sizeof(res), 0) < 0) {
@@ -619,8 +646,8 @@ endmerger:
         free(fin);
     }
 
+    zmq_close(merge->zmq_taggersock);
     corsaro_stop_plugins(merge->pluginset);
-
     pthread_exit(NULL);
 }
 
@@ -722,7 +749,8 @@ int main(int argc, char *argv[]) {
     corsaro_trace_merger_t merger;
     libtrace_t *dummy;
     void *control_sock;
-    uint8_t ctrlmsg;
+    corsaro_tagger_control_request_t ctrlreq;
+    corsaro_tagger_control_reply_t ctrlreply;
 
     glob = configure_corsaro(argc, argv);
     if (glob == NULL) {
@@ -740,20 +768,23 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (zmq_send(control_sock, "", 0, 0) < 0) {
+    ctrlreq.request_type = TAGGER_REQUEST_HELLO;
+    ctrlreq.data.last_version = 0;
+
+    if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
         corsaro_log(glob->logger, "unable to send request to corsarotagger via control socket: %s", strerror(errno));
         return 1;
     }
 
-    if (zmq_recv(control_sock, &ctrlmsg, sizeof(ctrlmsg), 0) < 0) {
+    if (zmq_recv(control_sock, &ctrlreply, sizeof(ctrlreply), 0) < 0) {
         corsaro_log(glob->logger, "unable to receive reply from corsarotagger via control socket: %s", strerror(errno));
         return 1;
     }
 
-    corsaro_log(glob->logger, "corsarotagger is using %u hashbins",
-            ctrlmsg);
-    glob->max_hashbins = ctrlmsg;
     zmq_close(control_sock);
+    corsaro_log(glob->logger, "corsarotagger is using %u hashbins",
+            ctrlreply.hashbins);
+    glob->max_hashbins = ctrlreply.hashbins;
 
     workers = calloc(glob->threads, sizeof(corsaro_trace_worker_t));
 
@@ -772,14 +803,6 @@ int main(int argc, char *argv[]) {
     merger.next_rotate_interval = 0;
     merger.pluginset = NULL;
     merger.finished_intervals = NULL;
-
-    merger.zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-    if (zmq_bind(merger.zmq_pullsock, "inproc://pluginresults") != 0) {
-        corsaro_log(glob->logger,
-                "unable to bind pull socket for merger: %s",
-                strerror(errno));
-        return 1;
-    }
 
     sigemptyset(&sig_block_all);
     if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
@@ -810,8 +833,9 @@ int main(int argc, char *argv[]) {
     }
 
     pthread_join(merger.threadid, NULL);
-    zmq_close(merger.zmq_pullsock);
-
+    if (merger.zmq_pullsock) {
+        zmq_close(merger.zmq_pullsock);
+    }
     free(workers);
 
     corsaro_log(glob->logger, "all threads have joined, exiting.");

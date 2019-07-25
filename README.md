@@ -498,3 +498,11 @@ The report plugin supports the following configuration options:
                         number of unique source and destination IPs seen
                         sending or receiving a packet matching each metric.
                         Defaults to 4.
+
+  querytaggerlabels     If set to 'no', the plugin will NOT attempt to ask
+                        the tagger for FQ labels for each country, region,
+                        etc. that appears in the geo-location tags. This is
+                        useful if you are running an older corsarotagger that
+                        does not support this feature, but will mean that your
+                        metric labels may contain a lot of 'unknown's. Default
+                        is 'yes'.

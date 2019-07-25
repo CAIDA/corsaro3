@@ -297,14 +297,43 @@ ipmeta_provider_t *corsaro_init_ipmeta_provider(ipmeta_t *ipmeta,
     return prov;
 }
 
+#define FREE_LABEL_MAP(map, index, rc_int, pval, dofree) \
+    index = 0; \
+    if (dofree) {  \
+        JLF(pval, map, index); \
+        while (pval) { \
+            free((char *)(*pval)); \
+            JLN(pval, map, index); \
+        } \
+    } \
+    JLFA(rc_int, map);
+
 void corsaro_free_ipmeta_state(corsaro_ipmeta_state_t *state) {
+
+    Word_t index = 0;
+    int rc_int;
+    PWord_t pval;
 
     if (state->ipmeta) {
         ipmeta_free(state->ipmeta);
     }
 
+    FREE_LABEL_MAP(state->country_labels, index, rc_int, pval, 1);
+    FREE_LABEL_MAP(state->recently_added_country_labels, index, rc_int,
+            pval, 0);
+    FREE_LABEL_MAP(state->region_labels, index, rc_int, pval, 1);
+    FREE_LABEL_MAP(state->recently_added_region_labels, index, rc_int, pval, 0);
+
     pthread_mutex_destroy(&(state->mutex));
     free(state);
+}
+
+void corsaro_free_ipmeta_label_map(Pvoid_t labelmap, int dofree) {
+    Word_t index = 0;
+    int rc_int;
+    PWord_t pval;
+
+    FREE_LABEL_MAP(labelmap, index, rc_int, pval, dofree);
 }
 
 void corsaro_replace_tagger_ipmeta(corsaro_packet_tagger_t *tagger,

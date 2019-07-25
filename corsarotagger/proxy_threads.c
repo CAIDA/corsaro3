@@ -91,6 +91,7 @@ void *start_zmq_output_thread(void *data) {
     uint64_t *nextseq = NULL;
     FILE *f;
     int seqindex;
+    uint64_t totalseen = 0;
 
     pqueue_t *pq;
     int i, r, zero = 0, hwm = 100;
@@ -246,30 +247,35 @@ void *start_zmq_output_thread(void *data) {
         packet = (corsaro_tagger_packet_t *)nextpkt;
         workind = packet->taggedby;
 
-        if (packet->hdr.hashbin <= 'Z') {
-            seqindex = packet->hdr.hashbin - 'A';
-        } else {
-            seqindex = packet->hdr.hashbin - 'a';
+        if (glob->sample_rate == 1 || ((totalseen % glob->sample_rate) == 0)) {
+
+            if (packet->hdr.hashbin <= 'Z') {
+                seqindex = packet->hdr.hashbin - 'A';
+            } else {
+                seqindex = packet->hdr.hashbin - 'a';
+            }
+
+            packet->hdr.tagger_id = htonl(taggerid);
+            if (nextseq[seqindex] == 0) {
+                nextseq[seqindex] = 1;
+            }
+            packet->hdr.seqno = bswap_host_to_be64(nextseq[seqindex]);
+            nextseq[seqindex] ++;
+
+            if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
+                    sizeof(packet->hdr) + packet->hdr.pktlen) {
+
+                zmq_send(proxy_fwd, sendbufs[seqindex],
+                        sendbufsizes[seqindex], 0);
+                sendbufsizes[seqindex] = 0;
+            }
+
+            memcpy(sendbufs[seqindex] + sendbufsizes[seqindex], &(packet->hdr),
+                    sizeof(packet->hdr) + packet->hdr.pktlen);
+            sendbufsizes[seqindex] += sizeof(packet->hdr) + packet->hdr.pktlen;
         }
 
-        packet->hdr.tagger_id = htonl(taggerid);
-        if (nextseq[seqindex] == 0) {
-            nextseq[seqindex] = 1;
-        }
-        packet->hdr.seqno = bswap_host_to_be64(nextseq[seqindex]);
-        nextseq[seqindex] ++;
-
-        if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
-                sizeof(packet->hdr) + packet->hdr.pktlen) {
-
-            zmq_send(proxy_fwd, sendbufs[seqindex], sendbufsizes[seqindex], 0);
-            sendbufsizes[seqindex] = 0;
-        }
-
-        memcpy(sendbufs[seqindex] + sendbufsizes[seqindex], &(packet->hdr),
-                sizeof(packet->hdr) + packet->hdr.pktlen);
-        sendbufsizes[seqindex] += sizeof(packet->hdr) + packet->hdr.pktlen;
-
+        totalseen ++;
 
         /* Read the next packet from the worker that provided us with
          * the packet we just published.

@@ -1429,7 +1429,8 @@ static int write_attack_vectors(corsaro_logger_t *logger,
     return 0;
 }
 
-void *corsaro_dos_init_merging(corsaro_plugin_t *p, int sources) {
+void *corsaro_dos_init_merging(corsaro_plugin_t *p, int sources,
+        void *tagsock) {
 
     corsaro_dos_merge_state_t *m;
     m = (corsaro_dos_merge_state_t *)calloc(1,

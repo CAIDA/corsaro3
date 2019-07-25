@@ -93,7 +93,6 @@ typedef struct corsaro_trace_glob {
     uint8_t removerouted;
 
     void *zmq_ctxt;
-    void *zmq_subsock;
 
     uint8_t max_hashbins;
 } corsaro_trace_global_t;
@@ -107,6 +106,7 @@ struct corsaro_trace_worker {
     corsaro_interval_t lastrotateinterval;
     corsaro_plugin_set_t *plugins;
     uint64_t pkts_outstanding;
+    uint64_t pkts_from_prev_interval;
 
     uint32_t first_pkt_ts;
     uint32_t next_report;
@@ -135,6 +135,7 @@ struct corsaro_trace_merger {
     corsaro_fin_interval_t *finished_intervals;
 
     void *zmq_pullsock;
+    void *zmq_taggersock;
 };
 
 corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode);

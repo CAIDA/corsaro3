@@ -373,7 +373,8 @@ int corsaro_filteringstats_process_packet(corsaro_plugin_t *p, void *local,
 
 /** ------------- MERGING API -------------------- */
 
-void *corsaro_filteringstats_init_merging(corsaro_plugin_t *p, int sources) {
+void *corsaro_filteringstats_init_merging(corsaro_plugin_t *p, int sources,
+        void *tagsock) {
 
     corsaro_filteringstats_merge_state_t *m;
     m = (corsaro_filteringstats_merge_state_t *)calloc(1,
