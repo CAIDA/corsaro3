@@ -2643,6 +2643,7 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
          * country.
          */
         if ((subtreemask & (1 << (r->metricid >> 32))) == 0) {
+            free(r);
             JLN(pval, *resultmap, index);
             continue;
         }
