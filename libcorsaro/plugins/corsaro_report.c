@@ -1664,7 +1664,6 @@ static int send_iptracker_message(corsaro_report_state_t *state,
                 iserr = 1;
             }
         }
-
         /* Send all of the tags that we've stored against "body" */
         in_index = 0;
         JLF(inval, saved, in_index);
@@ -1700,7 +1699,6 @@ static int send_iptracker_message(corsaro_report_state_t *state,
                     (((char *)tagptr) - blob), ZMQ_SNDMORE) < 0) {
                 iserr = 1;
             }
-
         }
         JLFA(rcword, saved);
 
@@ -2712,6 +2710,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
          * country.
          */
         if ((subtreemask & (1 << (r->metricid >> 32))) == 0) {
+            free(r);
             JLN(pval, *results, index);
             continue;
         }
