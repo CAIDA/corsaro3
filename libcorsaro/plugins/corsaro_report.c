@@ -1358,7 +1358,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_report_config_t *conf;
-    int i, j, ret = 0, rto=10, hwm=1000;
+    int i, j, ret = 0, rto=10, hwm=10000;
     char sockname[40];
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -1625,12 +1625,10 @@ static int send_iptracker_message(corsaro_report_state_t *state,
     msg.bodycount = tracker->ipcount;
 
     /* send "msg" with SNDMORE */
-#if 1
     if (zmq_send(tracker->tracker_queue, (void *)(&msg), sizeof(msg),
             ZMQ_SNDMORE) < 0) {
         iserr = 1;
     }
-#endif
 
     index = 0;
     JLF(pval, tracker->ipmetrics, index);
@@ -1660,14 +1658,12 @@ static int send_iptracker_message(corsaro_report_state_t *state,
 
         body->tags = NULL;
         /* send "body" with SNDMORE */
-#if 1
         if (!iserr) {
             if (zmq_send(tracker->tracker_queue, (void *)body,
                     sizeof(corsaro_report_msg_body_t), ZMQ_SNDMORE) < 0) {
                 iserr = 1;
             }
         }
-#endif
         /* Send all of the tags that we've stored against "body" */
         in_index = 0;
         JLF(inval, saved, in_index);
@@ -1699,12 +1695,10 @@ static int send_iptracker_message(corsaro_report_state_t *state,
 
                 JLN(inval, saved, in_index);
             }
-#if 1
             if (zmq_send(tracker->tracker_queue, (void *)blob,
                     (((char *)tagptr) - blob), ZMQ_SNDMORE) < 0) {
                 iserr = 1;
             }
-#endif
         }
         JLFA(rcword, saved);
 
@@ -1720,12 +1714,10 @@ static int send_iptracker_message(corsaro_report_state_t *state,
 
     /* send final counter as a trailer to finish the message */
     if (!iserr) {
-#if 1
         if (zmq_send(tracker->tracker_queue, (void *)&(msg.bodycount),
                 sizeof(msg.bodycount), 0) < 0) {
             return -1;
         }
-#endif
     } else {
         return -1;
     }
@@ -2311,12 +2303,10 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
     if (extract_addresses(packet, &srcaddr, &dstaddr, &iplen) != 0) {
         return 0;
     }
-#if 1
     /* Update our metrics observed for the source address */
     update_metrics_for_address(conf, state, srcaddr, 1, iplen, tags, p->logger);
     /* Update our metrics observed for the destination address */
     update_metrics_for_address(conf, state, dstaddr, 0, iplen, tags, p->logger);
-#endif
     return 0;
 }
 
