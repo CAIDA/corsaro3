@@ -1286,12 +1286,15 @@ static void *start_iptracker(void *tdata) {
 
     while (track->haltphase != 2) {
         if (zmq_recv(track->incoming, &msg, sizeof(msg), 0) < 0) {
-            if (errno == EAGAIN) {
+            if (errno == EAGAIN || errno == EINTR) {
                 continue;
             }
             corsaro_log(track->logger,
                     "error receiving message on tracker pull socket: %s",
                     strerror(errno));
+            pthread_mutex_lock(&(track->mutex));
+            track->haltphase = 2;
+            pthread_mutex_unlock(&(track->mutex));
             break;
         }
 
@@ -1328,6 +1331,9 @@ static void *start_iptracker(void *tdata) {
         }
 
         if (process_iptracker_update_message(track, &msg) < 0) {
+            pthread_mutex_lock(&(track->mutex));
+            track->haltphase = 2;
+            pthread_mutex_unlock(&(track->mutex));
             break;
         }
     }
@@ -1358,7 +1364,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_report_config_t *conf;
-    int i, j, ret = 0, rto=10, hwm=10000;
+    int i, j, ret = 0, rto=10, hwm=50;
     char sockname[40];
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -2762,6 +2768,22 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
     return 0;
 }
 
+static void clean_result_map(Pvoid_t *resultmap) {
+
+    corsaro_report_result_t *r;
+    Word_t index = 0, judyret;
+    PWord_t pval;
+
+    JLF(pval, *resultmap, index);
+    while (pval) {
+        r = (corsaro_report_result_t *)(*pval);
+        free(r);
+        JLN(pval, *resultmap, index);
+    }
+
+    JLFA(judyret, *resultmap);
+}
+
 /** Allocate and initialise a new report plugin result.
  *
  *  @param metricid         The ID of the metric that this result is for
@@ -3191,8 +3213,12 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
 
             /* If we can't get the lock, try another tracker thread */
             if (pthread_mutex_trylock(&(procconf->iptrackers[i].mutex)) == 0) {
-                assert(fin->timestamp >= procconf->iptrackers[i].lastresultts);
-                if (procconf->iptrackers[i].lastresultts == fin->timestamp) {
+                if (procconf->iptrackers[i].lastresultts > fin->timestamp) {
+                    trackers_done[i] = 1;
+                    totaldone ++;
+                    skipresult = 1;
+                } else if (procconf->iptrackers[i].lastresultts ==
+                        fin->timestamp) {
                     update_tracker_results(&results, &(procconf->iptrackers[i]),
                             fin->timestamp, conf, &subtrees_seen, p->logger);
                     trackers_done[i] = 1;
@@ -3223,6 +3249,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
          * Don't try writing it to the avro output to avoid being
          * misleading.
          */
+        clean_result_map(&results);
         return 0;
     }
 

@@ -409,6 +409,7 @@ static void *start_worker(void *tdata) {
     uint8_t *rcvspace;
     void **final_result;
     libtrace_t *deadtrace = NULL;
+    int hwm = 50;
 
     deadtrace = trace_create_dead("pcapfile");
     tls->packet = trace_create_packet();
@@ -419,6 +420,14 @@ static void *start_worker(void *tdata) {
     if (subscribe_streams(tls->glob, tls->zmq_pullsock, tls->workerid) < 0) {
         goto endworker;
     }
+
+    if (zmq_setsockopt(tls->zmq_pullsock, ZMQ_RCVHWM, &hwm, sizeof(hwm)) < 0) {
+        corsaro_log(tls->glob->logger,
+                "unable to configure sub socket for worker %d: %s",
+                tls->workerid, strerror(errno));
+        goto endworker;
+    }
+
 
     if (zmq_connect(tls->zmq_pullsock, tls->glob->subqueuename) != 0) {
         corsaro_log(tls->glob->logger,
@@ -434,8 +443,6 @@ static void *start_worker(void *tdata) {
                 tls->workerid, strerror(errno));
         goto endworker;
     }
-
-    /* TODO set HWM for push socket?? */
 
     tls->plugins = corsaro_start_plugins(tls->glob->logger,
             tls->glob->active_plugins, tls->glob->plugincount,
@@ -605,6 +612,10 @@ static void *start_merger(void *tdata) {
 
     while (1) {
         if (zmq_recv(merge->zmq_pullsock, &res, sizeof(res), 0) < 0) {
+            if (errno == EINTR || errno == EAGAIN) {
+                continue;
+            }
+
             corsaro_log(glob->logger,
                     "error receiving message on merger pull socket: %s",
                     strerror(errno));
@@ -740,7 +751,6 @@ static corsaro_trace_global_t *configure_corsaro(int argc, char *argv[]) {
 int main(int argc, char *argv[]) {
 
     corsaro_trace_global_t *glob = NULL;
-    int hwm = 0;
     int linger = 1000;
     sigset_t sig_before, sig_block_all;
     int i;
