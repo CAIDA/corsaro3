@@ -94,7 +94,7 @@ void *start_zmq_output_thread(void *data) {
     uint64_t totalseen = 0;
 
     pqueue_t *pq;
-    int i, r, zero = 0, hwm = 100;
+    int i, r, zero = 0, hwm = 250;
     int onesec = 1000;
 
     void **proxy_recv = calloc(glob->tag_threads, sizeof(void *));
@@ -148,10 +148,6 @@ void *start_zmq_output_thread(void *data) {
         goto proxyexit;
     }
 
-    /* Allow the forwarding socket to buffer as many messages as it
-     * wants -- NOTE: this means you will run out of memory if you
-     * have a slow client!
-     */
     if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
         corsaro_log(glob->logger,
                 "error while setting HWM for output forwarding socket %s: %s",
@@ -394,7 +390,7 @@ void *start_zmq_proxy_thread(void *data) {
 
 	void *proxy_recv = zmq_socket(glob->zmq_ctxt, proxy->recvtype);
 	void *proxy_fwd = zmq_socket(glob->zmq_ctxt, proxy->pushtype);
-	int zero = 0;
+	int zero = 0, hwm=1000;
 	int onesec = 1000;
 
 	if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
@@ -412,7 +408,7 @@ void *start_zmq_proxy_thread(void *data) {
 		goto proxyexit;
 	}
 
-    if (zmq_setsockopt(proxy_recv, ZMQ_RCVHWM, &zero, sizeof(zero)) < 0) {
+    if (zmq_setsockopt(proxy_recv, ZMQ_RCVHWM, &hwm, sizeof(hwm)) < 0) {
 		corsaro_log(glob->logger,
 				"unable to configure tagger proxy recv socket %s: %s",
 				proxy->insockname,strerror(errno));
@@ -447,7 +443,7 @@ void *start_zmq_proxy_thread(void *data) {
 	 * wants -- NOTE: this means you will run out of memory if you
 	 * have a slow client!
 	 */
-	if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &zero, sizeof(zero)) != 0) {
+	if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
 		corsaro_log(glob->logger,
 				"error while setting HWM for proxy forwarding socket %s: %s",
 				proxy->outsockname, strerror(errno));
