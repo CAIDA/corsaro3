@@ -486,9 +486,6 @@ typedef struct corsaro_report_state {
 /** Merge thread state for the report plugin */
 typedef struct corsaro_report_merge_state {
 
-    /** ZeroMQ socket used for requesting IPmeta labels from the tagger */
-    void *zmq_taggersock;
-
     /** A writer instance used for writing output in the Avro format */
     corsaro_avro_writer_t *writer;
 
@@ -1236,12 +1233,17 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
         corsaro_log(track->logger, "missing ip tracker message parts? trailer appears to be missing?");
     } else {
         uint32_t trailer;
-        if (zmq_recv(track->incoming, &trailer, sizeof(trailer), 0) < 0) {
-
-            corsaro_log(track->logger,
-                    "error receiving trailer on tracker pull socket: %s",
-                    strerror(errno));
-            return -1;
+        while (track->haltphase != 2) {
+            if (zmq_recv(track->incoming, &trailer, sizeof(trailer), 0) < 0) {
+                if (errno == EINTR || errno == EAGAIN) {
+                    continue;
+                }
+                corsaro_log(track->logger,
+                        "error receiving trailer on tracker pull socket: %s",
+                        strerror(errno));
+                return -1;
+            }
+            break;
         }
 
         if (trailer != msg->bodycount) {
@@ -2328,8 +2330,7 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
  *                  the tagger.
  *  @return A pointer to the newly create report merging state.
  */
-void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources,
-        void *tagsock) {
+void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
 
     corsaro_report_merge_state_t *m;
     corsaro_report_config_t *conf;
@@ -2344,7 +2345,6 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources,
         return NULL;
     }
 
-    m->zmq_taggersock = tagsock;
     m->last_label_update = 0;
 
     if (conf->outformat == CORSARO_OUTPUT_AVRO) {
@@ -2996,7 +2996,7 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
  *  @return -1 if an error occurs, 1 otherwise.
  */
 static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
-        corsaro_logger_t *logger) {
+        corsaro_logger_t *logger, void *zmq_taggersock) {
 
     corsaro_tagger_control_request_t req;
     corsaro_tagger_control_reply_t *reply;
@@ -3013,7 +3013,11 @@ static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
     req.request_type = TAGGER_REQUEST_IPMETA_UPDATE;
     req.data.last_version = htonl(state->last_label_update);
 
-    if (zmq_send(state->zmq_taggersock, &req, sizeof(req), 0) < 0) {
+    if (zmq_taggersock == NULL) {
+        return -1;
+    }
+
+    if (zmq_send(zmq_taggersock, &req, sizeof(req), 0) < 0) {
         corsaro_log(logger, "unable to send IPmeta update request to corsarotagger: %s", strerror(errno));
         return -1;
     }
@@ -3025,7 +3029,7 @@ static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
          * too busy -- skip the update and try again next time.
          */
         while (attempts < 10) {
-            if (zmq_msg_recv(&frame, state->zmq_taggersock, ZMQ_DONTWAIT) < 0) {
+            if (zmq_msg_recv(&frame, zmq_taggersock, ZMQ_DONTWAIT) < 0) {
                 if (errno == EAGAIN) {
                     attempts ++;
                     usleep(100000);
@@ -3101,7 +3105,7 @@ static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
         }
 
         more_size = sizeof(more);
-        if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+        if (zmq_getsockopt(zmq_taggersock, ZMQ_RCVMORE, &more,
                     &more_size) < 0) {
             corsaro_log(logger, "error while checking for more IPmeta update content: %s", strerror(errno));
             return -1;
@@ -3122,7 +3126,7 @@ drainmessage:
      */
 
     zmq_msg_close(&frame);
-    if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+    if (zmq_getsockopt(zmq_taggersock, ZMQ_RCVMORE, &more,
                 &more_size) < 0) {
         corsaro_log(logger, "error while draining bad IPmeta update content: %s", strerror(errno));
         return -1;
@@ -3130,12 +3134,12 @@ drainmessage:
 
     while (more) {
         zmq_msg_init(&frame);
-        if (zmq_msg_recv(state->zmq_taggersock, &frame, 0) < 0) {
+        if (zmq_msg_recv(zmq_taggersock, &frame, 0) < 0) {
             corsaro_log(logger, "unable to receive IPmeta update from corsarotagger: %s", strerror(errno));
             break;
         }
 
-        if (zmq_getsockopt(state->zmq_taggersock, ZMQ_RCVMORE, &more,
+        if (zmq_getsockopt(zmq_taggersock, ZMQ_RCVMORE, &more,
                     &more_size) < 0) {
             corsaro_log(logger, "error while draining bad IPmeta update content: %s", strerror(errno));
             break;
@@ -3156,11 +3160,11 @@ drainmessage:
  *  @return 0 if the merge is successful, -1 if an error occurs.
  */
 int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
-        void **tomerge, corsaro_fin_interval_t *fin) {
+        void **tomerge, corsaro_fin_interval_t *fin, void *tagsock) {
 
     corsaro_report_config_t *conf, *procconf;
     corsaro_report_merge_state_t *m;
-    int i;
+    int i, reloadsock = 0;
     Pvoid_t results = NULL;
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
@@ -3169,20 +3173,22 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     m = (corsaro_report_merge_state_t *)local;
     if (m == NULL) {
-        return -1;
+        return CORSARO_MERGE_BAD_ARGUMENTS;
     }
 
     /* Plugin result data is NULL, must be a partial interval */
     if (tomerge[0] == NULL) {
-        return 0;
+        return CORSARO_MERGE_NO_ACTION;
     }
 
     conf = (corsaro_report_config_t *)(p->config);
     /* Now would be a good time to make sure we have a copy of all of the
      * IPmeta labels that we need...
      */
-    if (conf->query_tagger_labels && update_ipmeta_labels(m, p->logger) < 0) {
+    if (conf->query_tagger_labels && update_ipmeta_labels(m, p->logger,
+            tagsock) < 0) {
         corsaro_log(p->logger, "unable to fetch labels for IPmeta metrics: metric names may not be up to date...");
+        reloadsock = 1;
     }
 
     /* All of the interim results should point at the same config, so we
@@ -3197,7 +3203,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     trackers_done = (uint8_t *)calloc(procconf->tracker_count, sizeof(uint8_t));
 
     if (initialise_results(p, &results, fin->timestamp) < 0) {
-        return -1;
+        return CORSARO_MERGE_BAD_ARGUMENTS;
     }
 
     do {
@@ -3250,7 +3256,10 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
          * misleading.
          */
         clean_result_map(&results);
-        return 0;
+        if (reloadsock) {
+            return CORSARO_MERGE_CONTROL_FAILURE;
+        }
+        return CORSARO_MERGE_NO_ACTION;
     }
 
     /* All trackers have reported tallies for this interval and they've
@@ -3259,21 +3268,25 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     if (conf->outformat == CORSARO_OUTPUT_AVRO) {
         if (report_write_avro_output(p, m, fin->timestamp, &results,
                 subtrees_seen) < 0) {
-            return -1;
+            return CORSARO_MERGE_WRITE_FAILED;
         }
     }
 
     if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
         if (report_write_libtimeseries(p, m, fin->timestamp, &results,
                 subtrees_seen) < 0) {
-            return -1;
+            return CORSARO_MERGE_WRITE_FAILED;
         }
     }
 
     for (i = 0; i < fin->threads_ended; i++) {
         free(tomerge[i]);
     }
-    return 0;
+
+    if (reloadsock) {
+        return CORSARO_MERGE_CONTROL_FAILURE;
+    }
+    return CORSARO_MERGE_SUCCESS;
 }
 
 /** Rotates the output file for the report plugin.

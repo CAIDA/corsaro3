@@ -265,7 +265,7 @@ corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
 }
 
 corsaro_plugin_set_t *corsaro_start_merging_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist, int count, int maxsources, void *tagsock) {
+        corsaro_plugin_t *plist, int count, int maxsources) {
 
     int index = 0;
 
@@ -283,8 +283,7 @@ corsaro_plugin_set_t *corsaro_start_merging_plugins(corsaro_logger_t *logger,
     while (plist != NULL) {
         assert(index < count);
 
-        pset->plugin_state[index] = plist->init_merging(plist, maxsources,
-                tagsock);
+        pset->plugin_state[index] = plist->init_merging(plist, maxsources);
 
         index += 1;
         plist = plist->next;
@@ -417,14 +416,14 @@ int corsaro_rotate_plugin_output(corsaro_logger_t *logger,
 }
 
 int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
-        corsaro_plugin_set_t *pset, corsaro_fin_interval_t *fin)
-{
+        corsaro_plugin_set_t *pset, corsaro_fin_interval_t *fin,
+        void *tagsock) {
 
     corsaro_plugin_t *p = NULL;
     int index = 0;
     void **plugin_state_ptrs = NULL;
     int pindex = 0;
-    int errors = 0;
+    int sockreload = 0, r;
 
     corsaro_log(logger, "commencing merge for all plugins %u:%u.",
             fin->interval_id, fin->timestamp);
@@ -443,12 +442,20 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
             plugin_state_ptrs[pindex] = fin->thread_plugin_data[pindex][index];
         }
 
-        if (p->merge_interval_results(p, pset->plugin_state[index],
-                plugin_state_ptrs, fin) == -1) {
-            corsaro_log(logger,
-                    "unable to merge interval results for plugin %s",
-                    p->name);
-            errors ++;
+        if ((r = p->merge_interval_results(p, pset->plugin_state[index],
+                plugin_state_ptrs, fin, tagsock)) == -1) {
+
+            if (r == CORSARO_MERGE_CONTROL_FAILURE) {
+                sockreload = 1;
+                if (tagsock) {
+                    corsaro_log(logger, "flagged tagger control socket as needing a reconnect");
+                    tagsock = NULL;
+                }
+            } else {
+                corsaro_log(logger,
+                        "unable to merge interval results for plugin %s",
+                        p->name);
+            }
         }
 
         p = p->next;
@@ -458,7 +465,10 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
     free(plugin_state_ptrs);
     corsaro_log(logger, "completed merge for all plugins %u:%u.",
             fin->interval_id, fin->timestamp);
-    return errors;
+    if (sockreload) {
+        return CORSARO_MERGE_CONTROL_FAILURE;
+    }
+    return CORSARO_MERGE_SUCCESS;
 
 }
 

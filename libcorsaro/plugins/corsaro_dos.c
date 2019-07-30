@@ -1429,8 +1429,7 @@ static int write_attack_vectors(corsaro_logger_t *logger,
     return 0;
 }
 
-void *corsaro_dos_init_merging(corsaro_plugin_t *p, int sources,
-        void *tagsock) {
+void *corsaro_dos_init_merging(corsaro_plugin_t *p, int sources) {
 
     corsaro_dos_merge_state_t *m;
     m = (corsaro_dos_merge_state_t *)calloc(1,
@@ -1761,7 +1760,7 @@ endcombine:
 }
 
 int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
-        void **tomerge, corsaro_fin_interval_t *fin) {
+        void **tomerge, corsaro_fin_interval_t *fin, void *tagsock) {
 
     corsaro_dos_merge_state_t *m;
     corsaro_dos_config_t *config;

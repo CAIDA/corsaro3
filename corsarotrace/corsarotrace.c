@@ -514,6 +514,23 @@ endworker:
     pthread_exit(NULL);
 }
 
+static inline void *reconnect_taggersock(corsaro_trace_global_t *glob,
+        void *current) {
+
+    void *newsock = NULL;
+    if (current) {
+        zmq_close(current);
+    }
+    newsock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+    if (zmq_connect(newsock, glob->control_uri) < 0) {
+        corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s",
+                glob->control_uri, strerror(errno));
+        zmq_close(newsock);
+        return NULL;
+    }
+    return newsock;
+}
+
 static void process_mergeable_result(corsaro_trace_global_t *glob,
         corsaro_trace_merger_t *merge, corsaro_result_msg_t *msg) {
 
@@ -531,8 +548,13 @@ static void process_mergeable_result(corsaro_trace_global_t *glob,
                     sizeof(void **)));
         quik.thread_plugin_data[0] = msg->plugindata;
 
-        corsaro_merge_plugin_outputs(glob->logger, merge->pluginset,
-                &quik);
+        if (corsaro_merge_plugin_outputs(glob->logger, merge->pluginset,
+                &quik, merge->zmq_taggersock) == CORSARO_MERGE_CONTROL_FAILURE)
+        {
+            merge->zmq_taggersock = reconnect_taggersock(glob,
+                    merge->zmq_taggersock);
+        }
+
         free(msg->plugindata);
         free(quik.thread_plugin_data);
         return;
@@ -553,7 +575,12 @@ static void process_mergeable_result(corsaro_trace_global_t *glob,
         fin->threads_ended ++;
         if (fin->threads_ended == glob->threads) {
             assert(fin == merge->finished_intervals);
-            corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin);
+            if (corsaro_merge_plugin_outputs(glob->logger, merge->pluginset,
+                    fin, merge->zmq_taggersock) ==
+                    CORSARO_MERGE_CONTROL_FAILURE) {
+                merge->zmq_taggersock = reconnect_taggersock(glob,
+                        merge->zmq_taggersock);
+            }
             if (fin->rotate_after) {
                 corsaro_rotate_plugin_output(glob->logger, merge->pluginset);
                 merge->next_rotate_interval = msg->interval_num + 1;
@@ -592,7 +619,11 @@ static void *start_merger(void *tdata) {
     corsaro_fin_interval_t *fin;
 
     merge->zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-    merge->zmq_taggersock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+    merge->zmq_taggersock = reconnect_taggersock(glob, NULL);
+
+    if (merge->zmq_taggersock == NULL) {
+        goto endmerger;
+    }
 
     if (zmq_bind(merge->zmq_pullsock, "inproc://pluginresults") != 0) {
         corsaro_log(glob->logger,
@@ -601,14 +632,8 @@ static void *start_merger(void *tdata) {
         goto endmerger;
     }
 
-    if (zmq_connect(merge->zmq_taggersock, glob->control_uri) < 0) {
-        corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
-        goto endmerger;
-    }
-
     merge->pluginset = corsaro_start_merging_plugins(glob->logger,
-            glob->active_plugins, glob->plugincount, glob->threads,
-            merge->zmq_taggersock);
+            glob->active_plugins, glob->plugincount, glob->threads);
 
     while (1) {
         if (zmq_recv(merge->zmq_pullsock, &res, sizeof(res), 0) < 0) {
@@ -652,12 +677,20 @@ endmerger:
     while (merge->finished_intervals) {
         fin = merge->finished_intervals;
 
-        corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin);
+        if (corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin,
+                merge->zmq_taggersock) == CORSARO_MERGE_CONTROL_FAILURE) {
+            if (merge->zmq_taggersock) {
+                zmq_close(merge->zmq_taggersock);
+            }
+            merge->zmq_taggersock = NULL;
+        }
         merge->finished_intervals = fin->next;
         free(fin);
     }
 
-    zmq_close(merge->zmq_taggersock);
+    if (merge->zmq_taggersock) {
+       zmq_close(merge->zmq_taggersock);
+    }
     corsaro_stop_plugins(merge->pluginset);
     pthread_exit(NULL);
 }
