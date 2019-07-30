@@ -409,7 +409,7 @@ static void *start_worker(void *tdata) {
     uint8_t *rcvspace;
     void **final_result;
     libtrace_t *deadtrace = NULL;
-    int hwm = 50;
+    int hwm = tls->glob->inputhwm;
 
     deadtrace = trace_create_dead("pcapfile");
     tls->packet = trace_create_packet();

@@ -360,6 +360,9 @@ typedef struct corsaro_report_config {
      */
     void **tracker_queues;
 
+    /** High water mark for internal messaging queues */
+    uint16_t internalhwm;
+
     /** Flag that can be used to disable making queries to the tagger for
      *  fully qualified metric labels, especially for geo-tagging metrics.
      *  Intended as a transitional feature until all existing taggers are
@@ -641,6 +644,7 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     conf->outformat = CORSARO_OUTPUT_AVRO;
     conf->tracker_count = 4;
     conf->query_tagger_labels = 1;
+    conf->internalhwm = 30;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -680,6 +684,19 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
             if (conf->tracker_count > CORSARO_REPORT_MAX_IPTRACKERS) {
                 corsaro_log(p->logger, "report plugin: iptracker thread count is currently capped at %d", CORSARO_REPORT_MAX_IPTRACKERS);
                 conf->tracker_count = CORSARO_REPORT_MAX_IPTRACKERS;
+            }
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                    "internalhwm") == 0) {
+            uint64_t optval;
+
+            optval = strtoul((char *)value->data.scalar.value, NULL, 0);
+            if (optval > 65535) {
+                conf->internalhwm = 0;
+            } else {
+                conf->internalhwm = optval;
             }
         }
 
@@ -1366,7 +1383,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_report_config_t *conf;
-    int i, j, ret = 0, rto=10, hwm=50;
+    int i, j, ret = 0, rto=10, hwm=30;
     char sockname[40];
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -1409,6 +1426,10 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_log(p->logger,
                 "report plugin: NOT querying the tagger for FQ geo-location labels");
     }
+
+    hwm = conf->internalhwm;
+    corsaro_log(p->logger, "report plugin: using internal queue HWM of %u",
+            conf->internalhwm);
 
     /* Create and start the IP tracker threads.
      *

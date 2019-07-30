@@ -106,6 +106,7 @@ void *start_zmq_output_thread(void *data) {
     uint8_t **sendbufs = calloc(glob->output_hashbins, sizeof(uint8_t *));
     uint32_t *sendbufsizes = calloc(glob->output_hashbins, sizeof(uint32_t));
 
+    hwm = glob->outputhwm;
     nextseq = (uint64_t *)calloc(glob->output_hashbins, sizeof(uint64_t));
 
     /* Assign ourselves a "random" tagger ID number so that clients can
