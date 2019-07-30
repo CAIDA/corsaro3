@@ -808,7 +808,7 @@ int main(int argc, char *argv[]) {
     control_sock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
     if (zmq_connect(control_sock, glob->control_uri) < 0) {
         corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
-        return 1;
+        goto endcorsarotrace;
     }
 
     ctrlreq.request_type = TAGGER_REQUEST_HELLO;
@@ -816,12 +816,12 @@ int main(int argc, char *argv[]) {
 
     if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
         corsaro_log(glob->logger, "unable to send request to corsarotagger via control socket: %s", strerror(errno));
-        return 1;
+        goto endcorsarotrace;
     }
 
     if (zmq_recv(control_sock, &ctrlreply, sizeof(ctrlreply), 0) < 0) {
         corsaro_log(glob->logger, "unable to receive reply from corsarotagger via control socket: %s", strerror(errno));
-        return 1;
+        goto endcorsarotrace;
     }
 
     zmq_close(control_sock);
@@ -873,6 +873,7 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < glob->threads; i++) {
         pthread_join(workers[i].threadid, NULL);
+        free(workers[i].nextseq);
     }
 
     pthread_join(merger.threadid, NULL);
@@ -882,6 +883,8 @@ int main(int argc, char *argv[]) {
     free(workers);
 
     corsaro_log(glob->logger, "all threads have joined, exiting.");
+
+endcorsarotrace:
     trace_destroy_dead(dummy);
     corsaro_trace_free_global(glob);
 
