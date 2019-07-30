@@ -259,17 +259,24 @@ void *start_zmq_output_thread(void *data) {
             packet->hdr.seqno = bswap_host_to_be64(nextseq[seqindex]);
             nextseq[seqindex] ++;
 
-            if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
-                    sizeof(packet->hdr) + packet->hdr.pktlen) {
+            if (glob->sample_rate <= 10) {
+                if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
+                        sizeof(packet->hdr) + packet->hdr.pktlen) {
 
-                zmq_send(proxy_fwd, sendbufs[seqindex],
-                        sendbufsizes[seqindex], 0);
-                sendbufsizes[seqindex] = 0;
+                    zmq_send(proxy_fwd, sendbufs[seqindex],
+                            sendbufsizes[seqindex], 0);
+                    sendbufsizes[seqindex] = 0;
+                }
             }
 
             memcpy(sendbufs[seqindex] + sendbufsizes[seqindex], &(packet->hdr),
                     sizeof(packet->hdr) + packet->hdr.pktlen);
             sendbufsizes[seqindex] += sizeof(packet->hdr) + packet->hdr.pktlen;
+            if (glob->sample_rate > 10) {
+                    zmq_send(proxy_fwd, sendbufs[seqindex],
+                            sendbufsizes[seqindex], 0);
+                    sendbufsizes[seqindex] = 0;
+            }
         }
 
         totalseen ++;
