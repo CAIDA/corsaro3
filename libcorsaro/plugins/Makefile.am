@@ -53,6 +53,8 @@ endif
 
 if WITH_PLUGIN_REPORT
 PLUGIN_SRC+=report/corsaro_report.c report/corsaro_report.h
+PLUGIN_SRC+=report/iptracker_thread.c report/merging_thread.c
+PLUGIN_SRC+=report/processing_thread.c report/report_internal.h
 include_HEADERS+=report/corsaro_report.h
 endif
 
