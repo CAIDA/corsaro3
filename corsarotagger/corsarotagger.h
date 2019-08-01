@@ -107,6 +107,9 @@ typedef struct corsaro_tagger_glob {
     /** The number of tagging threads to use */
     uint8_t tag_threads;
 
+    /** The HWM for the queue used to output tagged packets */
+    uint16_t outputhwm;
+
     /** The configuration options for the libipmeta prefix to ASN module */
     pfx2asn_opts_t pfxtagopts;
     /** The configuration options for the libipmeta Maxmind geolocation

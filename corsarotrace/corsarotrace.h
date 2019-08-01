@@ -86,6 +86,7 @@ typedef struct corsaro_trace_glob {
 
     uint8_t logmode;
     uint8_t threads;
+    uint16_t inputhwm;
     uint8_t plugincount;
 
     uint8_t removespoofed;

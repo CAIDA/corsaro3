@@ -588,8 +588,7 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
-void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources,
-        void *tagsock) {
+void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
     struct corsaro_flowtuple_merge_state_t *m;
 
     m = (struct corsaro_flowtuple_merge_state_t *)calloc(1,
@@ -882,7 +881,7 @@ static void merge_unsorted_inputs(corsaro_plugin_t *p,
 }
 
 int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
-        void **tomerge, corsaro_fin_interval_t *fin) {
+        void **tomerge, corsaro_fin_interval_t *fin, void *tagsock) {
 
     struct corsaro_flowtuple_merge_state_t *m;
     corsaro_flowtuple_config_t *conf;

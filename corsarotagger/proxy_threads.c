@@ -94,7 +94,7 @@ void *start_zmq_output_thread(void *data) {
     uint64_t totalseen = 0;
 
     pqueue_t *pq;
-    int i, r, zero = 0, hwm = 100;
+    int i, r, zero = 0, hwm = 250;
     int onesec = 1000;
 
     void **proxy_recv = calloc(glob->tag_threads, sizeof(void *));
@@ -106,6 +106,7 @@ void *start_zmq_output_thread(void *data) {
     uint8_t **sendbufs = calloc(glob->output_hashbins, sizeof(uint8_t *));
     uint32_t *sendbufsizes = calloc(glob->output_hashbins, sizeof(uint32_t));
 
+    hwm = glob->outputhwm;
     nextseq = (uint64_t *)calloc(glob->output_hashbins, sizeof(uint64_t));
 
     /* Assign ourselves a "random" tagger ID number so that clients can
@@ -148,10 +149,6 @@ void *start_zmq_output_thread(void *data) {
         goto proxyexit;
     }
 
-    /* Allow the forwarding socket to buffer as many messages as it
-     * wants -- NOTE: this means you will run out of memory if you
-     * have a slow client!
-     */
     if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
         corsaro_log(glob->logger,
                 "error while setting HWM for output forwarding socket %s: %s",
@@ -262,17 +259,24 @@ void *start_zmq_output_thread(void *data) {
             packet->hdr.seqno = bswap_host_to_be64(nextseq[seqindex]);
             nextseq[seqindex] ++;
 
-            if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
-                    sizeof(packet->hdr) + packet->hdr.pktlen) {
+            if (glob->sample_rate <= 10) {
+                if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
+                        sizeof(packet->hdr) + packet->hdr.pktlen) {
 
-                zmq_send(proxy_fwd, sendbufs[seqindex],
-                        sendbufsizes[seqindex], 0);
-                sendbufsizes[seqindex] = 0;
+                    zmq_send(proxy_fwd, sendbufs[seqindex],
+                            sendbufsizes[seqindex], 0);
+                    sendbufsizes[seqindex] = 0;
+                }
             }
 
             memcpy(sendbufs[seqindex] + sendbufsizes[seqindex], &(packet->hdr),
                     sizeof(packet->hdr) + packet->hdr.pktlen);
             sendbufsizes[seqindex] += sizeof(packet->hdr) + packet->hdr.pktlen;
+            if (glob->sample_rate > 10) {
+                    zmq_send(proxy_fwd, sendbufs[seqindex],
+                            sendbufsizes[seqindex], 0);
+                    sendbufsizes[seqindex] = 0;
+            }
         }
 
         totalseen ++;
@@ -394,7 +398,7 @@ void *start_zmq_proxy_thread(void *data) {
 
 	void *proxy_recv = zmq_socket(glob->zmq_ctxt, proxy->recvtype);
 	void *proxy_fwd = zmq_socket(glob->zmq_ctxt, proxy->pushtype);
-	int zero = 0;
+	int zero = 0, hwm=1000;
 	int onesec = 1000;
 
 	if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
@@ -412,7 +416,7 @@ void *start_zmq_proxy_thread(void *data) {
 		goto proxyexit;
 	}
 
-    if (zmq_setsockopt(proxy_recv, ZMQ_RCVHWM, &zero, sizeof(zero)) < 0) {
+    if (zmq_setsockopt(proxy_recv, ZMQ_RCVHWM, &hwm, sizeof(hwm)) < 0) {
 		corsaro_log(glob->logger,
 				"unable to configure tagger proxy recv socket %s: %s",
 				proxy->insockname,strerror(errno));
@@ -447,7 +451,7 @@ void *start_zmq_proxy_thread(void *data) {
 	 * wants -- NOTE: this means you will run out of memory if you
 	 * have a slow client!
 	 */
-	if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &zero, sizeof(zero)) != 0) {
+	if (zmq_setsockopt(proxy_fwd, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
 		corsaro_log(glob->logger,
 				"error while setting HWM for proxy forwarding socket %s: %s",
 				proxy->outsockname, strerror(errno));

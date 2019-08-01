@@ -362,6 +362,11 @@ static int parse_config(corsaro_tagger_global_t *glob,
         glob->tag_threads = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "outputhwm")) {
+        glob->outputhwm = strtoul((char *)value->data.scalar.value, NULL, 10);
+    }
+
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
             && !strcmp((char *)key->data.scalar.value, "tagproviders")) {
         if (parse_tagprov_config(glob, doc, value) != 0) {
@@ -375,6 +380,7 @@ static int parse_config(corsaro_tagger_global_t *glob,
 static void log_configuration(corsaro_tagger_global_t *glob) {
     corsaro_log(glob->logger, "using %d processing threads", glob->pkt_threads);
     corsaro_log(glob->logger, "using %d tagging threads", glob->tag_threads);
+    corsaro_log(glob->logger, "output queue has a HWM of %u", glob->outputhwm);
 
     if (glob->consterfframing >= 0) {
         corsaro_log(glob->logger, "using constant ERF framing size of %d",
@@ -509,6 +515,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->pkt_threads = 2;
     glob->tag_threads = 2;
 
+    glob->outputhwm = 125;
     glob->pubqueuename = NULL;
     glob->trace = NULL;
     glob->filter = NULL;

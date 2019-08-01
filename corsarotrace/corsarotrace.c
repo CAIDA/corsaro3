@@ -409,6 +409,7 @@ static void *start_worker(void *tdata) {
     uint8_t *rcvspace;
     void **final_result;
     libtrace_t *deadtrace = NULL;
+    int hwm = tls->glob->inputhwm;
 
     deadtrace = trace_create_dead("pcapfile");
     tls->packet = trace_create_packet();
@@ -419,6 +420,14 @@ static void *start_worker(void *tdata) {
     if (subscribe_streams(tls->glob, tls->zmq_pullsock, tls->workerid) < 0) {
         goto endworker;
     }
+
+    if (zmq_setsockopt(tls->zmq_pullsock, ZMQ_RCVHWM, &hwm, sizeof(hwm)) < 0) {
+        corsaro_log(tls->glob->logger,
+                "unable to configure sub socket for worker %d: %s",
+                tls->workerid, strerror(errno));
+        goto endworker;
+    }
+
 
     if (zmq_connect(tls->zmq_pullsock, tls->glob->subqueuename) != 0) {
         corsaro_log(tls->glob->logger,
@@ -434,8 +443,6 @@ static void *start_worker(void *tdata) {
                 tls->workerid, strerror(errno));
         goto endworker;
     }
-
-    /* TODO set HWM for push socket?? */
 
     tls->plugins = corsaro_start_plugins(tls->glob->logger,
             tls->glob->active_plugins, tls->glob->plugincount,
@@ -507,6 +514,23 @@ endworker:
     pthread_exit(NULL);
 }
 
+static inline void *reconnect_taggersock(corsaro_trace_global_t *glob,
+        void *current) {
+
+    void *newsock = NULL;
+    if (current) {
+        zmq_close(current);
+    }
+    newsock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+    if (zmq_connect(newsock, glob->control_uri) < 0) {
+        corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s",
+                glob->control_uri, strerror(errno));
+        zmq_close(newsock);
+        return NULL;
+    }
+    return newsock;
+}
+
 static void process_mergeable_result(corsaro_trace_global_t *glob,
         corsaro_trace_merger_t *merge, corsaro_result_msg_t *msg) {
 
@@ -524,8 +548,13 @@ static void process_mergeable_result(corsaro_trace_global_t *glob,
                     sizeof(void **)));
         quik.thread_plugin_data[0] = msg->plugindata;
 
-        corsaro_merge_plugin_outputs(glob->logger, merge->pluginset,
-                &quik);
+        if (corsaro_merge_plugin_outputs(glob->logger, merge->pluginset,
+                &quik, merge->zmq_taggersock) == CORSARO_MERGE_CONTROL_FAILURE)
+        {
+            merge->zmq_taggersock = reconnect_taggersock(glob,
+                    merge->zmq_taggersock);
+        }
+
         free(msg->plugindata);
         free(quik.thread_plugin_data);
         return;
@@ -546,7 +575,12 @@ static void process_mergeable_result(corsaro_trace_global_t *glob,
         fin->threads_ended ++;
         if (fin->threads_ended == glob->threads) {
             assert(fin == merge->finished_intervals);
-            corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin);
+            if (corsaro_merge_plugin_outputs(glob->logger, merge->pluginset,
+                    fin, merge->zmq_taggersock) ==
+                    CORSARO_MERGE_CONTROL_FAILURE) {
+                merge->zmq_taggersock = reconnect_taggersock(glob,
+                        merge->zmq_taggersock);
+            }
             if (fin->rotate_after) {
                 corsaro_rotate_plugin_output(glob->logger, merge->pluginset);
                 merge->next_rotate_interval = msg->interval_num + 1;
@@ -585,7 +619,11 @@ static void *start_merger(void *tdata) {
     corsaro_fin_interval_t *fin;
 
     merge->zmq_pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-    merge->zmq_taggersock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+    merge->zmq_taggersock = reconnect_taggersock(glob, NULL);
+
+    if (merge->zmq_taggersock == NULL) {
+        goto endmerger;
+    }
 
     if (zmq_bind(merge->zmq_pullsock, "inproc://pluginresults") != 0) {
         corsaro_log(glob->logger,
@@ -594,17 +632,15 @@ static void *start_merger(void *tdata) {
         goto endmerger;
     }
 
-    if (zmq_connect(merge->zmq_taggersock, glob->control_uri) < 0) {
-        corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
-        goto endmerger;
-    }
-
     merge->pluginset = corsaro_start_merging_plugins(glob->logger,
-            glob->active_plugins, glob->plugincount, glob->threads,
-            merge->zmq_taggersock);
+            glob->active_plugins, glob->plugincount, glob->threads);
 
     while (1) {
         if (zmq_recv(merge->zmq_pullsock, &res, sizeof(res), 0) < 0) {
+            if (errno == EINTR || errno == EAGAIN) {
+                continue;
+            }
+
             corsaro_log(glob->logger,
                     "error receiving message on merger pull socket: %s",
                     strerror(errno));
@@ -641,12 +677,20 @@ endmerger:
     while (merge->finished_intervals) {
         fin = merge->finished_intervals;
 
-        corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin);
+        if (corsaro_merge_plugin_outputs(glob->logger, merge->pluginset, fin,
+                merge->zmq_taggersock) == CORSARO_MERGE_CONTROL_FAILURE) {
+            if (merge->zmq_taggersock) {
+                zmq_close(merge->zmq_taggersock);
+            }
+            merge->zmq_taggersock = NULL;
+        }
         merge->finished_intervals = fin->next;
         free(fin);
     }
 
-    zmq_close(merge->zmq_taggersock);
+    if (merge->zmq_taggersock) {
+       zmq_close(merge->zmq_taggersock);
+    }
     corsaro_stop_plugins(merge->pluginset);
     pthread_exit(NULL);
 }
@@ -740,7 +784,6 @@ static corsaro_trace_global_t *configure_corsaro(int argc, char *argv[]) {
 int main(int argc, char *argv[]) {
 
     corsaro_trace_global_t *glob = NULL;
-    int hwm = 0;
     int linger = 1000;
     sigset_t sig_before, sig_block_all;
     int i;
@@ -765,7 +808,7 @@ int main(int argc, char *argv[]) {
     control_sock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
     if (zmq_connect(control_sock, glob->control_uri) < 0) {
         corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
-        return 1;
+        goto endcorsarotrace;
     }
 
     ctrlreq.request_type = TAGGER_REQUEST_HELLO;
@@ -773,12 +816,12 @@ int main(int argc, char *argv[]) {
 
     if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
         corsaro_log(glob->logger, "unable to send request to corsarotagger via control socket: %s", strerror(errno));
-        return 1;
+        goto endcorsarotrace;
     }
 
     if (zmq_recv(control_sock, &ctrlreply, sizeof(ctrlreply), 0) < 0) {
         corsaro_log(glob->logger, "unable to receive reply from corsarotagger via control socket: %s", strerror(errno));
-        return 1;
+        goto endcorsarotrace;
     }
 
     zmq_close(control_sock);
@@ -830,6 +873,7 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < glob->threads; i++) {
         pthread_join(workers[i].threadid, NULL);
+        free(workers[i].nextseq);
     }
 
     pthread_join(merger.threadid, NULL);
@@ -839,6 +883,8 @@ int main(int argc, char *argv[]) {
     free(workers);
 
     corsaro_log(glob->logger, "all threads have joined, exiting.");
+
+endcorsarotrace:
     trace_destroy_dead(dummy);
     corsaro_trace_free_global(glob);
 

@@ -57,11 +57,10 @@
             libtrace_packet_t *packet, corsaro_packet_tags_t *tags); \
     char *plugin##_derive_output_name(corsaro_plugin_t *p, void *local, \
             uint32_t timestamp, int threadid);              \
-    void *plugin##_init_merging(corsaro_plugin_t *p, int sources, \
-            void *tagsock);    \
+    void *plugin##_init_merging(corsaro_plugin_t *p, int sources); \
     int plugin##_halt_merging(corsaro_plugin_t *p, void *local); \
     int plugin##_merge_interval_results(corsaro_plugin_t *p, void *local, \
-            void **tomerge, corsaro_fin_interval_t *fin);                    \
+            void **tomerge, corsaro_fin_interval_t *fin, void *tagsock);  \
     int plugin##_rotate_output(corsaro_plugin_t *p, void *local);
 
 
@@ -77,6 +76,14 @@ typedef enum corsaro_plugin_id {
 enum {
     CORSARO_TRACE_API = 0,
     CORSARO_MERGING_API = 1
+};
+
+enum {
+    CORSARO_MERGE_SUCCESS = 1,
+    CORSARO_MERGE_NO_ACTION = 0,
+    CORSARO_MERGE_CONTROL_FAILURE = -1,
+    CORSARO_MERGE_WRITE_FAILED = -2,
+    CORSARO_MERGE_BAD_ARGUMENTS = -3,
 };
 
 typedef struct corsaro_plugin corsaro_plugin_t;
@@ -144,10 +151,10 @@ struct corsaro_plugin {
             uint32_t timestamp, int threadid);
 
     /* Callbacks for reading and merging results */
-    void *(*init_merging)(corsaro_plugin_t *p, int sources, void *tagsock);
+    void *(*init_merging)(corsaro_plugin_t *p, int sources);
     int (*halt_merging)(corsaro_plugin_t *p, void *local);
     int (*merge_interval_results)(corsaro_plugin_t *p, void *local,
-            void **tomerge, corsaro_fin_interval_t *fin);
+            void **tomerge, corsaro_fin_interval_t *fin, void *tagsock);
     int (*rotate_output)(corsaro_plugin_t *p, void *local);
 
 
@@ -185,7 +192,7 @@ int corsaro_finish_plugin_config(corsaro_plugin_t *p,
 corsaro_plugin_set_t *corsaro_start_plugins(corsaro_logger_t *logger,
         corsaro_plugin_t *plist, int count, int threadid);
 corsaro_plugin_set_t *corsaro_start_merging_plugins(corsaro_logger_t *logger,
-        corsaro_plugin_t *plist, int count, int maxsources, void *tagsock);
+        corsaro_plugin_t *plist, int count, int maxsources);
 int corsaro_stop_plugins(corsaro_plugin_set_t *pluginset);
 void **corsaro_push_end_plugins(corsaro_plugin_set_t *pluginset, uint32_t intid,
         uint32_t ts, uint8_t complete);
@@ -196,7 +203,8 @@ int corsaro_push_packet_plugins(corsaro_plugin_set_t *pluginset,
 int corsaro_rotate_plugin_output(corsaro_logger_t *logger,
         corsaro_plugin_set_t *pset);
 int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
-        corsaro_plugin_set_t *pset, corsaro_fin_interval_t *fin);
+        corsaro_plugin_set_t *pset, corsaro_fin_interval_t *fin,
+        void *tagsock);
 
 int corsaro_is_backscatter_packet(libtrace_packet_t *packet);
 

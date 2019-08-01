@@ -23,7 +23,7 @@
 #
 
 AC_INIT([corsaro-caida], [3.0.0], [corsaro-info@caida.org])
-AM_INIT_AUTOMAKE([foreign])
+AM_INIT_AUTOMAKE([foreign subdir-objects])
 
 # Corsaro versions...
 # this may need some re-thinking

@@ -205,6 +205,21 @@ The full set of supported config options for corsarotagger is:
 			preferably using either the ipc:// or tcp://
 			transports. The default is 'ipc:///tmp/corsarotagger'.
 
+  controlsocketname     The name of the zeroMQ queue which will be listening
+                        for meta-data requests from clients. This must be a
+                        valid zeroMQ socket URI, preferably using either the
+                        ipc:// or tcp:// transports. The default is
+                        'ipc:///tmp/corsarotagger-control'.
+
+  outputhwm             The high-water mark for the zeroMQ queue that is
+                        publishing tagged packets. If the backlog for this
+                        queue reaches or exceeds this value, then packets
+                        will be dropped rather than sent to clients. Larger
+                        HWM values will consume more memory whenever the
+                        tagger clients are failing to keep up, but will
+                        allow more packets to be buffered before dropping
+                        begins. Default is 125.
+
   pktthreads		The number of threads to devote to reading packets
 			from the input source. If using an ndag: input, this
 			should be equal to the number of ndag streams. The
@@ -303,6 +318,12 @@ The full set of supported global config options is:
 			by the corsarotagger instance. Defaults to
 			'ipc:///tmp/corsarotagger'.
 
+  controlsocketname     The name of the zeroMQ queue to connect to when
+                        sending meta-data requests to the corsarotagger
+                        instance. This MUST match the 'controlsocketname'
+                        option being used by the corsarotagger instance.
+                        Defaults to 'ipc:///tmp/corsarotagger-control'.
+
   monitorid             Set the monitor name that will appear in output file
                         names if the %N modifier is present in the template.
 
@@ -334,6 +355,16 @@ The full set of supported global config options is:
 			corsarotagger has marked as coming from a globally
 			routable address (i.e. not an RFC5735 address).
 			Defaults to 'no'.
+
+  inputhwm              The high-water mark for the subscription queue which
+                        this corsarotrace instance is receiving tagged packets
+                        from. This is approximately the number of received
+                        packets that each processing thread can buffer
+                        internally before having to stop reading from the
+                        tagger socket. Larger HWM values will consume more
+                        local memory whenever the corsarotrace instance is
+                        unable to keep up with the incoming packet rate.
+                        Default is 25.
 
   libtimeseriesbackends If a plugin is going to use libtimeseries to stream
                         output into a data platform, this sequence will list
@@ -498,6 +529,12 @@ The report plugin supports the following configuration options:
                         number of unique source and destination IPs seen
                         sending or receiving a packet matching each metric.
                         Defaults to 4.
+
+  internalhwm           The high-water mark applied to the internal queues
+                        linking the processing threads to the IP tracking
+                        threads. The same HWM is applied to both sending and
+                        receiving sockets for those queues. Defaults to 30
+                        messages.
 
   querytaggerlabels     If set to 'no', the plugin will NOT attempt to ask
                         the tagger for FQ labels for each country, region,

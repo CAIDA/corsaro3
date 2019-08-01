@@ -212,6 +212,11 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "inputhwm")) {
+        glob->inputhwm = strtoul((char *)value->data.scalar.value, NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "startboundaryts")) {
         glob->boundstartts = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
@@ -241,6 +246,8 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 static void log_configuration(corsaro_trace_global_t *glob) {
     corsaro_log(glob->logger, "running on monitor %s", glob->monitorid);
     corsaro_log(glob->logger, "using %d processing threads", glob->threads);
+    corsaro_log(glob->logger, "setting input queue high water mark to %u",
+            glob->inputhwm);
     corsaro_log(glob->logger, "interval length is set to %u seconds",
             glob->interval);
     corsaro_log(glob->logger, "rotating files every %u intervals",
@@ -363,6 +370,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->logfilename = NULL;
     glob->threads = 2;
     glob->plugincount = 0;
+    glob->inputhwm = 25;
 
     glob->removeerratic = 0;
     glob->removespoofed = 0;
