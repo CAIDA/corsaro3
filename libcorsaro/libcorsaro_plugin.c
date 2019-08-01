@@ -47,7 +47,7 @@
 #endif
 
 #ifdef WITH_PLUGIN_REPORT
-#include "corsaro_report.h"
+#include "report/corsaro_report.h"
 #endif
 
 #define PLUGIN_INIT_ADD(plugin)                                                \
