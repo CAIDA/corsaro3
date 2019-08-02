@@ -840,6 +840,7 @@ static int receive_label_update(void *zmq_taggersock, zmq_msg_t *frame,
 		corsaro_log(logger, "failed to get ipmeta label response in reasonable time frame");
 		return -1;
 	}
+    return 0;
 }
 
 static uint16_t process_single_label_update(

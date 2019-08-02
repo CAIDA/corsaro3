@@ -378,6 +378,38 @@ static void load_maxmind_country_labels(corsaro_tagger_global_t *glob,
     }
 }
 
+static void load_netacq_country_labels(corsaro_tagger_global_t *glob,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    int count, i;
+    char build[16];
+    uint32_t index;
+    PWord_t pval;
+    char *fqdn;
+    ipmeta_provider_netacq_edge_country_t **countries = NULL;
+
+    count = ipmeta_provider_netacq_edge_get_countries(
+            ipmeta_state->netacqipmeta, &countries);
+
+    for (i = 0; i < count; i++) {
+        index = (countries[i]->iso2[0] & 0xff) +
+                ((countries[i]->iso2[1] & 0xff) << 8);
+
+        snprintf(build, 16, "%s.%s", countries[i]->continent,
+                countries[i]->iso2);
+
+        JLI(pval, ipmeta_state->country_labels, index);
+        if (*pval) {
+            continue;
+        }
+        fqdn = strdup(build);
+        *pval = (Word_t) fqdn;
+
+        JLI(pval, ipmeta_state->recently_added_country_labels, index);
+        *pval = (Word_t) fqdn;
+    }
+}
+
 /** Creates and populates an IPMeta data structure, based on the contents
  *  of the files listed in the configuration file.
  *
@@ -428,6 +460,7 @@ static void load_ipmeta_data(corsaro_tagger_global_t *glob,
         } else {
             ipmeta_state->netacqipmeta = prov;
         }
+        load_netacq_country_labels(glob, ipmeta_state);
     }
 
     ipmeta_state->ending = 0;
