@@ -97,7 +97,7 @@ static int parse_netacq_tag_options(corsaro_logger_t *logger,
             if (opts->polygon_table_files == NULL) {
                 opts->polygon_table_files = libtrace_list_init(sizeof(char *));
             }
-            copy = strdup((char *)key->data.scalar.value);
+            copy = strdup((char *)value->data.scalar.value);
             libtrace_list_push_back(opts->polygon_table_files, &copy);
         }
 
