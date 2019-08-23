@@ -78,6 +78,8 @@ enum {
 
 };
 
+#define MAX_NETACQ_POLYGONS 8
+
 /** A set of tags that have been derived for an individual packet. */
 typedef struct corsaro_packet_tags {
 
@@ -88,11 +90,13 @@ typedef struct corsaro_packet_tags {
 
     /** The ID of the geo-location region for the source IP, as
      *  determined using the netacq-edge data */
-    uint32_t netacq_region;
+    uint16_t netacq_region;
 
     /** The ID of the geo-location 'polygon' for the source IP, as
-     *  determined using the netacq-edge data */
-    uint32_t netacq_polygon;
+     *  determined using the netacq-edge data. Note that there can
+     *  be multiple polygons for a single packet, as there are
+     *  multiple sources of polygon data. */
+    uint32_t netacq_polygon[MAX_NETACQ_POLYGONS];
 
     /** The ASN that owns the source IP, according to the prefix2asn
      *  data. */
@@ -216,10 +220,12 @@ typedef struct corsaro_ipmeta_state {
 
     Pvoid_t country_labels;
     Pvoid_t region_labels;
+    Pvoid_t polygon_labels;
 
     uint32_t last_reload;
     Pvoid_t recently_added_country_labels;
     Pvoid_t recently_added_region_labels;
+    Pvoid_t recently_added_polygon_labels;
 
 } corsaro_ipmeta_state_t;
 

@@ -33,7 +33,7 @@
 #define AVRO_CONVERSION_FAILURE -1
 #define AVRO_WRITE_FAILURE -2
 
-#define LOOKUP_COUNTRY_CONTINENT(contmap, metricid) \
+#define LOOKUP_GEOTAG_LABEL(contmap, metricid) \
     lookup = metricid & 0xffffffff; \
     JLF(pval, contmap, lookup); \
     if (pval == NULL) { \
@@ -52,15 +52,18 @@
     *pval = (Word_t)labelstr; \
     }
 
-#define STRIP_METRIC_VALUE(foundkey, dest, len) \
+#define STRIP_METRIC_VALUE(foundkey, dest, remain, len) \
     { \
         char *rstr = strrchr(foundkey, '.'); \
         if (rstr == NULL || rstr - foundkey >= len) { \
             memcpy(dest, foundkey, len - 1); \
             metrickey[len - 1] = '\0'; \
+            remain = ""; \
         } else { \
-            memcpy(dest, foundkey, rstr - foundkey); \
-            metrickey[rstr - foundkey] = '\0'; \
+            int keylen = rstr - foundkey; \
+            *rstr = '\0'; \
+            memcpy(dest, foundkey, keylen + 1); \
+            remain = rstr + 1; \
         } \
     }
 
@@ -106,6 +109,10 @@ typedef struct corsaro_report_merge_state {
 
     /** Map of region IDs to FQ region labels */
     Pvoid_t region_labels;
+
+    /** Map of polygon IDs to FQ polygon labels -- note that polygons can
+    */
+    Pvoid_t polygon_labels;
 } corsaro_report_merge_state_t;
 
 
@@ -171,6 +178,7 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
 
     Word_t *pval;
     const char *contkey = NULL;
+    char *remain;
     char metrickey[128];
     uint64_t lookup;
 
@@ -219,8 +227,8 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
                     (int)((res->metricid >> 8) & 0xff));
             break;
         case CORSARO_METRIC_CLASS_MAXMIND_COUNTRY:
-            LOOKUP_COUNTRY_CONTINENT(m->country_labels, res->metricid)
-            STRIP_METRIC_VALUE(contkey, metrickey, 128);
+            LOOKUP_GEOTAG_LABEL(m->country_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, remain, 128);
             snprintf(res->metrictype, 256, "geo.maxmind.%s", metrickey);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
@@ -231,11 +239,23 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
                     (int)((res->metricid >> 8) & 0xff));
             break;
         case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
-            LOOKUP_COUNTRY_CONTINENT(m->country_labels, res->metricid)
-            STRIP_METRIC_VALUE(contkey, metrickey, 128);
+            LOOKUP_GEOTAG_LABEL(m->country_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, remain, 128);
             snprintf(res->metrictype, 256, "geo.netacuity.%s", metrickey);
             snprintf(res->metricval, 128, "%c%c", (int)(res->metricid & 0xff),
                     (int)((res->metricid >> 8) & 0xff));
+            break;
+        case CORSARO_METRIC_CLASS_NETACQ_REGION:
+            LOOKUP_GEOTAG_LABEL(m->region_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, remain, 128);
+            snprintf(res->metrictype, 256, "geo.netacuity.%s", metrickey);
+            snprintf(res->metricval, 128, "%s", remain);
+            break;
+        case CORSARO_METRIC_CLASS_NETACQ_POLYGON:
+            LOOKUP_GEOTAG_LABEL(m->polygon_labels, res->metricid)
+            STRIP_METRIC_VALUE(contkey, metrickey, remain, 128);
+            snprintf(res->metrictype, 256, "geo.netacuity.%s", metrickey);
+            snprintf(res->metricval, 128, "%s", remain);
             break;
         case CORSARO_METRIC_CLASS_PREFIX_ASN:
             strncpy(res->metrictype , "routing.asn", 128);
@@ -774,6 +794,7 @@ void *corsaro_report_init_merging(corsaro_plugin_t *p, int sources) {
     m->metrickp_keys = (Pvoid_t) NULL;
     m->country_labels = (Pvoid_t) NULL;
     m->region_labels = (Pvoid_t) NULL;
+    m->polygon_labels = (Pvoid_t) NULL;
 
     return m;
 }
@@ -809,6 +830,7 @@ int corsaro_report_halt_merging(corsaro_plugin_t *p, void *local) {
     JLFA(judyret, m->metrickp_keys);
     corsaro_free_ipmeta_label_map(m->country_labels, 1);
     corsaro_free_ipmeta_label_map(m->region_labels, 1);
+    corsaro_free_ipmeta_label_map(m->polygon_labels, 1);
 
     free(m);
     return 0;
@@ -863,6 +885,9 @@ static uint16_t process_single_label_update(
 
 	if (hdr->subject_type == TAGGER_LABEL_COUNTRY) {
 		INSERT_IPMETA_LABEL(state->country_labels, index, labelstr);
+	}
+	if (hdr->subject_type == TAGGER_LABEL_POLYGON) {
+		INSERT_IPMETA_LABEL(state->polygon_labels, index, labelstr);
 	}
 	if (hdr->subject_type == TAGGER_LABEL_REGION) {
 		INSERT_IPMETA_LABEL(state->region_labels, index, labelstr);

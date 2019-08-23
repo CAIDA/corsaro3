@@ -323,6 +323,8 @@ void corsaro_free_ipmeta_state(corsaro_ipmeta_state_t *state) {
             pval, 0);
     FREE_LABEL_MAP(state->region_labels, index, rc_int, pval, 1);
     FREE_LABEL_MAP(state->recently_added_region_labels, index, rc_int, pval, 0);
+    FREE_LABEL_MAP(state->polygon_labels, index, rc_int, pval, 1);
+    FREE_LABEL_MAP(state->recently_added_polygon_labels, index, rc_int, pval, 0);
 
     pthread_mutex_destroy(&(state->mutex));
     free(state);
@@ -395,7 +397,11 @@ static int update_maxmind_tags(corsaro_logger_t *logger,
 }
 
 static int update_netacq_tags(corsaro_logger_t *logger,
-        ipmeta_record_t *rec, corsaro_packet_tags_t *tags) {
+        ipmeta_record_t *rec, corsaro_packet_tags_t *tags,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    int polygondetail = 0, i;
+    char *polygonfqid;
 
     if (rec == NULL) {
         return 0;
@@ -403,8 +409,13 @@ static int update_netacq_tags(corsaro_logger_t *logger,
 
     tags->netacq_continent = *((uint16_t *)(rec->continent_code));
     tags->netacq_country = *((uint16_t *)(rec->country_code));
+    tags->netacq_region = rec->region_code;
 
-    /* TODO regions, polygons etc */
+    memset(tags->netacq_polygon, 0, sizeof(uint32_t) * MAX_NETACQ_POLYGONS);
+    for (i = 0; i < rec->polygon_ids_cnt && i < MAX_NETACQ_POLYGONS; i++) {
+        tags->netacq_polygon[i] = (rec->polygon_ids[i] & 0xFFFFFF) \
+                                  + (((uint32_t)i) << 24);
+    }
 
     tags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
 
@@ -564,7 +575,8 @@ static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
                 }
                 break;
             case IPMETA_PROVIDER_NETACQ_EDGE:
-                if (update_netacq_tags(tagger->logger, rec, tags) != 0) {
+                if (update_netacq_tags(tagger->logger, rec, tags,
+                        tagger->ipmeta_state) != 0) {
                     return -1;
                 }
                 break;

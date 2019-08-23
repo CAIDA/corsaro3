@@ -410,6 +410,78 @@ static void load_netacq_country_labels(corsaro_tagger_global_t *glob,
     }
 }
 
+static void load_netacq_region_labels(corsaro_tagger_global_t *glob,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    ipmeta_provider_netacq_edge_region_t **regions = NULL;
+    char *fqdn;
+    PWord_t pval;
+    uint32_t index;
+    char build[64];
+    int i, count;
+
+    count = ipmeta_provider_netacq_edge_get_regions(ipmeta_state->netacqipmeta,
+            &regions);
+
+    for (i = 0; i < count; i++) {
+        index = regions[i]->code;
+
+        snprintf(build, 64, "%s", regions[i]->fqid);
+        JLI(pval, ipmeta_state->region_labels, index);
+        if (*pval) {
+            continue;
+        }
+        fqdn = strdup(build);
+        *pval = (Word_t) fqdn;
+
+        JLI(pval, ipmeta_state->recently_added_region_labels, index);
+        *pval = (Word_t) fqdn;
+    }
+}
+
+static void load_netacq_polygon_labels(corsaro_tagger_global_t *glob,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    ipmeta_polygon_table_t **tables = NULL;
+    int i, count, j;
+    PWord_t pval;
+    uint32_t index;
+    char build[96];
+    char *label;
+
+    count = ipmeta_provider_netacq_edge_get_polygon_tables(
+            ipmeta_state->netacqipmeta, &tables);
+
+    for (i = 0; i < count; i++) {
+
+        for (j = 0; j < tables[i]->polygons_cnt; j++) {
+            ipmeta_polygon_t *pol = tables[i]->polygons[j];
+
+            if (tables[i]->id > 255) {
+                corsaro_log(glob->logger,
+                        "Warning: polygon table ID %u exceeds 8 bits, so Shane's sneaky renumbering scheme will no longer work!", tables[i]->id);
+            }
+
+            if (pol->id > 0xFFFFFF) {
+                corsaro_log(glob->logger,
+                        "Warning: polygon ID %u exceeds 24 bits, so Shane's sneaky renumbering scheme will no longer work!", pol->id);
+            }
+
+            index = (((uint32_t)i) << 24) + (pol->id & 0x00FFFFFF);
+            JLI(pval, ipmeta_state->polygon_labels, (Word_t)index);
+            if (*pval) {
+                continue;
+            }
+            label = strdup(pol->fqid);
+            *pval = (Word_t) label;
+
+            JLI(pval, ipmeta_state->recently_added_polygon_labels,
+                    (Word_t)index);
+            *pval = (Word_t) label;
+        }
+    }
+}
+
 /** Creates and populates an IPMeta data structure, based on the contents
  *  of the files listed in the configuration file.
  *
@@ -461,6 +533,8 @@ static void load_ipmeta_data(corsaro_tagger_global_t *glob,
             ipmeta_state->netacqipmeta = prov;
         }
         load_netacq_country_labels(glob, ipmeta_state);
+        load_netacq_region_labels(glob, ipmeta_state);
+        load_netacq_polygon_labels(glob, ipmeta_state);
     }
 
     ipmeta_state->ending = 0;
@@ -617,6 +691,8 @@ static char *send_all_ipmeta_labels(corsaro_ipmeta_state_t *state,
             sock, TAGGER_LABEL_COUNTRY);
     rptr = send_ipmeta_labels(state->region_labels, buffer, rptr, bufsize,
             sock, TAGGER_LABEL_REGION);
+    rptr = send_ipmeta_labels(state->polygon_labels, buffer, rptr, bufsize,
+            sock, TAGGER_LABEL_POLYGON);
 
     return rptr;
 }
@@ -628,6 +704,8 @@ static char *send_new_ipmeta_labels(corsaro_ipmeta_state_t *state,
             rptr, bufsize, sock, TAGGER_LABEL_COUNTRY);
     rptr = send_ipmeta_labels(state->recently_added_region_labels, buffer,
             rptr, bufsize, sock, TAGGER_LABEL_REGION);
+    rptr = send_ipmeta_labels(state->recently_added_polygon_labels, buffer,
+            rptr, bufsize, sock, TAGGER_LABEL_POLYGON);
 
     return rptr;
 
@@ -664,6 +742,12 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
             corsaro_free_ipmeta_label_map(
                     glob->ipmeta_state->recently_added_region_labels, 0);
             glob->ipmeta_state->recently_added_region_labels = NULL;
+        }
+
+        if (glob->ipmeta_state->recently_added_polygon_labels) {
+            corsaro_free_ipmeta_label_map(
+                    glob->ipmeta_state->recently_added_polygon_labels, 0);
+            glob->ipmeta_state->recently_added_polygon_labels = NULL;
         }
     }
 
