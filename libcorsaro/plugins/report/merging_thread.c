@@ -61,8 +61,8 @@
             remain = ""; \
         } else { \
             int keylen = rstr - foundkey; \
-            *rstr = '\0'; \
-            memcpy(dest, foundkey, keylen + 1); \
+            memcpy(dest, foundkey, keylen); \
+            dest[keylen] = '\0'; \
             remain = rstr + 1; \
         } \
     }
