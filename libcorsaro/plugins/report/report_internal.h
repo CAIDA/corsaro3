@@ -130,11 +130,11 @@ typedef struct corsaro_metric_ip_hash_t {
      *  are the metric value. */
     uint64_t metricid;
 
-    /** Number of unique source IPs associated with this metric */
-    uint32_t srcips;
+    /** Unique source IPs associated with this metric */
+    Pvoid_t srcips;
 
-    /** Number of unique destination IPs associated with this metric */
-    uint32_t destips;
+    /** Unique destination IPs associated with this metric */
+    Pvoid_t destips;
 
     /** Number of packets that were tagged with this metric */
     uint32_t packets;

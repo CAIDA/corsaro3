@@ -39,87 +39,6 @@
         goto trackerover; \
     }
 
-/** Finds the entry for a given IP address in an IP tracker hash map. If
- *  the IP is not present in the map, creates and inserts a new entry which
- *  is then returned.
- *
- *  @param track        The state for the IP tracker thread.
- *  @param knownips     The hash map to search.
- *  @param ipaddr       The IP address to search the hash map for.
- *  @return a pointer to an IP hash entry corresponding to the given IP
- *          address.
- */
-static corsaro_ip_hash_t *update_iphash(corsaro_report_iptracker_t *track,
-        Pvoid_t *knownips, uint32_t ipaddr) {
-
-    corsaro_ip_hash_t *iphash;
-    PWord_t pval;
-
-    JLG(pval, *knownips, (Word_t)ipaddr);
-    if (pval == NULL) {
-        /* New IP, so create a new entry in our map */
-        iphash = calloc(1, sizeof(corsaro_ip_hash_t));
-        JLI(pval, *knownips, (Word_t)ipaddr);
-        iphash->ipaddr = ipaddr;
-        iphash->metricsseen = NULL;
-        iphash->metriccount = 0;
-        *pval = (Word_t)(iphash);
-    } else {
-        /* IP exists in the map, return the existing entry */
-        iphash = (corsaro_ip_hash_t *)(*pval);
-    }
-
-    return iphash;
-}
-
-/** Searches and updates the map of metrics associated with a single IP
- *  address. If the metric has not been associated with the IP previously,
- *  a new entry is created for that metric.
- *
- *  Also update the unique source or dest IP tally for the metric if this
- *  is the first time that IP has been seen in that context.
- *
- *  @param iphash       The IP hash entry to be updated.
- *  @param metricid     The ID of the metric.
- *  @param issrc        Set to 1 if the IP was seen as a source IP, 0 if
- *                      the IP was seen as a destination IP.
- *  @param m            The current tallies for the given metric.
- */
-static inline void update_metric_map(corsaro_ip_hash_t *iphash,
-        uint64_t metricid, uint8_t issrc, corsaro_metric_ip_hash_t *m) {
-
-    uint8_t metval;
-    PWord_t pval;
-
-    JLG(pval, iphash->metricsseen, (Word_t)metricid);
-    if (pval == NULL) {
-        /* metricid was not in the metric hash for this IP */
-        JLI(pval, iphash->metricsseen, (Word_t)metricid);
-        *pval = 0;
-        iphash->metriccount ++;
-    }
-
-    /* metval is a simple bitmask that indicates whether we've seen this
-     * IP + metric combination before, either as a source IP, destination IP
-     * or both.
-     * bit 1 (0b0000001) = seen as source
-     * bit 2 (0b0000010) = seen as dest
-     *
-     * If we set a bit for the first time, we can also increment our combined
-     * tally of source or dest IPs for this metric.
-     */
-    metval = (uint8_t) (*pval);
-    if (issrc && !(metval & 0x01)) {
-        metval |= 0x01;
-        *pval = metval;
-        m->srcips ++;
-    } else if (!issrc && !(metval & 0x02)) {
-        metval |= 0x02;
-        *pval = metval;
-        m->destips ++;
-    }
-}
-
 /** Updates the tallies for a single observed IP + metric combination.
  *
  *  @param track        The state for this IP tracker thread
@@ -133,12 +52,12 @@ static inline void update_metric_map(corsaro_ip_hash_t *iphash,
  */
 
 static void update_knownip_metric(corsaro_report_iptracker_t *track,
-        corsaro_report_msg_tag_t *tagptr, corsaro_ip_hash_t *iphash,
-        uint8_t issrc, Pvoid_t *metrictally) {
+        corsaro_report_msg_tag_t *tagptr, uint8_t issrc,
+        Pvoid_t *metrictally, uint32_t ipaddr) {
 
     corsaro_metric_ip_hash_t *m;
     uint64_t metricid = tagptr->tagid;
-
+    int ret;
     PWord_t pval;
 
     JLG(pval, *metrictally, (Word_t)metricid);
@@ -150,8 +69,8 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
 
         JLI(pval, *metrictally, (Word_t)metricid);
         m->metricid = metricid;
-        m->srcips = 0;
-        m->destips = 0;
+        m->srcips = NULL;
+        m->destips = NULL;
         m->packets = 0;
         m->bytes = 0;
         *pval = (Word_t)(m);
@@ -162,9 +81,11 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
     if (issrc) {
         m->packets += tagptr->packets;
         m->bytes += tagptr->bytes;
-    }
 
-    update_metric_map(iphash, metricid, issrc, m);
+        J1S(ret, m->srcips, (Word_t)ipaddr);
+    } else {
+        J1S(ret, m->destips, (Word_t)ipaddr);
+    }
 }
 
 /** Frees an entire metric tally hash map.
@@ -425,7 +346,6 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 	int more, i, j;
     size_t moresize;
 	uint32_t toalloc = 0;
-	corsaro_ip_hash_t *thisip = NULL;
     uint32_t tagsdone = 0;
 
 	buf = NULL;
@@ -470,14 +390,13 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 		corsaro_report_msg_tag_t *tag;
 
 		iphdr = (corsaro_report_single_ip_header_t *)ptr;
-		thisip = update_iphash(track, knownip, iphdr->ipaddr);
 
 		ptr += sizeof(corsaro_report_single_ip_header_t);
 
 		for (j = 0; j < iphdr->numtags; j++) {
 			tag = (corsaro_report_msg_tag_t *)ptr;
-			update_knownip_metric(track, tag, thisip, iphdr->issrc,
-				knowniptally);
+			update_knownip_metric(track, tag, iphdr->issrc,
+				knowniptally, iphdr->ipaddr);
 			ptr += sizeof(corsaro_report_msg_tag_t);
             tagsdone ++;
 		}

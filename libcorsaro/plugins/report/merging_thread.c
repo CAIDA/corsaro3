@@ -700,12 +700,17 @@ static void update_tracker_results(Pvoid_t *results,
             r = (corsaro_report_result_t *)(*pval2);
         }
 
-        r->uniq_src_ips += iter->srcips;
-        r->uniq_dst_ips += iter->destips;
+        J1C(ret, iter->srcips, 0, -1);
+        r->uniq_src_ips += (uint32_t)ret;
+        J1C(ret, iter->destips, 0, -1);
+        r->uniq_dst_ips += (uint32_t)ret;
+
         r->pkt_cnt += iter->packets;
         r->bytes += iter->bytes;
 
         /* Don't forget to release the metric tally back to the IP tracker */
+        J1FA(ret, iter->srcips);
+        J1FA(ret, iter->destips);
         free(iter);
 
         JLN(pval, tracker->lastresult, index);
