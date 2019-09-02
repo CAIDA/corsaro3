@@ -347,6 +347,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
     size_t moresize;
 	uint32_t toalloc = 0;
     uint32_t tagsdone = 0;
+    uint64_t metricid;
 
 	buf = NULL;
 
@@ -395,8 +396,12 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 
 		for (j = 0; j < iphdr->numtags; j++) {
 			tag = (corsaro_report_msg_tag_t *)ptr;
-			update_knownip_metric(track, tag, iphdr->issrc,
-				knowniptally, iphdr->ipaddr);
+            metricid = tag->tagid;
+            if (track->allowedmetricclasses == 0 ||
+                    (track->allowedmetricclasses & (1UL << (metricid >> 32)))) {
+			    update_knownip_metric(track, tag, iphdr->issrc,
+				        knowniptally, iphdr->ipaddr);
+            }
 			ptr += sizeof(corsaro_report_msg_tag_t);
             tagsdone ++;
 		}

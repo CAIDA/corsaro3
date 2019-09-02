@@ -224,6 +224,12 @@ typedef struct corsaro_report_iptracker {
      */
     corsaro_report_iptracker_source_t *sourcetrack;
 
+    /** Bitmask representing which metric classes are going to be tracked by
+     *  this corsarotrace instance.
+     *
+     *  This is copied straight from the global config.
+     */
+    uint64_t allowedmetricclasses;
 } corsaro_report_iptracker_t;
 
 
@@ -267,6 +273,14 @@ typedef struct corsaro_report_config {
      *  TODO remove this option once it is no longer needed
      */
     uint8_t query_tagger_labels;
+
+    /** Bitmask representing which metric classes are going to be tracked by
+     *  this corsarotrace instance.
+     *
+     *  XXX should we get close to 64 total metrics, we're going to need to
+     *  re-think this approach.
+     */
+    uint64_t allowedmetricclasses;
 } corsaro_report_config_t;
 
 
