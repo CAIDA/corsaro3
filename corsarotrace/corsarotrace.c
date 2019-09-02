@@ -791,7 +791,7 @@ int main(int argc, char *argv[]) {
     corsaro_trace_worker_t *workers;
     corsaro_trace_merger_t merger;
     libtrace_t *dummy;
-    void *control_sock;
+    void *control_sock = NULL;
     corsaro_tagger_control_request_t ctrlreq;
     corsaro_tagger_control_reply_t ctrlreply;
 
@@ -825,6 +825,7 @@ int main(int argc, char *argv[]) {
     }
 
     zmq_close(control_sock);
+    control_sock = NULL;
     corsaro_log(glob->logger, "corsarotagger is using %u hashbins",
             ctrlreply.hashbins);
     glob->max_hashbins = ctrlreply.hashbins;
@@ -885,6 +886,9 @@ int main(int argc, char *argv[]) {
     corsaro_log(glob->logger, "all threads have joined, exiting.");
 
 endcorsarotrace:
+    if (control_sock) {
+        zmq_close(control_sock);
+    }
     trace_destroy_dead(dummy);
     corsaro_trace_free_global(glob);
 
