@@ -91,6 +91,8 @@ typedef enum {
     CORSARO_METRIC_CLASS_IP_PROTOCOL,
     CORSARO_METRIC_CLASS_ICMP_CODE,
     CORSARO_METRIC_CLASS_ICMP_TYPE,
+    CORSARO_METRIC_CLASS_NETACQ_REGION,
+    CORSARO_METRIC_CLASS_NETACQ_POLYGON,
 } corsaro_report_metric_class_t;
 
 /** Types of messages that can be sent to the IP tracker threads */
@@ -128,11 +130,11 @@ typedef struct corsaro_metric_ip_hash_t {
      *  are the metric value. */
     uint64_t metricid;
 
-    /** Number of unique source IPs associated with this metric */
-    uint32_t srcips;
+    /** Unique source IPs associated with this metric */
+    Pvoid_t srcips;
 
-    /** Number of unique destination IPs associated with this metric */
-    uint32_t destips;
+    /** Unique destination IPs associated with this metric */
+    Pvoid_t destips;
 
     /** Number of packets that were tagged with this metric */
     uint32_t packets;
@@ -222,6 +224,12 @@ typedef struct corsaro_report_iptracker {
      */
     corsaro_report_iptracker_source_t *sourcetrack;
 
+    /** Bitmask representing which metric classes are going to be tracked by
+     *  this corsarotrace instance.
+     *
+     *  This is copied straight from the global config.
+     */
+    uint64_t allowedmetricclasses;
 } corsaro_report_iptracker_t;
 
 
@@ -265,6 +273,14 @@ typedef struct corsaro_report_config {
      *  TODO remove this option once it is no longer needed
      */
     uint8_t query_tagger_labels;
+
+    /** Bitmask representing which metric classes are going to be tracked by
+     *  this corsarotrace instance.
+     *
+     *  XXX should we get close to 64 total metrics, we're going to need to
+     *  re-think this approach.
+     */
+    uint64_t allowedmetricclasses;
 } corsaro_report_config_t;
 
 

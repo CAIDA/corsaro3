@@ -117,6 +117,61 @@ corsaro_plugin_t *corsaro_report_alloc(void) {
     return &(corsaro_report_plugin);
 }
 
+static void parse_metric_limits(corsaro_report_config_t *conf,
+        yaml_document_t *doc, yaml_node_t *metlist, corsaro_logger_t *logger) {
+
+    yaml_node_item_t *item;
+    for (item = metlist->data.sequence.items.start;
+            item != metlist->data.sequence.items.top; item++) {
+        yaml_node_t *node = yaml_document_get_node(doc, *item);
+        char *name;
+
+        if (node->type != YAML_SCALAR_NODE) {
+            corsaro_log(logger, "Invalid YAML configuration for 'limitmetrics' option -- ignoring");
+            conf->allowedmetricclasses = 0;
+            return;
+        }
+
+        name = (char *)node->data.scalar.value;
+        if (strcasecmp(name, "basic") == 0) {
+            conf->allowedmetricclasses |=
+                    ((1UL << CORSARO_METRIC_CLASS_COMBINED) |
+                     (1UL << CORSARO_METRIC_CLASS_IP_PROTOCOL));
+        }
+        if (strcasecmp(name, "tcpports") == 0) {
+            conf->allowedmetricclasses |=
+                    ((1UL << CORSARO_METRIC_CLASS_TCP_SOURCE_PORT) |
+                     (1UL << CORSARO_METRIC_CLASS_TCP_DEST_PORT));
+        }
+        if (strcasecmp(name, "udpports") == 0) {
+            conf->allowedmetricclasses |=
+                    ((1UL << CORSARO_METRIC_CLASS_UDP_SOURCE_PORT) |
+                     (1UL << CORSARO_METRIC_CLASS_UDP_DEST_PORT));
+        }
+        if (strcasecmp(name, "icmp") == 0) {
+            conf->allowedmetricclasses |=
+                    ((1UL << CORSARO_METRIC_CLASS_ICMP_CODE) |
+                     (1UL << CORSARO_METRIC_CLASS_ICMP_TYPE));
+        }
+        if (strcasecmp(name, "netacq") == 0) {
+            conf->allowedmetricclasses |=
+                    ((1UL << CORSARO_METRIC_CLASS_NETACQ_CONTINENT) |
+                     (1UL << CORSARO_METRIC_CLASS_NETACQ_COUNTRY) |
+                     (1UL << CORSARO_METRIC_CLASS_NETACQ_REGION) |
+                     (1UL << CORSARO_METRIC_CLASS_NETACQ_POLYGON));
+        }
+        if (strcasecmp(name, "maxmind") == 0) {
+            conf->allowedmetricclasses |=
+                    ((1UL << CORSARO_METRIC_CLASS_MAXMIND_CONTINENT) |
+                     (1UL << CORSARO_METRIC_CLASS_MAXMIND_COUNTRY));
+        }
+        if (strcasecmp(name, "pfx2asn") == 0) {
+            conf->allowedmetricclasses |=
+                     (1UL << CORSARO_METRIC_CLASS_PREFIX_ASN);
+        }
+    }
+}
+
 /** Parses the YAML configuration specific to the report plugin
  *
  *  @param p        A pointer to an instance of the report plugin.
@@ -146,6 +201,8 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     conf->tracker_count = 4;
     conf->query_tagger_labels = 1;
     conf->internalhwm = 30;
+    /* zero is a special value to represent 'all' metrics */
+    conf->allowedmetricclasses = 0;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -171,6 +228,12 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 free(conf->outlabel);
             }
             conf->outlabel = strdup(val);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
+                    && strcmp((char *)key->data.scalar.value, "limitmetrics")
+                            == 0) {
+            parse_metric_limits(conf, doc, value, p->logger);
         }
 
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -287,6 +350,43 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
                 "report plugin: invalid value for output format (?)");
     }
 
+    if (conf->allowedmetricclasses == 0) {
+        corsaro_log(p->logger, "report plugin: tracking ALL metrics");
+    } else {
+        if (conf->allowedmetricclasses & (1 << CORSARO_METRIC_CLASS_COMBINED)) {
+            corsaro_log(p->logger, "report plugin: tracking basic metrics");
+        }
+        if (conf->allowedmetricclasses & (1 << CORSARO_METRIC_CLASS_ICMP_CODE))
+        {
+            corsaro_log(p->logger, "report plugin: tracking ICMP metrics");
+        }
+        if (conf->allowedmetricclasses &
+                (1 << CORSARO_METRIC_CLASS_TCP_SOURCE_PORT))
+        {
+            corsaro_log(p->logger, "report plugin: tracking TCP metrics");
+        }
+        if (conf->allowedmetricclasses &
+                (1 << CORSARO_METRIC_CLASS_UDP_SOURCE_PORT))
+        {
+            corsaro_log(p->logger, "report plugin: tracking UDP metrics");
+        }
+        if (conf->allowedmetricclasses &
+                (1 << CORSARO_METRIC_CLASS_NETACQ_CONTINENT))
+        {
+            corsaro_log(p->logger,
+                "report plugin: tracking Netacq-Edge metrics");
+        }
+        if (conf->allowedmetricclasses &
+                (1 << CORSARO_METRIC_CLASS_MAXMIND_CONTINENT))
+        {
+            corsaro_log(p->logger, "report plugin: tracking Maxmind metrics");
+        }
+        if (conf->allowedmetricclasses & (1 << CORSARO_METRIC_CLASS_PREFIX_ASN))
+        {
+            corsaro_log(p->logger, "report plugin: tracking pfx2asn metrics");
+        }
+    }
+
     corsaro_log(p->logger,
             "report plugin: starting %d IP tracker threads",
             conf->tracker_count);
@@ -323,6 +423,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         conf->iptrackers[i].logger = p->logger;
         conf->iptrackers[i].sourcethreads = stdopts->procthreads;
         conf->iptrackers[i].haltphase = 0;
+        conf->iptrackers[i].allowedmetricclasses = conf->allowedmetricclasses;
         conf->iptrackers[i].outstanding = libtrace_list_init(
                sizeof(corsaro_report_out_interval_t));
 

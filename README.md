@@ -536,6 +536,26 @@ The report plugin supports the following configuration options:
                         receiving sockets for those queues. Defaults to 30
                         messages.
 
+  limitmetrics          Limit the time series generation by this plugin to
+                        a specific set of metrics. If not specified, time
+                        series will be generated for all metrics -- otherwise,
+                        only time series for the listed metric types will be
+                        generated. The value for this option is a YAML list
+                        containing one or more of the following values:
+
+                          - "basic" : include the 'combined' and IP protocol
+                                      metrics
+                          - "tcpports" : include the source and dest TCP port
+                                         metrics
+                          - "udpports" : include the source and dest UDP port
+                                         metrics
+                          - "icmp" : include the ICMP code and type metrics
+                          - "netacq" : include the metrics for the Netacq-Edge
+                                      geo-tagging
+                          - "maxmind" : include the metrics for the Maxmind
+                                      geo-tagging
+                          - "pfx2asn" : include the prefix2asn metrics
+
   querytaggerlabels     If set to 'no', the plugin will NOT attempt to ask
                         the tagger for FQ labels for each country, region,
                         etc. that appears in the geo-location tags. This is

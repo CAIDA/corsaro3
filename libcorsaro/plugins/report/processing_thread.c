@@ -212,6 +212,10 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
             return "Netacq continent";
         case CORSARO_METRIC_CLASS_NETACQ_COUNTRY:
             return "Netacq country";
+        case CORSARO_METRIC_CLASS_NETACQ_REGION:
+            return "Netacq region";
+        case CORSARO_METRIC_CLASS_NETACQ_POLYGON:
+            return "Netacq polygon";
         case CORSARO_METRIC_CLASS_PREFIX_ASN:
             return "pfx2as ASN";
     }
@@ -516,6 +520,7 @@ static int process_tags(corsaro_report_tracker_state_t *track,
         corsaro_report_single_ip_header_t *header,
         corsaro_logger_t *logger) {
 
+    int i;
     /* "Combined" is simply a total across all metrics, i.e. the total
      * number of packets, source IPs etc. Every IP packet should add to
      * the combined tally.
@@ -589,6 +594,20 @@ static int process_tags(corsaro_report_tracker_state_t *track,
                 tags->netacq_country, 0, track, header, logger, iplen) < 0) {
 			return -1;
 		}
+        if (process_single_tag(CORSARO_METRIC_CLASS_NETACQ_REGION,
+                tags->netacq_region, 0, track, header, logger, iplen) < 0) {
+			return -1;
+		}
+        for (i = 0; i < MAX_NETACQ_POLYGONS; i++) {
+            if (tags->netacq_polygon[i] == 0) {
+                continue;
+            }
+            if (process_single_tag(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
+                    tags->netacq_polygon[i], 0, track, header, logger, iplen)
+                    < 0) {
+                return -1;
+            }
+        }
     }
 
     if (pfx2as_tagged(tags)) {
