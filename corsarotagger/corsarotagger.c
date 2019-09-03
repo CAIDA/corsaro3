@@ -426,7 +426,9 @@ static void load_netacq_region_labels(corsaro_tagger_global_t *glob,
     for (i = 0; i < count; i++) {
         index = regions[i]->code;
 
-        snprintf(build, 64, "%s", regions[i]->fqid);
+        /* TODO update libipmeta to add FQIDs to region entities */
+        snprintf(build, 64, "TODO.%u", index);
+        //snprintf(build, 64, "%s", regions[i]->fqid);
         JLI(pval, ipmeta_state->region_labels, index);
         if (*pval) {
             continue;
