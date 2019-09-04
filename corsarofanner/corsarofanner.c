@@ -80,8 +80,12 @@ static void *run_fanner(void *globalin) {
 		goto endfanner;
 	}
 
-    for (i = 'A' + local->id; i <= 'Z'; i += glob->threads) {
+    for (i = 'A' + local->id; i <= 'z'; i += glob->threads) {
         char substr[5];
+
+        if (i < 'a' && i > 'Z') {
+            i = 'a';
+        }
         snprintf(substr, 5, "%c", i);
 
         if (zmq_setsockopt(insock, ZMQ_SUBSCRIBE, substr, 1) < 0) {
@@ -238,7 +242,6 @@ int main(int argc, char *argv[]) {
 	if (glob == NULL) {
 		return 1;
 	}
-    glob->threads = 4;
 
     tids = (corsaro_fanner_thread_t *)calloc(glob->threads,
             sizeof(corsaro_fanner_thread_t));

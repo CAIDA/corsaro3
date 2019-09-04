@@ -53,6 +53,11 @@ static int parse_fanner_config(void *globalin, yaml_document_t *doc,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "threads")) {
+        glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "outputhwm")) {
         glob->outputhwm = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
@@ -74,6 +79,8 @@ static void log_configuration(corsaro_fanner_global_t *glob) {
             glob->inputsockname);
     corsaro_log(glob->logger, "fanning tagged packets out to zeromq socket: %s",
             glob->outsockname);
+    corsaro_log(glob->logger, "using %u threads to consume tagged packets",
+            glob->threads);
 
 }
 
@@ -94,6 +101,7 @@ corsaro_fanner_global_t *corsaro_fanner_init_global(char *filename, int logmode)
     glob->inputhwm = 25;
     glob->outputhwm = 25;
     glob->logger = NULL;
+    glob->threads = 4;
     glob->zmq_ctxt = zmq_ctx_new();
     glob->inputsockname = NULL;
     glob->outsockname = NULL;
