@@ -22,9 +22,20 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 # 
 
-SUBDIRS = common libcorsaro corsarotrace corsarotagger corsarowdcap \
-        corsarofanner
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro \
+	-I$(top_srcdir)/common @TCMALLOC_FLAGS@
+
+bin_PROGRAMS = corsarofanner
+
+# main corsaro program
+corsarofanner_SOURCES = \
+	corsarofanner.c \
+        configparser.c \
+        corsarofanner.h
+
+corsarofanner_LDADD = -lcorsaro
+
+corsarofanner_LDFLAGS = -L$(top_builddir)/libcorsaro
 
 ACLOCAL_AMFLAGS = -I m4
 
