@@ -405,6 +405,7 @@ static void *start_worker(void *tdata) {
     void **final_result;
     libtrace_t *deadtrace = NULL;
     int hwm = tls->glob->inputhwm;
+    char fullsubqueuename[256];
 
     deadtrace = trace_create_dead("pcapfile");
     tls->packet = trace_create_packet();
@@ -423,8 +424,9 @@ static void *start_worker(void *tdata) {
         goto endworker;
     }
 
+    snprintf(fullsubqueuename, 256, "%s%02d", tls->glob->subqueuename, tls->workerid);
 
-    if (zmq_connect(tls->zmq_pullsock, tls->glob->subqueuename) != 0) {
+    if (zmq_connect(tls->zmq_pullsock, fullsubqueuename) != 0) {
         corsaro_log(tls->glob->logger,
                 "unable to connect sub socket for worker %d: %s", tls->workerid,
                 strerror(errno));
