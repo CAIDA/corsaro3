@@ -237,7 +237,6 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
 static inline int process_single_tag(corsaro_report_metric_class_t class,
         uint32_t tagval, uint32_t maxtagval,
         corsaro_report_tracker_state_t *track,
-		corsaro_report_single_ip_header_t *iphdr,
         corsaro_logger_t *logger, uint16_t pktbytes) {
 
     uint64_t metricid;
@@ -262,7 +261,6 @@ static inline int process_single_tag(corsaro_report_metric_class_t class,
 	tag->bytes = pktbytes;
 	tag->packets = 1;
 
-    iphdr->numtags ++;
 	track->nextwrite += sizeof(corsaro_report_msg_tag_t);
 	return 1;
 
@@ -502,6 +500,14 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     return (void *)interim;
 }
 
+#define PROCESS_SINGLE_TAG(class, val, maxval) \
+    if ((ret = process_single_tag(class, val, maxval, track, logger, \
+            iplen)) < 0) { \
+        return -1; \
+    } else { \
+        newtags += ret; \
+    }
+
 /** Insert all of the tags in a tag set into an IP update message that will
  *  be forwarded to an IP tracker thread.
  *
@@ -511,112 +517,74 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
  * 						tracker thread that will receive this update
  *  @param tags         The set of tags to insert into the IP update
  *  @param iplen        The number of IP-layer bytes in the original packet
- *  @param header       The IP update message header that will preceed the
- * 						tags in the message buffer
  *  @param logger       A reference to a corsaro logger for error reporting
  */
 static int process_tags(corsaro_report_tracker_state_t *track,
 		corsaro_packet_tags_t *tags, uint16_t iplen,
-        corsaro_report_single_ip_header_t *header,
         corsaro_logger_t *logger) {
 
-    int i;
+    int i, ret;
+    uint16_t newtags = 0;
+
     /* "Combined" is simply a total across all metrics, i.e. the total
      * number of packets, source IPs etc. Every IP packet should add to
      * the combined tally.
      */
 
-    if (process_single_tag(CORSARO_METRIC_CLASS_COMBINED, 0, 0, track, header,
-            logger, iplen) < 0) {
-		return -1;
-	}
+    PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_COMBINED, 0, 0);
 
     if (!tags || tags->providers_used == 0) {
-        return 0;
+        return newtags;
     }
 
-   	if ( process_single_tag(CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
-            METRIC_IPPROTOS_MAX, track, header, logger, iplen) < 0) {
-		return -1;
-	}
+    PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
+            METRIC_IPPROTOS_MAX);
 
     if (tags->protocol == TRACE_IPPROTO_ICMP) {
-        if (process_single_tag(CORSARO_METRIC_CLASS_ICMP_TYPE, tags->src_port,
-                METRIC_ICMP_MAX, track, header, logger, iplen) < 0) {
-			return -1;
-		}
-        if (process_single_tag(CORSARO_METRIC_CLASS_ICMP_CODE, tags->dest_port,
-                METRIC_ICMP_MAX, track, header, logger, iplen) < 0) {
-			return -1;
-		}
-
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_TYPE, tags->src_port,
+                METRIC_ICMP_MAX);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_CODE, tags->dest_port,
+                METRIC_ICMP_MAX);
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
-        if (process_single_tag(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
-				tags->src_port, METRIC_PORT_MAX, track, header, logger,
-				iplen) < 0) {
-			return -1;
-		}
-        if (process_single_tag(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
-				tags->dest_port, METRIC_PORT_MAX, track, header, logger,
-				iplen) < 0) {
-			return -1;
-		}
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
+                tags->src_port, METRIC_PORT_MAX);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
+                tags->dest_port, METRIC_PORT_MAX);
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
-        if (process_single_tag(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
-				tags->src_port, METRIC_PORT_MAX, track, header, logger,
-				iplen) < 0) {
-			return -1;
-		}
-        if (process_single_tag(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
-				tags->dest_port, METRIC_PORT_MAX, track, header, logger,
-				iplen) < 0) {
-			return -1;
-		}
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
+                tags->src_port, METRIC_PORT_MAX);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
+                tags->dest_port, METRIC_PORT_MAX);
     }
 
     if (maxmind_tagged(tags)) {
-        if (process_single_tag(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
-                tags->maxmind_continent, 0, track, header, logger, iplen) < 0) {
-			return -1;
-		}
-        if (process_single_tag(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
-                tags->maxmind_country, 0, track, header, logger, iplen) < 0) {
-			return -1;
-		}
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
+                tags->maxmind_continent, 0);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
+                tags->maxmind_country, 0);
     }
 
     if (netacq_tagged(tags)) {
-        if (process_single_tag(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
-                tags->netacq_continent, 0, track, header, logger, iplen) < 0) {
-			return -1;
-		}
-        if (process_single_tag(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
-                tags->netacq_country, 0, track, header, logger, iplen) < 0) {
-			return -1;
-		}
-        if (process_single_tag(CORSARO_METRIC_CLASS_NETACQ_REGION,
-                tags->netacq_region, 0, track, header, logger, iplen) < 0) {
-			return -1;
-		}
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
+                tags->netacq_continent, 0);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
+                tags->netacq_country, 0);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_REGION,
+                tags->netacq_region, 0);
         for (i = 0; i < MAX_NETACQ_POLYGONS; i++) {
             if (tags->netacq_polygon[i] == 0) {
                 continue;
             }
-            if (process_single_tag(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
-                    tags->netacq_polygon[i], 0, track, header, logger, iplen)
-                    < 0) {
-                return -1;
-            }
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
+                    tags->netacq_polygon[i], 0);
         }
     }
 
     if (pfx2as_tagged(tags)) {
-        if (process_single_tag(CORSARO_METRIC_CLASS_PREFIX_ASN,
-                tags->prefixasn, 0, track, header, logger, iplen) < 0) {
-			return -1;
-		}
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_PREFIX_ASN, tags->prefixasn,
+                0);
     }
-	return 0;
+	return newtags;
 }
 
 
@@ -639,7 +607,9 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
         uint16_t iplen, corsaro_packet_tags_t *tags, corsaro_logger_t *logger) {
 
 	int trackerhash;
-	corsaro_report_msg_tag_t *tag;
+    int ipoffset;
+	uint16_t newtags;
+    corsaro_report_msg_tag_t *tag;
 	corsaro_report_single_ip_header_t *singleip;
 	corsaro_report_tracker_state_t *track;
 
@@ -657,16 +627,22 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
 	}
 
 	track->header->bodycount ++;
-	singleip = (corsaro_report_single_ip_header_t *)track->nextwrite;
-	singleip->ipaddr = addr;
-	singleip->issrc = issrc;
-	singleip->numtags = 0;
+    /* Reserve space for the IP address header */
+    ipoffset = track->nextwrite - track->msgbuffer;
 
 	track->nextwrite += sizeof(corsaro_report_single_ip_header_t);
 
-	process_tags(track, tags, iplen, singleip, logger);
+	newtags = process_tags(track, tags, iplen, logger);
 
-    track->header->tagcount += singleip->numtags;
+    /* Due to potential buffer reallocation, singleip may not point anywhere
+     * valid anymore. */
+    singleip = (corsaro_report_single_ip_header_t *)
+            (track->msgbuffer + ipoffset);
+	singleip->ipaddr = addr;
+	singleip->issrc = issrc;
+    singleip->numtags = newtags;
+
+    track->header->tagcount += newtags;
 
 	if (track->header->bodycount < REPORT_BATCH_SIZE) {
 		return 1;
