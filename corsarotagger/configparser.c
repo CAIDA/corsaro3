@@ -200,7 +200,8 @@ static int parse_maxmind_tag_options(corsaro_logger_t *logger,
 }
 
 static int parse_tagprov_config(corsaro_tagger_global_t *glob,
-        yaml_document_t *doc, yaml_node_t *provlist) {
+        yaml_document_t *doc, yaml_node_t *provlist,
+        corsaro_logger_t *logger) {
 
     yaml_node_item_t *item;
     int plugincount = 0;
@@ -222,27 +223,27 @@ static int parse_tagprov_config(corsaro_tagger_global_t *glob,
             /* key = provider name */
             /* value = map of provider options */
             if (strcmp((char *)key->data.scalar.value, "maxmind") == 0) {
-                if (parse_maxmind_tag_options(glob->logger,
+                if (parse_maxmind_tag_options(logger,
                         &(glob->maxtagopts), doc, value) != 0) {
-                    corsaro_log(glob->logger,
+                    corsaro_log(logger,
                             "error while parsing config for Maxmind tagging");
                     continue;
                 }
                 provid = IPMETA_PROVIDER_MAXMIND;
             }
             if (strcmp((char *)key->data.scalar.value, "netacq-edge") == 0) {
-                if (parse_netacq_tag_options(glob->logger,
+                if (parse_netacq_tag_options(logger,
                         &(glob->netacqtagopts), doc, value) != 0) {
-                    corsaro_log(glob->logger,
+                    corsaro_log(logger,
                             "error while parsing config for Netacq-Edge tagging");
                     continue;
                 }
                 provid = IPMETA_PROVIDER_NETACQ_EDGE;
             }
             if (strcmp((char *)key->data.scalar.value, "pfx2as") == 0) {
-                if (parse_pfx2as_tag_options(glob->logger,
+                if (parse_pfx2as_tag_options(logger,
                         &(glob->pfxtagopts), doc, value) != 0) {
-                    corsaro_log(glob->logger,
+                    corsaro_log(logger,
                             "error while parsing config for Prefix->ASN tagging");
                     continue;
                 }
@@ -250,7 +251,7 @@ static int parse_tagprov_config(corsaro_tagger_global_t *glob,
             }
 
             if (provid == 0) {
-                corsaro_log(glob->logger,
+                corsaro_log(logger,
                         "unrecognised tag provider name in config file: %s",
                         (char *)key->data.scalar.value);
                 continue;
@@ -261,7 +262,8 @@ static int parse_tagprov_config(corsaro_tagger_global_t *glob,
 }
 
 
-static int add_uri(corsaro_tagger_global_t *glob, char *uri) {
+static int add_uri(corsaro_tagger_global_t *glob, char *uri,
+        corsaro_logger_t *logger) {
 
     if (glob->totaluris == glob->alloceduris) {
         glob->inputuris = (char **)realloc(glob->inputuris,
@@ -270,7 +272,7 @@ static int add_uri(corsaro_tagger_global_t *glob, char *uri) {
     }
 
     if (glob->inputuris == NULL) {
-        corsaro_log(glob->logger,
+        corsaro_log(logger,
                 "OOM while allocating space for input URIs.");
         return -1;
     }
@@ -280,19 +282,22 @@ static int add_uri(corsaro_tagger_global_t *glob, char *uri) {
     return 0;
 }
 
-static int parse_config(corsaro_tagger_global_t *glob,
-        yaml_document_t *doc, yaml_node_t *key, yaml_node_t *value) {
+static int parse_config(void *globalin,
+        yaml_document_t *doc, yaml_node_t *key, yaml_node_t *value,
+        corsaro_logger_t *logger) {
+
+    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)globalin;
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "inputuri")) {
-        if (add_uri(glob, (char *)value->data.scalar.value) == -1) {
+        if (add_uri(glob, (char *)value->data.scalar.value, logger) == -1) {
             return -1;
         }
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "promisc")) {
-        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
+        if (parse_onoff_option(logger, (char *)value->data.scalar.value,
                 &(glob->promisc), "promiscuous mode") < 0) {
             return -1;
         }
@@ -300,7 +305,7 @@ static int parse_config(corsaro_tagger_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "dohashing")) {
-        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
+        if (parse_onoff_option(logger, (char *)value->data.scalar.value,
                 &(glob->hasher_required), "hashing") < 0) {
             return -1;
         }
@@ -318,7 +323,7 @@ static int parse_config(corsaro_tagger_global_t *glob,
 
         int hbins = (int)strtol((char *)value->data.scalar.value, NULL, 10);
         if (hbins <= 0 || hbins >= 255) {
-            corsaro_log(glob->logger, "inappropriate number of outputhashbins specified in configuration file: %d, falling back to 4.", hbins);
+            corsaro_log(logger, "inappropriate number of outputhashbins specified in configuration file: %d, falling back to 4.", hbins);
             hbins = 4;
         }
 
@@ -330,7 +335,7 @@ static int parse_config(corsaro_tagger_global_t *glob,
 
         int rate = (int)strtol((char *)value->data.scalar.value, NULL, 10);
         if (rate <= 0) {
-            corsaro_log(glob->logger, "sample rate must be greater than zero, setting to 1.");
+            corsaro_log(logger, "sample rate must be greater than zero, setting to 1.");
             rate = 1;
         }
 
@@ -369,7 +374,7 @@ static int parse_config(corsaro_tagger_global_t *glob,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
             && !strcmp((char *)key->data.scalar.value, "tagproviders")) {
-        if (parse_tagprov_config(glob, doc, value) != 0) {
+        if (parse_tagprov_config(glob, doc, value, logger) != 0) {
             return -1;
         }
     }
@@ -426,69 +431,6 @@ static void log_configuration(corsaro_tagger_global_t *glob) {
 
 }
 
-static int parse_corsaro_tagger_config(corsaro_tagger_global_t *glob,
-        char *configfile,
-        int (*parsefunc)(corsaro_tagger_global_t *,
-                yaml_document_t *doc, yaml_node_t *,
-                yaml_node_t *)) {
-
-    yaml_parser_t parser;
-    yaml_document_t document;
-    yaml_node_t *root, *key, *value;
-    yaml_node_pair_t *pair;
-    FILE *in = NULL;
-    int ret = 0;
-
-    if ((in = fopen(configfile, "r")) == NULL) {
-        corsaro_log(glob->logger, "Failed to open config file: %s", strerror(errno));
-        return -1;
-    }
-
-    yaml_parser_initialize(&parser);
-    yaml_parser_set_input_file(&parser, in);
-
-    if (!yaml_parser_load(&parser, &document)) {
-        corsaro_log(glob->logger, "Malformed config file");
-        ret = -1;
-        goto yamlfail;
-    }
-
-    root = yaml_document_get_root_node(&document);
-    if (!root) {
-        corsaro_log(glob->logger, "Config file is empty!");
-        ret = -1;
-        goto endconfig;
-    }
-
-    if (root->type != YAML_MAPPING_NODE) {
-        corsaro_log(glob->logger, "Top level of config should be a map");
-        ret = -1;
-        goto endconfig;
-    }
-
-    for (pair = root->data.mapping.pairs.start;
-            pair < root->data.mapping.pairs.top; pair ++) {
-
-        key = yaml_document_get_node(&document, pair->key);
-        value = yaml_document_get_node(&document, pair->value);
-
-        ret = parsefunc(glob, &document, key, value);
-        if (ret <= 0) {
-            break;
-        }
-        ret = 0;
-    }
-
-endconfig:
-    yaml_document_delete(&document);
-    yaml_parser_delete(&parser);
-
-yamlfail:
-    fclose(in);
-    return ret;
-}
-
-
 corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
         int logmode) {
     corsaro_tagger_global_t *glob = NULL;
@@ -540,6 +482,13 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->ipmeta_queue_uri = NULL;
     glob->ipmeta_state = NULL;
 
+    /* Parse config file */
+    if (parse_corsaro_generic_config((void *)glob, filename, "corsarotagger",
+                glob->logmode, parse_config) == -1) {
+        corsaro_tagger_free_global(glob);
+        return NULL;
+    }
+
     /* Create global logger */
     if (glob->logmode == GLOBAL_LOGMODE_STDERR) {
         glob->logger = init_corsaro_logger("corsarotagger", "");
@@ -559,16 +508,6 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
 
     if (glob->logger == NULL && glob->logmode != GLOBAL_LOGMODE_DISABLED) {
         fprintf(stderr, "corsarotagger: failed to create logger. Exiting.\n");
-        corsaro_tagger_free_global(glob);
-        return NULL;
-    }
-
-    /* Parse config file */
-    if (parse_corsaro_tagger_config(glob, filename,
-                parse_config) == -1) {
-        corsaro_log(glob->logger,
-            "corsarotagger: errors while parsing configuration file %s.",
-            filename);
         corsaro_tagger_free_global(glob);
         return NULL;
     }
