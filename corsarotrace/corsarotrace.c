@@ -45,11 +45,6 @@
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_filtering.h"
 
-/* TODO: this is currently defined in both the tagger and here, so we
- * run the risk of them getting out of sync :/
- */
-#define TAGGER_MAX_MSGSIZE (10 * 1024 * 1024)
-
 typedef struct pcaphdr_t {
     uint32_t ts_sec;        /* Seconds portion of the timestamp */
     uint32_t ts_usec;       /* Microseconds portion of the timestamp */

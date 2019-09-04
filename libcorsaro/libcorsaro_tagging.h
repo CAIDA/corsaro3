@@ -35,6 +35,8 @@
 
 #include "libcorsaro_log.h"
 
+#define TAGGER_MAX_MSGSIZE (10 * 1024 * 1024)
+
 /* These are our "built-in" tags */
 /* TODO think about how we could support "custom" tags? */
 

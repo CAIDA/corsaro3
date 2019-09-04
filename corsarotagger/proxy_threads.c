@@ -164,7 +164,7 @@ void *start_zmq_output_thread(void *data) {
     }
 
     for (i = 0; i < glob->output_hashbins; i++) {
-        sendbufs[i] = malloc(10 * TAGGER_BUFFER_SIZE);
+        sendbufs[i] = malloc(TAGGER_MAX_MSGSIZE);
     }
 
     /* Set up our receiving sockets from each of the tagger threads and
@@ -260,7 +260,7 @@ void *start_zmq_output_thread(void *data) {
             nextseq[seqindex] ++;
 
             if (glob->sample_rate <= 10) {
-                if (10 * TAGGER_BUFFER_SIZE - sendbufsizes[seqindex] <
+                if (TAGGER_MAX_MSGSIZE - sendbufsizes[seqindex] <
                         sizeof(packet->hdr) + packet->hdr.pktlen) {
 
                     zmq_send(proxy_fwd, sendbufs[seqindex],
