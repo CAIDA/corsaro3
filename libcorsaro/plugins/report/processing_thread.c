@@ -501,11 +501,14 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
 }
 
 #define PROCESS_SINGLE_TAG(class, val, maxval) \
-    if ((ret = process_single_tag(class, val, maxval, track, logger, \
-            iplen)) < 0) { \
-        return -1; \
-    } else { \
-        newtags += ret; \
+    if (allowedmetricclasses == 0 || \
+            ((1UL << class) & allowedmetricclasses)) { \
+        if ((ret = process_single_tag(class, val, maxval, track, logger, \
+                iplen)) < 0) { \
+            return -1; \
+        } else { \
+            newtags += ret; \
+        } \
     }
 
 /** Insert all of the tags in a tag set into an IP update message that will
@@ -521,7 +524,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
  */
 static int process_tags(corsaro_report_tracker_state_t *track,
 		corsaro_packet_tags_t *tags, uint16_t iplen,
-        corsaro_logger_t *logger) {
+        corsaro_logger_t *logger, uint64_t allowedmetricclasses) {
 
     int i, ret;
     uint16_t newtags = 0;
@@ -632,7 +635,8 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
 
 	track->nextwrite += sizeof(corsaro_report_single_ip_header_t);
 
-	newtags = process_tags(track, tags, iplen, logger);
+	newtags = process_tags(track, tags, iplen, logger,
+            conf->allowedmetricclasses);
 
     /* Due to potential buffer reallocation, singleip may not point anywhere
      * valid anymore. */
