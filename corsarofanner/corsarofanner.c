@@ -313,6 +313,11 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+    if (glob->inputsockname == NULL) {
+        corsaro_log(glob->logger, "config file does not specify a suitable 'subqueuename' -- exiting");
+        return 1;
+    }
+
     tids = (corsaro_fanner_thread_t *)calloc(glob->threads,
             sizeof(corsaro_fanner_thread_t));
     if (tids == NULL) {
