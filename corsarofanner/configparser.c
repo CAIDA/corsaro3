@@ -166,6 +166,10 @@ void corsaro_fanner_free_global(corsaro_fanner_global_t *glob) {
         free(glob->logfilename);
     }
 
+    if (glob->statfilename) {
+        free(glob->statfilename);
+    }
+
     if (glob->inputsockname) {
         free(glob->inputsockname);
     }
