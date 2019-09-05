@@ -369,7 +369,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->monitorid = NULL;
     glob->logmode = logmode;
     glob->logfilename = NULL;
-    glob->threads = 2;
+    glob->threads = 4;
     glob->plugincount = 0;
     glob->inputhwm = 25;
 
@@ -439,7 +439,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     }
 
     if (glob->subqueuename == NULL) {
-        glob->subqueuename = strdup("ipc:///tmp/corsarotagger");
+        glob->subqueuename = strdup("ipc:///tmp/corsarofanner");
     }
 
     /* XXX slightly dirty hack to determine whether our packets are
