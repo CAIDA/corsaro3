@@ -252,7 +252,8 @@ static void log_configuration(corsaro_trace_global_t *glob) {
             glob->interval);
     corsaro_log(glob->logger, "rotating files every %u intervals",
             glob->rotatefreq);
-    corsaro_log(glob->logger, "subscribing to tagged packets on zeromq socket: %s",
+    corsaro_log(glob->logger, "subscribing to tagged packets on %s zeromq socket: %s",
+            (glob->subsource == CORSARO_TRACE_SOURCE_FANNER ? "fanner" : "tagger"),
             glob->subqueuename);
     corsaro_log(glob->logger, "connecting to corsarotagger control socket: %s",
             glob->control_uri);
@@ -376,6 +377,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->removespoofed = 0;
     glob->removerouted = 0;
 
+    glob->subsource = CORSARO_TRACE_SOURCE_FANNER;
     glob->logger = NULL;
     glob->subqueuename = NULL;
     glob->control_uri = NULL;
@@ -438,6 +440,16 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
     if (glob->subqueuename == NULL) {
         glob->subqueuename = strdup("ipc:///tmp/corsarotagger");
+    }
+
+    /* XXX slightly dirty hack to determine whether our packets are
+     *     coming from a fanner or directly from the tagger. Assumes
+     *     that we're not going to use tcp for fanner publishing sockets.
+     */
+    if (strncmp(glob->subqueuename, "ipc://", 6) == 0) {
+        glob->subsource = CORSARO_TRACE_SOURCE_FANNER;
+    } else {
+        glob->subsource = CORSARO_TRACE_SOURCE_TAGGER;
     }
 
     if (glob->control_uri == NULL) {

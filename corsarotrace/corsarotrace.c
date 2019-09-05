@@ -424,7 +424,11 @@ static void *start_worker(void *tdata) {
         goto endworker;
     }
 
-    snprintf(fullsubqueuename, 256, "%s%02d", tls->glob->subqueuename, tls->workerid);
+    if (tls->glob->subsource == CORSARO_TRACE_SOURCE_FANNER) {
+        snprintf(fullsubqueuename, 256, "%s%02d", tls->glob->subqueuename, tls->workerid);
+    } else {
+        snprintf(fullsubqueuename, 256, "%s", tls->glob->subqueuename);
+    }
 
     if (zmq_connect(tls->zmq_pullsock, fullsubqueuename) != 0) {
         corsaro_log(tls->glob->logger,
