@@ -177,41 +177,12 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
         corsaro_tagged_packet_header_t *taghdr, libtrace_t *deadtrace) {
 
     void **interval_data;
-    uint32_t tagid;
-    uint64_t thisseq;
-    int seqindex;
     uint16_t pktalloc = 0;
     void **final_result;
     uint16_t fbits = 0;
 
-    tagid = ntohl(taghdr->tagger_id);
-    thisseq = bswap_be_to_host64(taghdr->seqno);
 
-    if (taghdr->hashbin <= 'Z') {
-        seqindex = taghdr->hashbin - 'A';
-    } else {
-        seqindex = taghdr->hashbin - 'a';
-    }
-
-    if (tagid != tls->taggerid) {
-        /* tagger has restarted -- reset our sequence numbers */
-        tls->taggerid = tagid;
-        memset(tls->nextseq, 0, sizeof(uint64_t) * tls->glob->max_hashbins);
-    }
-
-    /* seqno of 0 is a reserved value -- we will never receive a seqno
-     * of 0, so we can use it to mark the next expected sequence number
-     * as "unknown".
-     */
-    if (tls->nextseq[seqindex] != 0 && thisseq != tls->nextseq[seqindex]) {
-        tls->dropcounter += (thisseq - tls->nextseq[seqindex]);
-        tls->dropinstances ++;
-    }
-    tls->nextseq[seqindex] = thisseq + 1;
-    if (tls->nextseq[seqindex] == 0) {
-        tls->nextseq[seqindex] = 1;
-    }
-
+    corsaro_update_tagged_loss_tracker(tls->tracker, taghdr);
     fast_construct_packet(deadtrace, tls->packet, taghdr,
             ((uint8_t *)taghdr) + sizeof(corsaro_tagged_packet_header_t),
             &pktalloc);
@@ -301,14 +272,13 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
             return -1;
         }
 
-        if (tls->dropcounter > 0) {
+        if (tls->tracker->lostpackets > 0) {
             corsaro_log(tls->glob->logger,
-                    "warning: worker thread %d has observed %u packets dropped by the tagger in the past interval (%u instances)",
+                    "warning: worker thread %d has observed %lu packets dropped by the tagger in the past interval (%u instances)",
                     tls->workerid,
-                    tls->dropcounter, tls->dropinstances);
+                    tls->tracker->lostpackets, tls->tracker->lossinstances);
         }
-        tls->dropcounter = 0;
-        tls->dropinstances = 0;
+        corsaro_reset_tagged_loss_tracker(tls->tracker);
 
         if (tls->glob->rotatefreq > 0 &&
                 taghdr->ts_sec >= tls->next_rotate) {
@@ -836,11 +806,8 @@ int main(int argc, char *argv[]) {
     for (i = 0; i < glob->threads; i++) {
         workers[i].glob = glob;
         workers[i].workerid = i;
-        workers[i].taggerid = 0;
-        /* XXX wasteful, but easier than having to use a hash map */
-        workers[i].nextseq = calloc(glob->max_hashbins, sizeof(uint64_t));
-        workers[i].dropcounter = 0;
-        workers[i].dropinstances = 0;
+        workers[i].tracker = corsaro_create_tagged_loss_tracker(
+                glob->max_hashbins);
     }
 
     merger.glob = glob;
@@ -875,7 +842,7 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < glob->threads; i++) {
         pthread_join(workers[i].threadid, NULL);
-        free(workers[i].nextseq);
+        corsaro_free_tagged_loss_tracker(workers[i].tracker);
     }
 
     pthread_join(merger.threadid, NULL);
