@@ -28,9 +28,88 @@
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <errno.h>
 
 #include "libcorsaro_common.h"
 #include "libcorsaro_log.h"
+
+int parse_corsaro_generic_config(void *glob, char *filename, char *progname,
+		int logmode, 
+		int (*parsefunc)(void *, yaml_document_t *doc, yaml_node_t *,
+                yaml_node_t *, corsaro_logger_t *logger)) {
+
+	corsaro_logger_t *logger;
+    yaml_parser_t parser;
+    yaml_document_t document;
+    yaml_node_t *root, *key, *value;
+    yaml_node_pair_t *pair;
+    FILE *in = NULL;
+    int ret = 0;
+
+	/* create a temporary logger for config parsing errors */
+	if (logmode == GLOBAL_LOGMODE_SYSLOG) {
+		logger = init_corsaro_logger(progname, NULL);
+	} else {
+		/* use stderr because we don't know the filename to log to yet */
+		logger = init_corsaro_logger(progname, "");
+	}
+
+	if (logger == NULL) {
+		fprintf(stderr, "%s: failed to create a logger, exiting...\n",
+                progname);
+		return -2;
+	}
+
+
+    if ((in = fopen(filename, "r")) == NULL) {
+        corsaro_log(logger, "Failed to open config file: %s", strerror(errno));
+        return -1;
+    }
+
+    yaml_parser_initialize(&parser);
+    yaml_parser_set_input_file(&parser, in);
+
+    if (!yaml_parser_load(&parser, &document)) {
+        corsaro_log(logger, "Malformed config file");
+        ret = -1;
+        goto yamlfail;
+    }
+
+    root = yaml_document_get_root_node(&document);
+    if (!root) {
+        corsaro_log(logger, "Config file is empty!");
+        ret = -1;
+        goto endconfig;
+    }
+
+    if (root->type != YAML_MAPPING_NODE) {
+        corsaro_log(logger, "Top level of config should be a map");
+        ret = -1;
+        goto endconfig;
+    }
+
+    for (pair = root->data.mapping.pairs.start;
+            pair < root->data.mapping.pairs.top; pair ++) {
+
+        key = yaml_document_get_node(&document, pair->key);
+        value = yaml_document_get_node(&document, pair->value);
+
+        ret = parsefunc(glob, &document, key, value, logger);
+        if (ret <= 0) {
+            break;
+        }
+        ret = 0;
+    }
+
+endconfig:
+    yaml_document_delete(&document);
+	yaml_parser_delete(&parser);
+
+yamlfail:
+	destroy_corsaro_logger(logger);
+	fclose(in);
+	return ret;
+}
 
 int parse_onoff_option(corsaro_logger_t *logger, char *value,
         uint8_t *opt, const char *optstr) {

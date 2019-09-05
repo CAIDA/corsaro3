@@ -46,6 +46,11 @@ enum {
     CORSARO_TRACE_MSG_PACKET = 3,
 };
 
+enum {
+    CORSARO_TRACE_SOURCE_FANNER,
+    CORSARO_TRACE_SOURCE_TAGGER
+};
+
 typedef struct corsaro_worker_msg {
     uint8_t type;
     corsaro_tagged_packet_header_t header;
@@ -84,6 +89,7 @@ typedef struct corsaro_trace_glob {
     uint32_t interval;
     uint32_t rotatefreq;
 
+    uint8_t subsource;
     uint8_t logmode;
     uint8_t threads;
     uint16_t inputhwm;
@@ -115,11 +121,7 @@ struct corsaro_trace_worker {
     uint32_t last_ts;
     uint8_t stopped;
 
-    uint32_t taggerid;
-    uint64_t *nextseq;
-    uint64_t dropcounter;
-    uint64_t dropinstances;
-
+    corsaro_tagged_loss_tracker_t *tracker;
     void *zmq_pullsock;
     void *zmq_pushsock;
 

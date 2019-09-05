@@ -31,6 +31,7 @@
 
 #include <libipmeta.h>
 #include "libcorsaro_filtering.h"
+#include "libcorsaro_common.h"
 #include "libcorsaro_tagging.h"
 #include "libcorsaro_log.h"
 
@@ -625,4 +626,89 @@ int corsaro_tag_ippayload(corsaro_packet_tagger_t *tagger,
     return _corsaro_tag_ip_packet(tagger, tags, ip, rem);
 }
 
+corsaro_tagged_loss_tracker_t *corsaro_create_tagged_loss_tracker(
+        uint8_t maxhashbins) {
+
+    corsaro_tagged_loss_tracker_t *tracker;
+
+    tracker = calloc(1, sizeof(corsaro_tagged_loss_tracker_t));
+    if (tracker == NULL) {
+        return NULL;
+    }
+
+    tracker->max_hashbins = maxhashbins;
+    tracker->nextseq = calloc(maxhashbins, sizeof(uint64_t));
+
+    if (!tracker->nextseq) {
+        free(tracker);
+        return NULL;
+    }
+    return tracker;
+}
+
+void corsaro_free_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker) {
+
+    if (!tracker) {
+        return;
+    }
+
+    if (tracker->nextseq) {
+        free(tracker->nextseq);
+    }
+    free(tracker);
+}
+
+void corsaro_reset_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker)
+{
+    tracker->lostpackets = 0;
+    tracker->lossinstances = 0;
+    tracker->bytesreceived = 0;
+    tracker->packetsreceived = 0;
+}
+
+int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
+        corsaro_tagged_packet_header_t *taghdr) {
+
+    int seqindex;
+    uint64_t thisseq;
+    uint32_t tagid;
+
+    if (tracker == NULL || taghdr == NULL) {
+        return -1;
+    }
+
+	tagid = ntohl(taghdr->tagger_id);
+	thisseq = bswap_be_to_host64(taghdr->seqno);
+
+	if (taghdr->hashbin <= 'Z') {
+		seqindex = taghdr->hashbin - 'A';
+	} else {
+		seqindex = taghdr->hashbin - 'a';
+	}
+
+	if (tagid != tracker->taggerid) {
+		/* tagger has restarted -- reset our sequence numbers */
+		tracker->taggerid = tagid;
+		memset(tracker->nextseq, 0, sizeof(uint64_t) * tracker->max_hashbins);
+	}
+
+	/* seqno of 0 is a reserved value -- we will never receive a seqno
+	 * of 0, so we can use it to mark the next expected sequence number
+	 * as "unknown".
+	 */
+	if (tracker->nextseq[seqindex] != 0 &&
+			thisseq != tracker->nextseq[seqindex]) {
+		tracker->lostpackets += (thisseq - tracker->nextseq[seqindex]);
+		tracker->lossinstances ++;
+	}
+    tracker->packetsreceived ++;
+    tracker->bytesreceived += (taghdr->pktlen);
+
+	tracker->nextseq[seqindex] = thisseq + 1;
+	if (tracker->nextseq[seqindex] == 0) {
+		tracker->nextseq[seqindex] = 1;
+	}
+
+	return 0;
+}
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

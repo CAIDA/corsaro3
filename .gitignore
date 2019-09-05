@@ -2,6 +2,7 @@
 *~
 *.#*
 .DS_Store
+*.swp
 
 # Compiled Object files
 *.slo
@@ -21,6 +22,7 @@
 corsarotagger/corsarotagger
 corsarotrace/corsarotrace
 corsarowdcap/corsarowdcap
+corsarofanner/corsarofanner
 
 # Auto-generated files
 corsaro-*.tar.gz

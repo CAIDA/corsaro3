@@ -35,6 +35,8 @@
 
 #include "libcorsaro_log.h"
 
+#define TAGGER_MAX_MSGSIZE (10 * 1024 * 1024)
+
 /* These are our "built-in" tags */
 /* TODO think about how we could support "custom" tags? */
 
@@ -257,6 +259,16 @@ typedef struct prefix2asn_options {
     uint8_t enabled;
 } pfx2asn_opts_t;
 
+typedef struct corsaro_tagged_loss_tracker {
+    uint64_t *nextseq;
+    uint8_t max_hashbins;
+    uint32_t taggerid;
+
+    uint64_t packetsreceived;
+    uint64_t bytesreceived;
+    uint64_t lostpackets;
+    uint32_t lossinstances;
+} corsaro_tagged_loss_tracker_t;
 
 /** Set of configuration options for the libipmeta maxmind geo-location
   * provider. */
@@ -378,6 +390,17 @@ int corsaro_tag_packet(corsaro_packet_tagger_t *tagger,
  */
 int corsaro_tag_ippayload(corsaro_packet_tagger_t *tagger,
         corsaro_packet_tags_t *tags, libtrace_ip_t *ip, uint32_t rem);
+
+
+corsaro_tagged_loss_tracker_t *corsaro_create_tagged_loss_tracker(
+        uint8_t maxhashbins);
+
+int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
+        corsaro_tagged_packet_header_t *taghdr);
+
+void corsaro_reset_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker);
+void corsaro_free_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker);
+
 
 #endif
 

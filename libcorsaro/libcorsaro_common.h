@@ -29,7 +29,13 @@
 #define LIBCORSARO_COMMON_H_
 
 #include <inttypes.h>
+#include <yaml.h>
 #include "libcorsaro_log.h"
+
+int parse_corsaro_generic_config(void *glob, char *filename, char *progname,
+        int logmode,
+        int (*parsefunc)(void *, yaml_document_t *doc, yaml_node_t *,
+            yaml_node_t *, corsaro_logger_t *logger));
 
 int parse_onoff_option(corsaro_logger_t *logger, char *value,
         uint8_t *opt, const char *optstr);
