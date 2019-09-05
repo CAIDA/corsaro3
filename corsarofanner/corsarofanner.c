@@ -57,6 +57,49 @@ static void usage(char *prog) {
     printf("\tterminal\n\tfile\n\tsyslog\n\tdisabled\n");
 }
 
+static inline void check_stat_timer(corsaro_fanner_global_t *glob,
+        int threadid, uint32_t *nextstattime,
+        corsaro_tagged_loss_tracker_t *tracker) {
+
+    struct timeval tv;
+    uint32_t statfreq = 60;     /* TODO make configurable? */
+    FILE *f = NULL;
+    char sfname[1024];
+
+    if (glob->statfilename == NULL) {
+        return;
+    }
+
+    gettimeofday(&tv, NULL);
+
+    if (*nextstattime == 0) {
+        *nextstattime = tv.tv_sec - (tv.tv_sec % statfreq) + statfreq;
+    }
+
+    if (tv.tv_sec >= *nextstattime) {
+        snprintf(sfname, 1024, "%s-t%02d", glob->statfilename, threadid);
+        f = fopen(sfname, "w");
+        if (!f) {
+            corsaro_log(glob->logger, "unable to open stats file %s: %s",
+                    sfname, strerror(errno));
+        }
+    }
+
+    while (tv.tv_sec >= *nextstattime) {
+        if (f) {
+            fprintf(f, "time=%u bytesreceived=%lu lostpackets=%lu lossinstances=%u\n",
+                    (*nextstattime), tracker->bytesreceived,
+                    tracker->lostpackets, tracker->lossinstances);
+        }
+        *nextstattime += statfreq;
+        corsaro_reset_tagged_loss_tracker(tracker);
+    }
+
+    if (f) {
+        fclose(f);
+    }
+}
+
 static void *run_fanner(void *globalin) {
 
     corsaro_fanner_thread_t *local = (corsaro_fanner_thread_t *)globalin;
@@ -65,8 +108,10 @@ static void *run_fanner(void *globalin) {
 	int inhwm = glob->inputhwm;
 	int outhwm = glob->outputhwm;
 	uint8_t *recvbuf = NULL;
-	int r, i, zero = 0;
+	int processed, r, i, eagaincount, zero = 0;
     char fulloutsockname[256];
+    uint32_t nextstattime = 0;
+    corsaro_tagged_loss_tracker_t *losstracker = NULL;
 
 	insock = zmq_socket(glob->zmq_ctxt, ZMQ_SUB);
 	outsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUB);
@@ -125,11 +170,20 @@ static void *run_fanner(void *globalin) {
         goto endfanner;
     }
 
+    losstracker = corsaro_create_tagged_loss_tracker(52);
+    eagaincount = 0;
 	while (!corsaro_halted) {
 		r = zmq_recv(insock, recvbuf, TAGGER_MAX_MSGSIZE, ZMQ_DONTWAIT);
 		if (r < 0) {
 			if (errno == EAGAIN) {
 				usleep(10);
+                eagaincount ++;
+
+                if (eagaincount >= 50000) {
+                    check_stat_timer(glob, local->id, &nextstattime,
+                            losstracker);
+                    eagaincount = 0;
+                }
 				continue;
 			}
 			corsaro_log(glob->logger,
@@ -143,6 +197,19 @@ static void *run_fanner(void *globalin) {
 			goto endfanner;
 		}
 
+        check_stat_timer(glob, local->id, &nextstattime, losstracker);
+
+        processed = 0;
+        while (processed < r) {
+            corsaro_tagged_packet_header_t *hdr;
+
+            hdr = (corsaro_tagged_packet_header_t *)(recvbuf + processed);
+
+            corsaro_update_tagged_loss_tracker(losstracker, hdr);
+            processed += hdr->pktlen + sizeof(corsaro_tagged_packet_header_t);
+        }
+
+        eagaincount = 0;
 		/* Republish the same packet(s) to the output queue */
 		if (zmq_send(outsock, recvbuf, r, 0) != r) {
         }
@@ -158,6 +225,9 @@ endfanner:
 	if (recvbuf) {
 		free(recvbuf);
 	}
+    if (losstracker) {
+        corsaro_free_tagged_loss_tracker(losstracker);
+    }
     pthread_exit(NULL);
 }
 

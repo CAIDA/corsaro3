@@ -67,6 +67,11 @@ static int parse_fanner_config(void *globalin, yaml_document_t *doc,
         glob->logfilename = strdup((char *)value->data.scalar.value);
     }
 
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "statfilename")) {
+        glob->statfilename = strdup((char *)value->data.scalar.value);
+    }
+
     return 1;
 }
 
@@ -82,6 +87,12 @@ static void log_configuration(corsaro_fanner_global_t *glob) {
     corsaro_log(glob->logger, "using %u threads to consume tagged packets",
             glob->threads);
 
+    if (glob->statfilename) {
+        corsaro_log(glob->logger, "dumping internal statistics to %s",
+                glob->statfilename);
+    } else {
+        corsaro_log(glob->logger, "NOT dumping internal statistics to a file");
+    }
 }
 
 corsaro_fanner_global_t *corsaro_fanner_init_global(char *filename, int logmode)
@@ -105,6 +116,7 @@ corsaro_fanner_global_t *corsaro_fanner_init_global(char *filename, int logmode)
     glob->zmq_ctxt = zmq_ctx_new();
     glob->inputsockname = NULL;
     glob->outsockname = NULL;
+    glob->statfilename = NULL;
 
     if (parse_corsaro_generic_config((void *)glob, filename, "corsarofanner",
                 glob->logmode, parse_fanner_config) < 0) {

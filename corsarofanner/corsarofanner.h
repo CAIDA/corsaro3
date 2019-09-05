@@ -29,11 +29,13 @@
 #define CORSAROFANNER_H_
 
 #include "libcorsaro_log.h"
+#include "libcorsaro_tagging.h"
 
 typedef struct corsaro_fanner_global {
     corsaro_logger_t *logger;
     uint8_t logmode;
     char *logfilename;
+    char *statfilename;
     uint16_t inputhwm;
     uint16_t outputhwm;
     void *zmq_ctxt;
