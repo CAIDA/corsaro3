@@ -27,12 +27,15 @@ Standard installation instructions apply.
 
 Included Tools
 ==============
-There are three tools included with Corsaro 3:
+There are four tools included with Corsaro 3:
  * corsarotagger -- captures packets from a libtrace source and performs
                     some preliminary processing (e.g. geolocation).
- * corsarotrace -- receives tagged packets from corsarotagger and runs one
-                   or more of the built-in analysis plugins against that
-	           data stream.
+ * corsarofanner -- receives tagged packets from corsarotagger and
+                    republishes them on a local socket for consumption
+                    by multiple corsarotrace (or other analysis) processes.
+ * corsarotrace -- receives tagged packets from either corsarofanner or
+                   corsarotagger and runs one or more of the built-in analysis
+                   plugins against that data stream.
  * corsarowdcap -- captures packets from a libtrace source and writes them
                    to disk as a set of trace files.
                 
@@ -273,8 +276,8 @@ To enable Maxmind geo-location tagging, add the following entry to your
 
 
 **NetAcq-Edge:** looks up the source IP address in the NetAcuity Edge
-geo-location dataset and tags the packet with the country and continent for
-that IP address. 
+geo-location dataset and tags the packet with the country, continent and
+polygon for that IP address. 
   
 To enable NetAcuity geo-location tagging, add the following entry to your
 'tagproviders:' configuration sequence:
@@ -282,10 +285,77 @@ To enable NetAcuity geo-location tagging, add the following entry to your
   - netacq-edge:
      blocksfile: <location of the Blocks CSV file>
      locationsfile: <location of the Locations CSV file>
+     countryfile: <location of the Country Codes CSV file>
+     polygonmapfile: <location of the Polygons CSV file>
+     polygontablefile: <location of a processed Polygons CSV file>
+                       (may be specified multiple times)
 
-Note that we do not support tagging with the NetAcq region or polygon just
-yet.
 
+Running corsarofanner
+=====================
+
+To use corsarofanner, write a suitable config file (see below for more
+details) and run the following command:
+
+  ./corsarofanner -c <config filename> -l <logmode>
+
+Use corsarofanner to consume a feed of tagged packets that are being
+published by corsarotagger over a TCP socket and re-publish those packets
+on a local IPC socket on the host running the fanner. This allows you to
+run multiple corsarotrace instances on the same host without each instance
+consuming network bandwidth to receive a separate feed from a remote
+corsarotagger.
+
+The full set of supported global config options is:
+
+  threads               The number of threads to use for consuming and
+                        re-publishing tagged packets. Clients must make sure
+                        that they are consuming from the queues created by
+                        all of the threads (e.g. the number of processing
+                        threads for corsarotrace instances MUST match this
+                        number to avoid missing packets). Defaults to 4.
+
+  logfilename           If the log mode is set to 'file', the log messages
+                        will be written to the file name provided by this
+                        option. This option must be set if the log mode
+                        is set to 'file'.
+
+  statfilename          If specified, each thread will write basic statistics
+                        about received and missing packets to a file using
+                        the given value as the base filename, followed by
+                        "-t<thread id>".
+
+  subqueuename		The name of the zeroMQ queue where the corresponding
+                        corsarotagger is writing tagged packets to.
+			This MUST match the 'pubqueuename' option being used
+			by the corsarotagge instance.
+                        If not specified, corsarofanner will immediately halt.
+
+  pubqueuename          The base name of the zeroMQ queue to re-publish any
+                        received packets to. This queue should be an "ipc://"
+                        queue and each thread will extend the base name to
+                        include its thread ID.
+                        Defaults to "ipc://tmp/corsarofanner".
+
+  inputhwm              The high-water mark for the subscription queue which
+                        this corsarofanner instance is receiving tagged packets
+                        from. This is approximately the number of received
+                        packets that each processing thread can buffer
+                        internally before having to stop reading from the
+                        tagger socket. Larger HWM values will consume more
+                        local memory whenever the corsarofanner instance is
+                        unable to keep up with the incoming packet rate.
+                        Default is 25.
+
+  outputhwm             The high-water mark for the publishing queue which
+                        this corsarofanner instance is emitting tagged packets
+                        to. This is approximately the number of received
+                        packets that each processing thread can buffer
+                        internally before having to stop writing to the
+                        publishing socket. Larger HWM values will consume more
+                        local memory whenever the downstream clients are
+                        unable to keep up with the incoming packet rate.
+                        Default is 25.
 
 Running corsarotrace
 ====================
@@ -296,9 +366,10 @@ details) and run the following command:
   ./corsarotrace -c <config filename> -l <logmode>
 
 Unlike the other tools, corsarotrace does not read packets directly from the
-capture source -- instead, it expects to received tagged packets directly from
-corsarotagger. Therefore, corsarotrace will require a running instance of
-corsarotagger to be able to function correctly.
+capture source -- instead, it expects to received tagged packets either
+directly from corsarotagger or from a corsarofanner local socket. Therefore,
+corsarotrace will require a running instance of corsarotagger to be able to
+function correctly.
 
 The full set of supported global config options is:
 
@@ -313,22 +384,29 @@ The full set of supported global config options is:
                         is set to 'file'.
 
   subqueuename		The name of the zeroMQ queue where the corresponding
-                        corsarotagger instance is writing tagged packets to.
+                        corsarotagger or corsarofanner instance is writing
+                        tagged packets to.
 			This MUST match the 'pubqueuename' option being used
-			by the corsarotagger instance. Defaults to
-			'ipc:///tmp/corsarotagger'.
+			by the corsarotagger or corsarofanner instance.
+                        Defaults to 'ipc:///tmp/corsarotagger'.
 
   controlsocketname     The name of the zeroMQ queue to connect to when
                         sending meta-data requests to the corsarotagger
                         instance. This MUST match the 'controlsocketname'
                         option being used by the corsarotagger instance.
+                        A control socket MUST connect to a corsarotagger
+                        instance -- corsarofanner does not have a control
+                        socket to connect to.
                         Defaults to 'ipc:///tmp/corsarotagger-control'.
 
   monitorid             Set the monitor name that will appear in output file
                         names if the %N modifier is present in the template.
 
   threads               Set the number of threads to be created for packet
-                        processing. Defaults to 2.
+                        processing. Defaults to 4. If connecting to a
+                        corsarofanner instance, ensure that this matches the
+                        number of threads being used by the fanner, otherwise
+                        you will miss packets.
 
   interval              Specifies the distribution interval length in seconds.
                         Defaults to 60.
