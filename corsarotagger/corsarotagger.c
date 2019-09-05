@@ -249,12 +249,32 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
         stats = trace_create_statistics();
         trace_get_thread_statistics(trace, t, stats);
 
+        if (glob->statfilename) {
+            FILE *f = NULL;
+            char sfname[1024];
+
+            snprintf(sfname, 1024, "%s-t%02d", glob->statfilename,
+                    trace_get_perpkt_thread_id(t));
+            f = fopen(sfname, "w");
+            if (!f) {
+                corsaro_log(glob->logger, "unable to open statistic file %s for writing: %s",
+                        sfname, strerror(errno));
+            } else {
+                fprintf(f, "time=%lu accepted=%lu dropped=%lu\n",
+                        (tick >> 32), stats->accepted - tls->lastaccepted,
+                        stats->missing - tls->lastmisscount);
+                fclose(f);
+            }
+        }
+
         if (stats->missing > tls->lastmisscount) {
-            corsaro_log(glob->logger,
-                    "thread %d dropped %lu packets in last minute (accepted %lu)",
-                    trace_get_perpkt_thread_id(t),
-                    stats->missing - tls->lastmisscount,
-                    stats->accepted - tls->lastaccepted);
+            if (!glob->statfilename) {
+                corsaro_log(glob->logger,
+                        "thread %d dropped %lu packets in last minute (accepted %lu)",
+                        trace_get_perpkt_thread_id(t),
+                        stats->missing - tls->lastmisscount,
+                        stats->accepted - tls->lastaccepted);
+            }
             tls->lastmisscount = stats->missing;
         }
         tls->lastaccepted = stats->accepted;

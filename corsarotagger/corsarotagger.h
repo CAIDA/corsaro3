@@ -59,8 +59,11 @@ typedef struct corsaro_tagger_glob {
     /** The logger instance to use when logging error messages */
     corsaro_logger_t *logger;
 
-    /* The name of the file to use for logging (if logging to a file */
+    /* The name of the file to use for logging (if logging to a file) */
     char *logfilename;
+
+    /* The base name of the files to use for writing loss statistics  */
+    char *statfilename;
 
     /** An array of URI strings to read packets from */
     char **inputuris;
