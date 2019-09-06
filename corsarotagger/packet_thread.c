@@ -53,6 +53,7 @@ void init_packet_thread_data(corsaro_packet_local_t *tls,
     tls->lastmisscount = 0;
     tls->lastaccepted = 0;
     tls->tickcounter = 0;
+    tls->laststat = 0;
 
     tls->buf = create_tls_buffer();
 

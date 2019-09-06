@@ -348,6 +348,16 @@ static int parse_config(void *globalin,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "logfilename")) {
+        glob->logfilename = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "statfilename")) {
+        glob->statfilename = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "pubqueuename")) {
         glob->pubqueuename = strdup((char *)value->data.scalar.value);
     }
@@ -386,6 +396,12 @@ static void log_configuration(corsaro_tagger_global_t *glob) {
     corsaro_log(glob->logger, "using %d processing threads", glob->pkt_threads);
     corsaro_log(glob->logger, "using %d tagging threads", glob->tag_threads);
     corsaro_log(glob->logger, "output queue has a HWM of %u", glob->outputhwm);
+
+    if (glob->statfilename) {
+        corsaro_log(glob->logger, "writing loss statistics to files beginning with %s", glob->statfilename);
+    } else {
+        corsaro_log(glob->logger, "NOT writing loss statistics to a file");
+    }
 
     if (glob->consterfframing >= 0) {
         corsaro_log(glob->logger, "using constant ERF framing size of %d",
@@ -454,6 +470,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->promisc = 0;
     glob->logmode = logmode;
     glob->logfilename = NULL;
+    glob->statfilename = NULL;
     glob->pkt_threads = 2;
     glob->tag_threads = 2;
 
@@ -561,6 +578,10 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
 
     if (glob->logfilename) {
         free(glob->logfilename);
+    }
+
+    if (glob->statfilename) {
+        free(glob->statfilename);
     }
 
     if (glob->trace) {

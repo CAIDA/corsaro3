@@ -87,8 +87,9 @@ static inline void check_stat_timer(corsaro_fanner_global_t *glob,
 
     while (tv.tv_sec >= *nextstattime) {
         if (f) {
-            fprintf(f, "time=%u bytesreceived=%lu lostpackets=%lu lossinstances=%u\n",
-                    (*nextstattime), tracker->bytesreceived,
+            fprintf(f, "time=%u packetsreceived=%lu bytesreceived=%lu lostpackets=%lu lossinstances=%u\n",
+                    (*nextstattime), tracker->packetsreceived,
+                    tracker->bytesreceived,
                     tracker->lostpackets, tracker->lossinstances);
         }
         *nextstattime += statfreq;
