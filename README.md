@@ -523,11 +523,15 @@ flow using an 8-tuple of the following packet fields:
  * IP protocol
  * IP length
 
-The flowtuple plugin only has the one option:
+The flowtuple plugin can be further configured using the following options:
 
   sorttuples            If 'yes', the flowtuples are output in sorted order.
                         The sorting is based on the same sorting method as in
                         previous Corsaro versions. Defaults to 'yes'.
+
+  mergethreads          Specifies the number of threads to reserve for
+                        merging flowtuple results into a single coherent
+                        file. Defaults to 2.
 
 Flowtuple output is written to an avro file, which is named according to
 the 'outtemplate' option specified at the global config level.
