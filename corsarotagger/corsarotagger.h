@@ -247,6 +247,7 @@ struct corsaro_packet_local {
     void *pubsock;
     corsaro_tagger_buffer_t *buf;
     uint16_t tickcounter;
+    uint32_t laststat;
 };
 
 /** Initialises the global state for a corsarotagger instance, based on
