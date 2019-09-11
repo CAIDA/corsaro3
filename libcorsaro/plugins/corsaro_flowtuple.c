@@ -902,7 +902,12 @@ static void *start_ftmerge_worker(void *tdata) {
     int i;
 
     while (1) {
-        if (zmq_recv(m->inqueue, &(msg), sizeof(msg), 0) < 0) {
+        if (zmq_recv(m->inqueue, &(msg), sizeof(msg), ZMQ_DONTWAIT) < 0) {
+
+            if (errno == EAGAIN) {
+                usleep(1000000);
+                continue;
+            }
             corsaro_log(m->logger, "error receiving message on flowtuple merger thread socket: %s",
                     strerror(errno));
             break;
