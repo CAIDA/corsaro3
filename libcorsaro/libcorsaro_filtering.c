@@ -699,11 +699,9 @@ static int _apply_spoofing_filter(corsaro_logger_t *logger,
         return 1;
     }
 
-/*
     if (_apply_ttl200_filter(logger, fparams->ip) > 0) {
         return 1;
     }
-*/
 
     if (_apply_fragment_filter(logger, fparams->ip) > 0) {
         return 1;
