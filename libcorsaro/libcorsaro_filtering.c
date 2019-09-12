@@ -1086,11 +1086,19 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
             case CORSARO_FILTERID_ROUTED:
                 torun[i].result = _apply_routable_filter(logger, fparams.ip);
                 break;
+            case CORSARO_FILTERID_LARGE_SCALE_SCAN:
+                torun[i].result = _apply_large_scale_scan_filter(logger,
+                        &fparams);
+                break;
             case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
                 torun[i].result = _apply_abnormal_protocol_filter(logger, &fparams);
                 break;
             case CORSARO_FILTERID_TTL_200:
                 torun[i].result =_apply_ttl200_filter(logger, fparams.ip);
+                break;
+            case CORSARO_FILTERID_NO_TCP_OPTIONS:
+                torun[i].result = _apply_no_tcp_options_filter(logger,
+                        fparams.tcp);
                 break;
             case CORSARO_FILTERID_FRAGMENT:
                 torun[i].result =_apply_fragment_filter(logger, fparams.ip);
