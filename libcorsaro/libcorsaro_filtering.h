@@ -71,6 +71,9 @@ typedef enum {
      */
     CORSARO_FILTERID_ROUTED,
 
+    /** Matches if the packet looks like one of the various large-scale
+     *  scans that we have identified.
+     */
     CORSARO_FILTERID_LARGE_SCALE_SCAN,
 
     /** Matches packets that are using a protocol other than TCP, UDP or
@@ -82,6 +85,7 @@ typedef enum {
     /** Matches if the packet has a TTL >= 200 */
     CORSARO_FILTERID_TTL_200,
 
+    /** Matches if the packet is a TCP SYN with no options */
     CORSARO_FILTERID_NO_TCP_OPTIONS,
 
     /** Matches if the packet is an IP fragment */

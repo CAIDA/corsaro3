@@ -434,6 +434,10 @@ The full set of supported global config options is:
 			routable address (i.e. not an RFC5735 address).
 			Defaults to 'no'.
 
+  removenotscan         If set to 'yes', only include packets that the
+                        corsarotagger has marked as likely to be from a
+                        known large-scale scanning system. Defaults to 'no'.
+
   inputhwm              The high-water mark for the subscription queue which
                         this corsarotrace instance is receiving tagged packets
                         from. This is approximately the number of received
