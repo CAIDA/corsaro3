@@ -136,6 +136,9 @@ typedef struct corsaro_metric_ip_hash_t {
     /** Unique destination IPs associated with this metric */
     Pvoid_t destips;
 
+    /** Unique source ASNs associated with this metric */
+    Pvoid_t srcasns;
+
     /** Number of packets that were tagged with this metric */
     uint32_t packets;
 
@@ -297,6 +300,7 @@ typedef struct corsaro_report_msg_tag {
 
     /** Number of packets sent by this IP address matching this tag */
     uint32_t packets;
+
 } PACKED corsaro_report_msg_tag_t;
 
 
@@ -309,6 +313,9 @@ typedef struct corsaro_report_single_ip {
 
     /** The IP address itself */
     uint32_t ipaddr;
+
+    /** The ASN for this IP (if it is a source IP) */
+    uint32_t sourceasn;
 
     /** Flag indicating whether the IP was observed as a source IP */
     uint8_t issrc;
@@ -375,6 +382,11 @@ typedef struct corsaro_report_result {
     /** Total number of unique destination IPs that received packets tagged
      *  with this metric */
     uint32_t uniq_dst_ips;
+
+    /** Set of unique ASNs that sent packets tagged with this metric. */
+    Pvoid_t uniq_src_asns;
+
+    uint32_t uniq_src_asn_count;
 
     /** The timestamp of the interval that this tally applies to */
     uint32_t attimestamp;

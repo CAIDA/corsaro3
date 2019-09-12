@@ -645,6 +645,11 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
 	singleip->ipaddr = addr;
 	singleip->issrc = issrc;
     singleip->numtags = newtags;
+    if (issrc) {
+        singleip->sourceasn = tags->prefixasn;
+    } else {
+        singleip->sourceasn = 0;
+    }
 
     track->header->tagcount += newtags;
 
