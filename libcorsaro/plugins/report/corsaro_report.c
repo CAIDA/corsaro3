@@ -169,6 +169,11 @@ static void parse_metric_limits(corsaro_report_config_t *conf,
             conf->allowedmetricclasses |=
                      (1UL << CORSARO_METRIC_CLASS_PREFIX_ASN);
         }
+
+        if (strcasecmp(name, "filter") == 0) {
+            conf->allowedmetricclasses |=
+                    (1UL << CORSARO_METRIC_CLASS_FILTER_CRITERIA);
+        }
     }
 }
 
@@ -384,6 +389,11 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         if (conf->allowedmetricclasses & (1 << CORSARO_METRIC_CLASS_PREFIX_ASN))
         {
             corsaro_log(p->logger, "report plugin: tracking pfx2asn metrics");
+        }
+        if (conf->allowedmetricclasses &
+                (1 << CORSARO_METRIC_CLASS_FILTER_CRITERIA))
+        {
+            corsaro_log(p->logger, "report plugin: tracking filtering metrics");
         }
     }
 

@@ -29,6 +29,7 @@
 #include "report_internal.h"
 #include "libcorsaro_avro.h"
 #include "libcorsaro_libtimeseries.h"
+#include "libcorsaro_filtering.h"
 
 #define AVRO_CONVERSION_FAILURE -1
 #define AVRO_WRITE_FAILURE -2
@@ -168,6 +169,52 @@ const char *alpha2_countries[] = {
     "A1", "A2", "O1", "AP", "EU",
 };
 
+static inline const char * get_filter_stringname(int fbit) {
+
+    switch(fbit) {
+        case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
+            return "abnormal-protocol";
+        case CORSARO_FILTERID_TTL_200:
+            return "ttl-200";
+        case CORSARO_FILTERID_FRAGMENT:
+            return "fragmented-v2";
+        case CORSARO_FILTERID_LAST_SRC_IP_0:
+            return "last-byte-src-0";
+        case CORSARO_FILTERID_LAST_SRC_IP_255:
+            return "last-byte-src-255";
+        case CORSARO_FILTERID_SAME_SRC_DEST_IP:
+            return "same-src-dst";
+        case CORSARO_FILTERID_UDP_PORT_0:
+            return "udp-port-0";
+        case CORSARO_FILTERID_TCP_PORT_0:
+            return "tcp-port-0";
+        case CORSARO_FILTERID_RFC5735:
+            return "rfc5735";
+        case CORSARO_FILTERID_BACKSCATTER:
+            return "backscatter";
+        case CORSARO_FILTERID_BITTORRENT:
+            return "bittorrent";
+        case CORSARO_FILTERID_UDP_0X31:
+            return "udp-0x31";
+        case CORSARO_FILTERID_UDP_IPLEN_96:
+            return "udp-ip-len-96";
+        case CORSARO_FILTERID_PORT_53:
+            return "port-53";
+        case CORSARO_FILTERID_TCP_PORT_23:
+            return "tcp-port-23";
+        case CORSARO_FILTERID_TCP_PORT_80:
+            return "tcp-port-80";
+        case CORSARO_FILTERID_TCP_PORT_5000:
+            return "tcp-port-5000";
+        case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
+            return "dns-resp-non-standard-v2";
+        case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
+            return "netbios-query-name";
+        case CORSARO_FILTERID_NOTIP:
+            return "not-ip";
+    }
+    return "unexpected";
+}
 
 /** Produce fully-qualified labels for both the metric class and the
  *  metric value for a given result.
@@ -260,6 +307,14 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
         case CORSARO_METRIC_CLASS_PREFIX_ASN:
             strncpy(res->metrictype , "routing.asn", 128);
             snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
+            break;
+        case CORSARO_METRIC_CLASS_FILTER_CRITERIA:
+            if ((res->metricid & 0xffffffff) >=
+                    CORSARO_FILTERID_ABNORMAL_PROTOCOL) {
+                snprintf(res->metrictype, 256, "filter-criteria");
+                snprintf(res->metricval, 128, "%s",
+                        get_filter_stringname(res->metricid & 0xffffffff));
+            }
             break;
     }
 }
@@ -631,6 +686,9 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
     }
+
+    /* XXX Do NOT add empty results for filters, as they may or
+     * may not be relevant depending on high level filtering */
 
     /* ASNs are too sparse? */
 

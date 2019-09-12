@@ -331,6 +331,15 @@ trackerover:
 	return;
 }
 
+#define METRIC_ALLOWED(met, allowflag) \
+    if (track->allowedmetricclasses == 0 && (met != CORSARO_METRIC_CLASS_FILTER_CRITERIA)) { \
+        allowflag = 1; \
+    } else if (track->allowedmetricclasses & (1UL << met)) { \
+        allowflag = 1; \
+    } else { \
+        allowflag = 0; \
+    }
+
 /** Processes and acts upon an update message that has been received
  *  by an IP tracker thread.
  *
@@ -348,6 +357,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 	uint32_t toalloc = 0;
     uint32_t tagsdone = 0;
     uint64_t metricid;
+    uint8_t allowed;
 
 	buf = NULL;
 
@@ -397,8 +407,9 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 		for (j = 0; j < iphdr->numtags; j++) {
 			tag = (corsaro_report_msg_tag_t *)ptr;
             metricid = tag->tagid;
-            if (track->allowedmetricclasses == 0 ||
-                    (track->allowedmetricclasses & (1UL << (metricid >> 32)))) {
+
+            METRIC_ALLOWED((metricid >> 32), allowed);
+            if (allowed) {
 			    update_knownip_metric(track, tag, iphdr->issrc,
 				        knowniptally, iphdr->ipaddr);
             }
