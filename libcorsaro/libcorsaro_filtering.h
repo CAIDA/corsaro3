@@ -71,6 +71,8 @@ typedef enum {
      */
     CORSARO_FILTERID_ROUTED,
 
+    CORSARO_FILTERID_LARGE_SCALE_SCAN,
+
     /** Matches packets that are using a protocol other than TCP, UDP or
      *  ICMP. Also matches TCP packets that have unconventional flag
      *  combinations.
@@ -79,6 +81,8 @@ typedef enum {
 
     /** Matches if the packet has a TTL >= 200 */
     CORSARO_FILTERID_TTL_200,
+
+    CORSARO_FILTERID_NO_TCP_OPTIONS,
 
     /** Matches if the packet is an IP fragment */
     CORSARO_FILTERID_FRAGMENT,
@@ -193,11 +197,15 @@ int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_routable_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
+int corsaro_apply_large_scale_scan_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet);
 
 /* Low level built-in filters (subfilters) */
 int corsaro_apply_abnormal_protocol_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_ttl200_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet);
+int corsaro_apply_no_tcp_options_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_fragment_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);

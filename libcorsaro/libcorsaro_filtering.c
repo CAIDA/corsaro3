@@ -68,6 +68,19 @@ static inline int _apply_notip_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+static inline int _apply_no_tcp_options_filter(corsaro_logger_t *logger,
+        libtrace_tcp_t *tcp) {
+
+    if (!tcp) {
+        return -1;
+    }
+
+    if (tcp->doff == 5) {
+        return 1;
+    }
+    return 0;
+}
+
 static inline int _apply_fragment_filter(corsaro_logger_t *logger,
         libtrace_ip_t *ip) {
 
@@ -694,9 +707,11 @@ static int _apply_spoofing_filter(corsaro_logger_t *logger,
         return 1;
     }
 
+/*
     if (_apply_ttl200_filter(logger, fparams->ip) > 0) {
         return 1;
     }
+*/
 
     if (_apply_fragment_filter(logger, fparams->ip) > 0) {
         return 1;
@@ -780,6 +795,18 @@ static inline int _apply_routable_filter(corsaro_logger_t *logger,
     return _apply_rfc5735_filter(logger, ip);
 }
 
+static inline int _apply_large_scale_scan_filter(corsaro_logger_t *logger,
+        filter_params_t *fparams) {
+
+    return _apply_no_tcp_options_filter(logger, fparams->tcp);
+}
+
+int corsaro_apply_large_scale_scan_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+    PREPROCESS_PACKET
+    return _apply_large_scale_scan_filter(logger, &fparams);
+}
+
 int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
     PREPROCESS_PACKET
@@ -810,6 +837,12 @@ int corsaro_apply_ttl200_filter(corsaro_logger_t *logger,
 
     PREPROCESS_PACKET
     return _apply_ttl200_filter(logger, fparams.ip);
+}
+
+int corsaro_apply_no_tcp_options_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+    PREPROCESS_PACKET
+    return _apply_no_tcp_options_filter(logger, fparams.tcp);
 }
 
 int corsaro_apply_fragment_filter(corsaro_logger_t *logger,
