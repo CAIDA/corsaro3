@@ -310,6 +310,10 @@ static int worker_per_packet(corsaro_trace_worker_t *tls,
     }
 
     fbits = ntohs(taghdr->filterbits);
+    if (tls->glob->removenotscan && !(fbits & CORSARO_FILTERBIT_LARGE_SCALE_SCAN)) {
+        goto filtered;
+    }
+
     if (tls->glob->removespoofed && (fbits & CORSARO_FILTERBIT_SPOOFED)) {
         goto filtered;
     }

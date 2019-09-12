@@ -98,6 +98,7 @@ typedef struct corsaro_trace_glob {
     uint8_t removespoofed;
     uint8_t removeerratic;
     uint8_t removerouted;
+    uint8_t removenotscan;
 
     void *zmq_ctxt;
 

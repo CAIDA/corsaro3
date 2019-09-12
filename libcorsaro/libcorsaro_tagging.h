@@ -56,6 +56,8 @@ enum {
     CORSARO_FILTERBIT_ERRATIC = 2,
     /** Packet matched the filter for RFC 5735 addresses */
     CORSARO_FILTERBIT_NONROUTABLE = 4,
+    /** Packet matched the filter for widely deployed scanning tools */
+    CORSARO_FILTERBIT_LARGE_SCALE_SCAN = 8,
     /** Packet is not an IP packet, so can be ignored by most applications */
     CORSARO_FILTERBIT_NOTIP = 32768,
 };
