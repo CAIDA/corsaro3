@@ -505,7 +505,7 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
         libtrace_ip_t *ip, uint32_t iprem, corsaro_packet_tags_t *tags) {
 
 
-    corsaro_filter_torun_t torun[3];
+    corsaro_filter_torun_t torun[4];
 
     if (ip == NULL) {
         tags->highlevelfilterbits = CORSARO_FILTERBIT_NOTIP;
@@ -522,8 +522,10 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
     torun[1].result = 255;
     torun[2].filterid = CORSARO_FILTERID_ROUTED;
     torun[2].result = 255;
+    torun[3].filterid = CORSARO_FILTERID_LARGE_SCALE_SCAN;
+    torun[3].result = 255;
 
-    corsaro_apply_multiple_filters(logger, ip, iprem, torun, 3);
+    corsaro_apply_multiple_filters(logger, ip, iprem, torun, 4);
 
     if (torun[0].result == 1) {
         tags->highlevelfilterbits |= CORSARO_FILTERBIT_SPOOFED;
@@ -535,6 +537,10 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
 
     if (torun[2].result == 1) {
         tags->highlevelfilterbits |= CORSARO_FILTERBIT_NONROUTABLE;
+    }
+
+    if (torun[3].result == 1) {
+        tags->highlevelfilterbits |= CORSARO_FILTERBIT_LARGE_SCALE_SCAN;
     }
 }
 

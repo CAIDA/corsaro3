@@ -44,6 +44,10 @@ removeerratic: no
 # RFC 5735.
 removerouted: no
 
+# Set to 'yes' to reduce the packet stream down to just packets tagged
+# as "large-scale scanning" traffic.
+removenotscan: no
+
 # If using libtimeseries output, write output using the following backends:
 libtimeseriesbackends:
 

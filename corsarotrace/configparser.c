@@ -174,6 +174,14 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "removenotscan")) {
+        if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
+                &(glob->removenotscan), "remove not scan") < 0) {
+            return -1;
+        }
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "removerouted")) {
         if (parse_onoff_option(glob->logger, (char *)value->data.scalar.value,
                 &(glob->removerouted), "remove routed") < 0) {
@@ -266,6 +274,11 @@ static void log_configuration(corsaro_trace_global_t *glob) {
     if (glob->boundendts != 0) {
         corsaro_log(glob->logger, "stopping at timestamp %u",
                 glob->boundendts);
+    }
+
+
+    if (glob->removenotscan) {
+        corsaro_log(glob->logger, "removing traffic that is not an obvious scan from the packet stream");
     }
 
     if (glob->removespoofed) {
@@ -376,6 +389,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->removeerratic = 0;
     glob->removespoofed = 0;
     glob->removerouted = 0;
+    glob->removenotscan = 0;
 
     glob->subsource = CORSARO_TRACE_SOURCE_FANNER;
     glob->logger = NULL;

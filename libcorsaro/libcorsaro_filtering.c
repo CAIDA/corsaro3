@@ -60,6 +60,19 @@ static inline int _apply_ttl200_filter(corsaro_logger_t *logger,
     return 1;
 }
 
+static inline int _apply_no_tcp_options_filter(corsaro_logger_t *logger,
+        libtrace_tcp_t *tcp) {
+
+    if (!tcp) {
+        return -1;
+    }
+
+    if (tcp->syn && !tcp->ack && tcp->doff == 5) {
+        return 1;
+    }
+    return 0;
+}
+
 static inline int _apply_fragment_filter(corsaro_logger_t *logger,
         libtrace_ip_t *ip) {
 
@@ -772,6 +785,18 @@ static inline int _apply_routable_filter(corsaro_logger_t *logger,
     return _apply_rfc5735_filter(logger, ip);
 }
 
+static inline int _apply_large_scale_scan_filter(corsaro_logger_t *logger,
+        filter_params_t *fparams) {
+
+    return _apply_no_tcp_options_filter(logger, fparams->tcp);
+}
+
+int corsaro_apply_large_scale_scan_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+    PREPROCESS_PACKET
+    return _apply_large_scale_scan_filter(logger, &fparams);
+}
+
 int corsaro_apply_erratic_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
     PREPROCESS_PACKET
@@ -802,6 +827,12 @@ int corsaro_apply_ttl200_filter(corsaro_logger_t *logger,
 
     PREPROCESS_PACKET
     return _apply_ttl200_filter(logger, fparams.ip);
+}
+
+int corsaro_apply_no_tcp_options_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+    PREPROCESS_PACKET
+    return _apply_no_tcp_options_filter(logger, fparams.tcp);
 }
 
 int corsaro_apply_fragment_filter(corsaro_logger_t *logger,
@@ -1045,11 +1076,19 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
             case CORSARO_FILTERID_ROUTED:
                 torun[i].result = _apply_routable_filter(logger, fparams.ip);
                 break;
+            case CORSARO_FILTERID_LARGE_SCALE_SCAN:
+                torun[i].result = _apply_large_scale_scan_filter(logger,
+                        &fparams);
+                break;
             case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
                 torun[i].result = _apply_abnormal_protocol_filter(logger, &fparams);
                 break;
             case CORSARO_FILTERID_TTL_200:
                 torun[i].result =_apply_ttl200_filter(logger, fparams.ip);
+                break;
+            case CORSARO_FILTERID_NO_TCP_OPTIONS:
+                torun[i].result = _apply_no_tcp_options_filter(logger,
+                        fparams.tcp);
                 break;
             case CORSARO_FILTERID_FRAGMENT:
                 torun[i].result =_apply_fragment_filter(logger, fparams.ip);
