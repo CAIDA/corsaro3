@@ -67,7 +67,7 @@ static inline int _apply_no_tcp_options_filter(corsaro_logger_t *logger,
         return -1;
     }
 
-    if (tcp->doff == 5) {
+    if (tcp->syn && !tcp->ack && tcp->doff == 5) {
         return 1;
     }
     return 0;
