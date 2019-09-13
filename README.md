@@ -624,7 +624,8 @@ The report plugin supports the following configuration options:
 
   limitmetrics          Limit the time series generation by this plugin to
                         a specific set of metrics. If not specified, time
-                        series will be generated for all metrics -- otherwise,
+                        series will be generated for all metrics *except*
+                        the filter criteria -- otherwise,
                         only time series for the listed metric types will be
                         generated. The value for this option is a YAML list
                         containing one or more of the following values:
@@ -641,6 +642,8 @@ The report plugin supports the following configuration options:
                           - "maxmind" : include the metrics for the Maxmind
                                       geo-tagging
                           - "pfx2asn" : include the prefix2asn metrics
+                          - "filter": include the individual filter matching
+                                      metrics
 
   querytaggerlabels     If set to 'no', the plugin will NOT attempt to ask
                         the tagger for FQ labels for each country, region,
