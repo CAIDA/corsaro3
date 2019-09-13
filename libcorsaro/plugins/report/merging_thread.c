@@ -176,6 +176,8 @@ static inline const char * get_filter_stringname(int fbit) {
             return "non-spoofed.abnormal-protocol";
         case CORSARO_FILTERID_TTL_200:
             return "non-spoofed.ttl-200";
+        case CORSARO_FILTERID_NO_TCP_OPTIONS:
+            return "scan.no-tcp-options";
         case CORSARO_FILTERID_FRAGMENT:
             return "non-spoofed.fragmented-v2";
         case CORSARO_FILTERID_LAST_SRC_IP_0:
