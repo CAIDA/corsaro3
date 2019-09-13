@@ -173,43 +173,43 @@ static inline const char * get_filter_stringname(int fbit) {
 
     switch(fbit) {
         case CORSARO_FILTERID_ABNORMAL_PROTOCOL:
-            return "abnormal-protocol";
+            return "non-spoofed.abnormal-protocol";
         case CORSARO_FILTERID_TTL_200:
-            return "ttl-200";
+            return "non-spoofed.ttl-200";
         case CORSARO_FILTERID_FRAGMENT:
-            return "fragmented-v2";
+            return "non-spoofed.fragmented-v2";
         case CORSARO_FILTERID_LAST_SRC_IP_0:
-            return "last-byte-src-0";
+            return "non-spoofed.last-byte-src-0";
         case CORSARO_FILTERID_LAST_SRC_IP_255:
-            return "last-byte-src-255";
+            return "non-spoofed.last-byte-src-255";
         case CORSARO_FILTERID_SAME_SRC_DEST_IP:
-            return "same-src-dst";
+            return "non-spoofed.same-src-dst";
         case CORSARO_FILTERID_UDP_PORT_0:
-            return "udp-port-0";
+            return "non-spoofed.udp-port-0";
         case CORSARO_FILTERID_TCP_PORT_0:
-            return "tcp-port-0";
+            return "non-spoofed.tcp-port-0";
         case CORSARO_FILTERID_RFC5735:
-            return "rfc5735";
+            return "non-routed.rfc5735";
         case CORSARO_FILTERID_BACKSCATTER:
-            return "backscatter";
+            return "non-erratic.backscatter";
         case CORSARO_FILTERID_BITTORRENT:
-            return "bittorrent";
+            return "non-erratic.bittorrent";
         case CORSARO_FILTERID_UDP_0X31:
-            return "udp-0x31";
+            return "non-erratic.udp-0x31";
         case CORSARO_FILTERID_UDP_IPLEN_96:
-            return "udp-ip-len-96";
+            return "non-erratic.udp-ip-len-96";
         case CORSARO_FILTERID_PORT_53:
-            return "port-53";
+            return "non-erratic.port-53";
         case CORSARO_FILTERID_TCP_PORT_23:
-            return "tcp-port-23";
+            return "non-erratic.tcp-port-23";
         case CORSARO_FILTERID_TCP_PORT_80:
-            return "tcp-port-80";
+            return "non-erratic.tcp-port-80";
         case CORSARO_FILTERID_TCP_PORT_5000:
-            return "tcp-port-5000";
+            return "non-erratic.tcp-port-5000";
         case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
-            return "dns-resp-non-standard-v2";
+            return "non-erratic.dns-resp-non-standard-v2";
         case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
-            return "netbios-query-name";
+            return "non-erratic.netbios-query-name";
         case CORSARO_FILTERID_NOTIP:
             return "not-ip";
     }
