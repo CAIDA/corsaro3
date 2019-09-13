@@ -156,6 +156,8 @@ typedef enum {
     /** Matches UDP packets that appear to be NetBIOS queries */
     CORSARO_FILTERID_NETBIOS_QUERY_NAME,
 
+    CORSARO_FILTERID_NOTIP,
+
     /** Special reserved ID for the "last" filter -- this should always
      *  be at the end of enum declaration.
      */

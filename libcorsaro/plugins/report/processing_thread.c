@@ -27,6 +27,7 @@
 
 #include "report_internal.h"
 #include "corsaro_report.h"
+#include "libcorsaro_filtering.h"
 
 /** Structure for maintaining state for each IP tracker thread that a
  *  packet processing thread will be sending updates to.
@@ -218,6 +219,8 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
             return "Netacq polygon";
         case CORSARO_METRIC_CLASS_PREFIX_ASN:
             return "pfx2as ASN";
+        case CORSARO_METRIC_CLASS_FILTER_CRITERIA:
+            return "corsaro filter";
     }
 
     return "unknown";
@@ -542,6 +545,14 @@ static int process_tags(corsaro_report_tracker_state_t *track,
 
     PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
             METRIC_IPPROTOS_MAX);
+
+    for (i = CORSARO_FILTERID_ABNORMAL_PROTOCOL;
+            i < CORSARO_FILTERID_MAX; i++) {
+        if (tags->filterbits & ( 1 << i)) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_FILTER_CRITERIA, i,
+                    CORSARO_FILTERID_MAX);
+        }
+    }
 
     if (tags->protocol == TRACE_IPPROTO_ICMP) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_TYPE, tags->src_port,

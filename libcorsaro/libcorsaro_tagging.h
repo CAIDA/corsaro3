@@ -132,9 +132,9 @@ typedef struct corsaro_packet_tags {
      *  Encoded as a uint16_t, one byte for each character. */
     uint16_t netacq_continent;
 
-    /** Bitmask showing which high level filters this packet matches, i.e.
+    /** Bitmask showing which filters this packet matches, i.e.
      * is it spoofed, is it erratic, is it non-routable */
-    uint16_t highlevelfilterbits;
+    uint64_t filterbits;
 
     /** The hash of the flowtuple ID for this packet -- note this is more
      *  than just a standard 5-tuple and includes fields such as TTL,

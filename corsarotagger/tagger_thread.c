@@ -188,7 +188,7 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
         libtrace_ip_t *ip;
         void *l2, *next;
         uint32_t rem;
-        uint16_t ethertype;
+        uint16_t ethertype, filtbits;
 
         packet = (corsaro_tagger_packet_t *)(buf->space + processed);
 
@@ -248,7 +248,11 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
          */
         ASSIGN_HASH_BIN(packet->hdr.tags.ft_hash,
                 tls->glob->output_hashbins, packet->hdr.hashbin);
-        packet->hdr.filterbits = htons(packet->hdr.tags.highlevelfilterbits);
+
+        filtbits = 0;
+        filtbits = (uint16_t)(packet->hdr.tags.filterbits & 0x0f);
+
+        packet->hdr.filterbits = htons(filtbits);
         packet->taggedby = tls->threadid;
         processed += packet->hdr.pktlen;
 
