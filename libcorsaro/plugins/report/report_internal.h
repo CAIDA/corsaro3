@@ -93,6 +93,7 @@ typedef enum {
     CORSARO_METRIC_CLASS_ICMP_TYPE,
     CORSARO_METRIC_CLASS_NETACQ_REGION,
     CORSARO_METRIC_CLASS_NETACQ_POLYGON,
+    CORSARO_METRIC_CLASS_FILTER_CRITERIA,
 } corsaro_report_metric_class_t;
 
 /** Types of messages that can be sent to the IP tracker threads */

@@ -505,10 +505,11 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
         libtrace_ip_t *ip, uint32_t iprem, corsaro_packet_tags_t *tags) {
 
 
-    corsaro_filter_torun_t torun[4];
+    corsaro_filter_torun_t torun[CORSARO_FILTERID_MAX];
+    int i;
 
     if (ip == NULL) {
-        tags->highlevelfilterbits = CORSARO_FILTERBIT_NOTIP;
+        tags->filterbits = (1 << CORSARO_FILTERID_NOTIP);
         return;
     }
 
@@ -516,32 +517,20 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
      * matched, respectively) so we use 255 here as an initial
      * value to avoid confusion.
      */
-    torun[0].filterid = CORSARO_FILTERID_SPOOFED;
-    torun[0].result = 255;
-    torun[1].filterid = CORSARO_FILTERID_ERRATIC;
-    torun[1].result = 255;
-    torun[2].filterid = CORSARO_FILTERID_ROUTED;
-    torun[2].result = 255;
-    torun[3].filterid = CORSARO_FILTERID_LARGE_SCALE_SCAN;
-    torun[3].result = 255;
-
-    corsaro_apply_multiple_filters(logger, ip, iprem, torun, 4);
-
-    if (torun[0].result == 1) {
-        tags->highlevelfilterbits |= CORSARO_FILTERBIT_SPOOFED;
+    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
+        torun[i].filterid = i;
+        torun[i].result = 255;
     }
 
-    if (torun[1].result == 1) {
-        tags->highlevelfilterbits |= CORSARO_FILTERBIT_ERRATIC;
+    corsaro_apply_multiple_filters(logger, ip, iprem, torun,
+            CORSARO_FILTERID_MAX);
+
+    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
+        if (torun[i].result == 1) {
+            tags->filterbits |= (1 << i);
+        }
     }
 
-    if (torun[2].result == 1) {
-        tags->highlevelfilterbits |= CORSARO_FILTERBIT_NONROUTABLE;
-    }
-
-    if (torun[3].result == 1) {
-        tags->highlevelfilterbits |= CORSARO_FILTERBIT_LARGE_SCALE_SCAN;
-    }
 }
 
 static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,

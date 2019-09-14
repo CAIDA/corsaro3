@@ -60,6 +60,14 @@ static inline int _apply_ttl200_filter(corsaro_logger_t *logger,
     return 1;
 }
 
+static inline int _apply_notip_filter(corsaro_logger_t *logger,
+        libtrace_ip_t *ip) {
+    if (!ip) {
+        return 1;
+    }
+    return 0;
+}
+
 static inline int _apply_no_tcp_options_filter(corsaro_logger_t *logger,
         libtrace_tcp_t *tcp) {
 
@@ -1141,6 +1149,9 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
                 break;
             case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
                 torun[i].result =_apply_netbios_name_filter(logger, &fparams);
+                break;
+            case CORSARO_FILTERID_NOTIP:
+                torun[i].result = _apply_notip_filter(logger, fparams.ip);
                 break;
             default:
                 corsaro_log(logger, "Warning: no filter callback for id %d -- please add one to corsaro_apply_multiple_filters()", torun[i].filterid);
