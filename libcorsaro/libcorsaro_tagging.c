@@ -283,8 +283,7 @@ ipmeta_provider_t *corsaro_init_ipmeta_provider(ipmeta_t *ipmeta,
         return NULL;
     }
 
-    if (ipmeta_enable_provider(ipmeta, prov, (const char *)optstring,
-            IPMETA_PROVIDER_DEFAULT_NO) != 0) {
+    if (ipmeta_enable_provider(ipmeta, prov, (const char *)optstring) != 0) {
         corsaro_log(logger,
                 "Cannot create IPMeta provider %u: libipmeta internal error.",
                 provid);
