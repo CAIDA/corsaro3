@@ -2,7 +2,7 @@ Source: corsaro
 Section: libs
 Priority: optional
 Maintainer: CAIDA Software Maintainer <software@caida.org>
-Build-Depends: debhelper (>= 10), autotools-dev,
+Build-Depends: debhelper (>= 10), autotools-dev, libc6-dev,
  libpcap-dev, libyaml-dev, libjudy-dev, uthash-dev, libzmq3-dev, libavro-dev,
  libipmeta2-dev, libavro-dev, libtrace4-dev, libtimeseries0-dev,
  libwandio1 (>=4.2.0), librdkafka1 (>=0.11.3)
