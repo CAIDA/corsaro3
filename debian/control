@@ -1,0 +1,55 @@
+Source: corsaro
+Section: libs
+Priority: optional
+Maintainer: CAIDA Software Maintainer <software@caida.org>
+Build-Depends: debhelper (>= 10), autotools-dev, libc6-dev,
+ libpcap-dev, libyaml-dev, libjudy-dev, uthash-dev, libzmq3-dev, libavro-dev,
+ libipmeta2-dev, libavro-dev, libtrace4-dev, libtimeseries0-dev,
+ libwandio1 (>=4.2.0), librdkafka1 (>=0.11.3)
+Standards-Version: 4.1.2
+Homepage: https://github.com/CAIDA/corsaro
+
+Package: corsaro
+Architecture: any
+Section: libdevel
+Depends: corsaro3-tools (=${binary:Version}),
+ libcorsaro3-dev (=${binary:Version}), ${misc:Depends}
+Description: Meta package to install latest Corsaro tools and libraries.
+ Meta package with libcorsaro library, tools, and development environment.
+ .
+ Corsaro is a software suite for performing large-scale analysis of trace
+ data. It was specifically designed to be used with passive traces captured by
+ darknets, but the overall structure is generic enough to be used with any type
+ of passive trace data.
+
+Package: corsaro3-tools
+Architecture: any
+Section: libs
+Depends: libcorsaro3 (=${binary:Version}), libwandio1 (>=4.2.0),
+ librdkafka1 (>=0.11.3), ${shlibs:Depends}, ${misc:Depends}
+Description: Command line tools for processing one-way network traffic data
+ Corsaro is a software suite for performing large-scale analysis of trace
+ data. It was specifically designed to be used with passive traces captured by
+ darknets, but the overall structure is generic enough to be used with any type
+ of passive trace data.
+
+Package: libcorsaro3
+Architecture: any
+Section: libs
+Depends: libwandio1 (>=4.2.0), librdkafka1 (>=0.11.3),
+ ${shlibs:Depends}, ${misc:Depends}
+Description: Library for processing one-way network traffic data
+ Corsaro is a software suite for performing large-scale analysis of trace
+ data. It was specifically designed to be used with passive traces captured by
+ darknets, but the overall structure is generic enough to be used with any type
+ of passive trace data.
+
+Package: libcorsaro3-dev
+Architecture: any
+Section: libdevel
+Depends: libcorsaro3 (=${binary:Version}), ${misc:Depends}
+Description: Development headers and shared libraries for libcorsaro3
+ Corsaro is a software suite for performing large-scale analysis of trace
+ data. It was specifically designed to be used with passive traces captured by
+ darknets, but the overall structure is generic enough to be used with any type
+ of passive trace data.
