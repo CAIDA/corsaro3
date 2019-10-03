@@ -1,3 +1,9 @@
+corsaro (3.0.0-1) unstable; urgency=medium
+
+  * Fix build-time dependencies of debian packages
+
+ -- Alistair King <software@caida.org>  Thu, 03 Oct 2019 14:18:14 -0700
+
 corsaro (3.0.0) unstable; urgency=medium
 
   * First release of Corsaro v3
