@@ -45,6 +45,7 @@
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_common.h"
 #include "libcorsaro_avro.h"
+#include "libcorsaro_filtering.h"
 #include "corsaro_flowtuple.h"
 #include "utils.h"
 
@@ -177,7 +178,11 @@ static const char FLOWTUPLE_RESULT_SCHEMA[] =
       {\"name\": \"ttl\", \"type\": \"int\"}, \
       {\"name\": \"tcp_flags\", \"type\": \"int\"}, \
       {\"name\": \"ip_len\", \"type\": \"int\"}, \
+      {\"name\": \"tcp_synlen\", \"type\": \"int\"}, \
+      {\"name\": \"tcp_synwinlen\", \"type\": \"int\"}, \
       {\"name\": \"packet_cnt\", \"type\": \"long\"}, \
+      {\"name\": \"is_spoofed\", \"type\": \"int\"}, \
+      {\"name\": \"is_masscan\", \"type\": \"int\"}, \
       {\"name\": \"maxmind_continent\", \"type\": \"string\"}, \
       {\"name\": \"maxmind_country\", \"type\": \"string\"}, \
       {\"name\": \"netacq_continent\", \"type\": \"string\"}, \
@@ -592,7 +597,7 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     t.dst_port = tags->dest_port;
 
     if (ip_hdr->ip_p == TRACE_IPPROTO_TCP) {
-        tcp_hdr = (libtrace_tcp_t *) ((char *)ip_hdr) + (ip_hdr->ip_hl * 4);
+        tcp_hdr = (libtrace_tcp_t *) (((char *)ip_hdr) + (ip_hdr->ip_hl * 4));
 
         if (rem - (ip_hdr->ip_hl * 4) >= sizeof(libtrace_tcp_t)) {
 
@@ -603,6 +608,10 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
                  (tcp_hdr->urg << 5) | (tcp_hdr->ack << 4) |
                  (tcp_hdr->psh << 3) | (tcp_hdr->rst << 2) |
                  (tcp_hdr->syn << 1) | (tcp_hdr->fin << 0));
+            if (t.tcp_flags == (1 << 1)) {
+                t.tcp_synlen = tcp_hdr->doff * 4;
+                t.tcp_synwinlen = ntohs(tcp_hdr->window);
+            }
         }
     }
 
@@ -622,6 +631,13 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
 
     if (tags) {
         t.tagproviders = tags->providers_used;
+
+        if (tags->filterbits & (1 << CORSARO_FILTERID_SPOOFED)) {
+            t.is_spoofed = 1;
+        }
+        if (tags->filterbits & (1 << CORSARO_FILTERID_LARGE_SCALE_SCAN)) {
+            t.is_masscan = 1;
+        }
     } else {
         t.tagproviders = 0;
     }
@@ -696,7 +712,27 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->tcp_synlen), sizeof(nextft->tcp_synlen)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->tcp_synwinlen), sizeof(nextft->tcp_synwinlen)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
                 &(nextft->packet_cnt), sizeof(nextft->packet_cnt)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->is_spoofed), sizeof(nextft->is_spoofed)) < 0) {
+        return;
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                &(nextft->is_masscan), sizeof(nextft->is_masscan)) < 0) {
         return;
     }
 

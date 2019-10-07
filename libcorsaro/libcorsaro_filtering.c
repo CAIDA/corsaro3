@@ -68,6 +68,20 @@ static inline int _apply_notip_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+static inline int _apply_tcpwin_1024_filter(corsaro_logger_t *logger,
+        libtrace_tcp_t *tcp) {
+
+    if (!tcp) {
+        return -1;
+    }
+
+    if (tcp->syn && !tcp->ack && ntohs(tcp->window) == 1024) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static inline int _apply_no_tcp_options_filter(corsaro_logger_t *logger,
         libtrace_tcp_t *tcp) {
 
@@ -796,7 +810,19 @@ static inline int _apply_routable_filter(corsaro_logger_t *logger,
 static inline int _apply_large_scale_scan_filter(corsaro_logger_t *logger,
         filter_params_t *fparams) {
 
-    return _apply_no_tcp_options_filter(logger, fparams->tcp);
+    if (_apply_no_tcp_options_filter(logger, fparams->tcp) <= 0) {
+        return 0;
+    }
+
+    if (_apply_ttl200_filter(logger, fparams->ip) <= 0) {
+        return 0;
+    }
+
+    if (_apply_tcpwin_1024_filter(logger, fparams->tcp) <= 0) {
+        return 0;
+    }
+
+    return 1;
 }
 
 int corsaro_apply_large_scale_scan_filter(corsaro_logger_t *logger,
@@ -841,6 +867,12 @@ int corsaro_apply_no_tcp_options_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
     PREPROCESS_PACKET
     return _apply_no_tcp_options_filter(logger, fparams.tcp);
+}
+
+int corsaro_apply_tcpwin_1024_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+    PREPROCESS_PACKET
+    return _apply_tcpwin_1024_filter(logger, fparams.tcp);
 }
 
 int corsaro_apply_fragment_filter(corsaro_logger_t *logger,
@@ -1096,6 +1128,10 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
                 break;
             case CORSARO_FILTERID_NO_TCP_OPTIONS:
                 torun[i].result = _apply_no_tcp_options_filter(logger,
+                        fparams.tcp);
+                break;
+            case CORSARO_FILTERID_TCPWIN_1024:
+                torun[i].result = _apply_tcpwin_1024_filter(logger,
                         fparams.tcp);
                 break;
             case CORSARO_FILTERID_FRAGMENT:
