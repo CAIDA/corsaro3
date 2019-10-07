@@ -87,19 +87,44 @@ struct corsaro_flowtuple {
   /** Length of the IP packet (from the IP header) */
   uint16_t ip_len;
 
+  /** Size of the TCP SYN (including options) */
+  uint16_t tcp_synlen;
+
+  /** Announced receive window size in the TCP SYN (including options) */
+  uint16_t tcp_synwinlen;
+
   /** The number of packets that comprise this flowtuple
       This is populated immediately before the tuple is written out */
   uint32_t packet_cnt;
+
+  /** The result of applying the hash function to this flowtuple */
   uint32_t hash_val;
 
+  /** Flag indicating whether the source address was probably spoofed */
+  uint8_t is_spoofed;
+
+  /** Flag indicating whether the flow appeared to be a TCP Masscan attempt */
+  uint8_t is_masscan;
+
+  /** Country that the source IP corresponds to, according to maxmind */
   uint16_t maxmind_country;
+  /** Continent that the source IP corresponds to, according to maxmind */
   uint16_t maxmind_continent;
+  /** Country that the source IP corresponds to, according to netacq-edge */
   uint16_t netacq_country;
+  /** Continent that the source IP corresponds to, according to netacq-edge */
   uint16_t netacq_continent;
+  /** ASN that the source IP corresponds to, according to pf2asn data */
   uint32_t prefixasn;
+  /** Bitmap indicating which libipmeta tags are valid for this flow */
   uint16_t tagproviders;
 
+  /** Pointer to local memory manager that allocated this flowtuple (only
+   *  used if tcmalloc is not available.
+   */
   corsaro_memsource_t *memsrc;
+
+  /** Local variables used for merging sorted flowtuple maps */
   size_t pqueue_pos;
   pqueue_pri_t pqueue_pri;
   void *from;
