@@ -133,7 +133,8 @@ static const char REPORT_RESULT_SCHEMA[] =
         {\"name\": \"src_ip_cnt\", \"type\": \"long\"}, \
         {\"name\": \"dest_ip_cnt\", \"type\": \"long\"}, \
         {\"name\": \"pkt_cnt\", \"type\": \"long\"}, \
-        {\"name\": \"byte_cnt\", \"type\": \"long\"} \
+        {\"name\": \"byte_cnt\", \"type\": \"long\"}, \
+        {\"name\": \"src_asn_cnt\", \"type\": \"long\"} \
         ]}";
 
 /* Pre-defined alpha-2 codes for continents */
@@ -349,6 +350,8 @@ static inline int report_result_to_avro(corsaro_logger_t *logger,
             res->pkt_cnt);
     CORSARO_AVRO_SET_FIELD(long, av, field, 7, "byte_cnt", "report",
             res->bytes);
+    CORSARO_AVRO_SET_FIELD(long, av, field, 8, "src_asn_cnt", "report",
+            res->uniq_src_asn_count);
     return 0;
 }
 
@@ -474,6 +477,7 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
                 haderror = 1;
             }
         }
+        J1FA(judyret, r->uniq_src_asns);
         free(r);
 
         JLN(pval, *resultmap, index);
@@ -546,6 +550,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
             *pval = (Word_t)keyid;
 
             ADD_TIMESERIES_KEY("uniq_dst_ip");
+            ADD_TIMESERIES_KEY("uniq_src_asn");
             ADD_TIMESERIES_KEY("pkt_cnt");
             ADD_TIMESERIES_KEY("ip_len");
         }
@@ -555,8 +560,9 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
          * for the other tallies. */
         timeseries_kp_set(m->kp, *pval, r->uniq_src_ips);
         timeseries_kp_set(m->kp, (*pval) + 1, r->uniq_dst_ips);
-        timeseries_kp_set(m->kp, (*pval) + 2, r->pkt_cnt);
-        timeseries_kp_set(m->kp, (*pval) + 3, r->bytes);
+        timeseries_kp_set(m->kp, (*pval) + 2, r->uniq_src_asn_count);
+        timeseries_kp_set(m->kp, (*pval) + 3, r->pkt_cnt);
+        timeseries_kp_set(m->kp, (*pval) + 4, r->bytes);
 
         free(r);
         JLN(pval, *results, index);
@@ -643,6 +649,8 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
     r->bytes = 0;
     r->uniq_src_ips = 0;
     r->uniq_dst_ips = 0;
+    r->uniq_src_asn_count = 0;
+    r->uniq_src_asns = NULL;
     r->attimestamp = ts;
     r->label = outlabel;
     r->metrictype[0] = '\0';
@@ -738,7 +746,8 @@ static void update_tracker_results(Pvoid_t *results,
     corsaro_report_result_t *r;
     corsaro_metric_ip_hash_t *iter;
     PWord_t pval, pval2;
-    Word_t index = 0, ret;
+    Word_t index = 0, index2 = 0, ret;
+    int x;
 
     /* Simple loop over all metrics in the tracker tally and update our
      * combined metric map.
@@ -764,6 +773,24 @@ static void update_tracker_results(Pvoid_t *results,
         r->uniq_src_ips += (uint32_t)ret;
         J1C(ret, iter->destips, 0, -1);
         r->uniq_dst_ips += (uint32_t)ret;
+
+        /* Consider limiting this to only certain metrics if processing
+         * time becomes a problem?
+         */
+        index2 = 0;
+        if (iter->srcasns == NULL) {
+            r->uniq_src_asn_count = 0;
+        } else {
+            J1F(x, iter->srcasns, index2);
+            while (x) {
+                J1S(x, r->uniq_src_asns, (Word_t)index2);
+                if (x != 0) {
+                    r->uniq_src_asn_count ++;
+                }
+                J1N(x, iter->srcasns, index2);
+            }
+            J1FA(ret, iter->srcasns);
+        }
 
         r->pkt_cnt += iter->packets;
         r->bytes += iter->bytes;

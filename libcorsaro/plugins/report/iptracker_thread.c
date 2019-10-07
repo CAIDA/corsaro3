@@ -42,18 +42,18 @@
 /** Updates the tallies for a single observed IP + metric combination.
  *
  *  @param track        The state for this IP tracker thread
- *  @param metricid     The ID of the metric that was observed
- *  @param iphash       The IP hash map entry for the observed IP
+ *  @param tagptr       The individual tag for the metric being updated
  *  @param issrc        Set to 1 if the IP was seen as a source IP, 0 if
  *                      the IP was seen as a destination IP.
- *  @param iplen        The number of IP-layer bytes to add to the tally.
  *  @param metrictally  The hash map containing the metric tallies to be
  *                      updated.
+ *  @param ipaddr       The IP address that participated in this metric
+ *  @param asn          The source ASN that participated in this metric
  */
 
 static void update_knownip_metric(corsaro_report_iptracker_t *track,
         corsaro_report_msg_tag_t *tagptr, uint8_t issrc,
-        Pvoid_t *metrictally, uint32_t ipaddr) {
+        Pvoid_t *metrictally, uint32_t ipaddr, uint32_t asn) {
 
     corsaro_metric_ip_hash_t *m;
     uint64_t metricid = tagptr->tagid;
@@ -71,18 +71,22 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         m->metricid = metricid;
         m->srcips = NULL;
         m->destips = NULL;
+        m->srcasns = NULL;
         m->packets = 0;
         m->bytes = 0;
         *pval = (Word_t)(m);
     }
 
-    /* An IP length of zero == the packet has already been tallied for
-     * this metric, just update IP tallies only. */
+    /* Only increment byte and packet counts for the source IP half of
+     * this metric tag, otherwise we will double-count them */
     if (issrc) {
         m->packets += tagptr->packets;
         m->bytes += tagptr->bytes;
 
         J1S(ret, m->srcips, (Word_t)ipaddr);
+        if (asn != 0) {
+            J1S(ret, m->srcasns, (Word_t)asn);
+        }
     } else {
         J1S(ret, m->destips, (Word_t)ipaddr);
     }
@@ -411,7 +415,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
             METRIC_ALLOWED((metricid >> 32), allowed);
             if (allowed) {
 			    update_knownip_metric(track, tag, iphdr->issrc,
-				        knowniptally, iphdr->ipaddr);
+				        knowniptally, iphdr->ipaddr, iphdr->sourceasn);
             }
 			ptr += sizeof(corsaro_report_msg_tag_t);
             tagsdone ++;
