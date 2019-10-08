@@ -164,6 +164,7 @@ typedef struct corsaro_flowtuple_merger {
     void *inqueue;
     corsaro_logger_t *logger;
     corsaro_plugin_proc_options_t *baseconf;
+    uint8_t usesnappy;
 } corsaro_flowtuple_merger_t;
 
 struct corsaro_flowtuple_merge_state_t {
@@ -178,6 +179,7 @@ typedef struct corsaro_flowtuple_config {
     corsaro_flowtuple_sort_t sort_enabled;
     void *zmq_ctxt;
     uint8_t maxmergeworkers;
+    uint8_t usesnappy;
 } corsaro_flowtuple_config_t;
 
 /** The name of this plugin */
@@ -270,6 +272,7 @@ int corsaro_flowtuple_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     CORSARO_INIT_PLUGIN_PROC_OPTS(conf->basic);
     conf->sort_enabled = CORSARO_FLOWTUPLE_SORT_DEFAULT;
     conf->maxmergeworkers = 2;
+    conf->usesnappy = 0;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -301,6 +304,17 @@ int corsaro_flowtuple_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 } else {
                     conf->sort_enabled = CORSARO_FLOWTUPLE_SORT_DISABLED;
                 }
+            }
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "usesnappy") == 0) {
+
+            uint8_t opt = 0;
+
+            if (parse_onoff_option(p->logger, (char *)value->data.scalar.value,
+                    &(conf->usesnappy), "usesnappy") != 0) {
+                return -1;
             }
         }
 
@@ -339,6 +353,14 @@ int corsaro_flowtuple_finalise_config(corsaro_plugin_t *p,
     } else {
         corsaro_log(p->logger,
                 "flowtuple plugin: NOT sorting flowtuples before output");
+    }
+
+    if (conf->usesnappy) {
+        corsaro_log(p->logger,
+                "flowtuple plugin: using snappy compression for avro output");
+    } else {
+        corsaro_log(p->logger,
+                "flowtuple plugin: using deflate compression for avro output");
     }
 
     return 0;
@@ -992,7 +1014,8 @@ static void *start_ftmerge_worker(void *tdata) {
             if (outname == NULL) {
                 continue;
             }
-            if (corsaro_start_avro_writer(m->writer, outname) == -1) {
+            if (corsaro_start_avro_writer(m->writer, outname,
+                    m->usesnappy) == -1) {
                 free(outname);
                 continue;
             }
@@ -1089,6 +1112,7 @@ void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
 
         m->mergethreads[i].thread_num = i;
         m->mergethreads[i].inqueue = zmq_socket(conf->zmq_ctxt, ZMQ_SUB);
+        m->mergethreads[i].usesnappy = conf->usesnappy;
 
         FT_MERGE_THREAD_SUB(255)
         FT_MERGE_THREAD_SUB(m->mergethreads[i].thread_num)

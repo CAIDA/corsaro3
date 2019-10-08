@@ -118,7 +118,8 @@ void corsaro_destroy_avro_writer(corsaro_avro_writer_t *writer);
 avro_value_t *corsaro_populate_avro_item(corsaro_avro_writer_t *writer,
         void *plugindata, int (*callback)(corsaro_logger_t *logger,
             avro_value_t *av, void *plugindata));
-int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname);
+int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname,
+        uint8_t usesnappy);
 int corsaro_append_avro_writer(corsaro_avro_writer_t *writer,
         avro_value_t *value);
 int corsaro_close_avro_writer(corsaro_avro_writer_t *writer);

@@ -226,9 +226,10 @@ int corsaro_is_avro_writer_active(corsaro_avro_writer_t *writer) {
     return 0;
 }
 
-int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname) {
+int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname,
+        uint8_t usesnappy) {
 
-    int ret;
+    int ret = -1;
     avro_schema_error_t error;
 
     if (writer->out != NULL) {
@@ -251,12 +252,17 @@ int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname) {
 
     /* I assume a block size of zero just uses the default?? */
 
-    /* Try snappy first, as that is faster (albeit with a worse ratio).
-     * If snappy fails, i.e. libavro was built without snappy support,
-     * then fall back to deflate.
-     */
-    ret = avro_file_writer_create_with_codec(fname, writer->schema,
-            &(writer->out), "snappy", 16 * 1024);
+
+    if (usesnappy) {
+
+        /* Try snappy first, as that is faster (albeit with a worse ratio).
+         * If snappy fails, i.e. libavro was built without snappy support,
+         * then fall back to deflate.
+         */
+        ret = avro_file_writer_create_with_codec(fname, writer->schema,
+                &(writer->out), "snappy", 16 * 1024);
+    }
+
     if (ret) {
         ret = avro_file_writer_create_with_codec(fname, writer->schema,
                 &(writer->out), "deflate", 16 * 1024);
