@@ -189,7 +189,6 @@ AC_DEFINE_UNQUOTED([CORSARO_MONITOR_NAME],[$with_monitorname],[Monitor Name])
 ################################################################################
 
 ED_WITH_PLUGIN([corsaro_flowtuple],[flowtuple],[SIXT],[yes])
-ED_WITH_PLUGIN([corsaro_filteringstats],[filteringstats],[FILTERINGSTATS],[yes])
 ED_WITH_PLUGIN([corsaro_dos],[dos],[DOS],[yes])
 ED_WITH_PLUGIN([corsaro_report],[report],[REPORT],[yes])
 

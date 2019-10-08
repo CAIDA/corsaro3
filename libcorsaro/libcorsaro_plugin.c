@@ -56,16 +56,8 @@
 #include "corsaro_flowtuple.h"
 #endif
 
-#ifdef WITH_PLUGIN_WDCAP
-#include "corsaro_wdcap.h"
-#endif
-
 #ifdef WITH_PLUGIN_DOS
 #include "corsaro_dos.h"
-#endif
-
-#ifdef WITH_PLUGIN_FILTERINGSTATS
-#include "corsaro_filteringstats.h"
 #endif
 
 #ifdef WITH_PLUGIN_REPORT
