@@ -128,6 +128,9 @@ typedef enum {
     /** Matches UDP packets with a specific payload pattern */
     CORSARO_FILTERID_UDP_0X31,
 
+    /** Matches SIP packets sent over UDP to dest port 5060 over source port 5060 and with a SIP error in the payload */
+    CORSARO_FILTERID_SIP_ERROR,
+    
     /** Matches UDP packets with an IP length of 96 */
     CORSARO_FILTERID_UDP_IPLEN_96,
 
