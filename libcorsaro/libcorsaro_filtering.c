@@ -213,6 +213,27 @@ static inline int _apply_udp_0x31_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+static inline int _apply_sip_status_filter(corsaro_logger_t *logger,
+        filter_params_t *fparams) {
+
+  /* uint8_t pattern[9] = {0x53, 0x49, 0x50, 0x2f, 0x32, 0x2e, 0x30, 0x20, 0x34}; */
+  uint8_t pattern[7] = {0x53, 0x49, 0x50, 0x2f, 0x32, 0x2e, 0x30};
+
+    if (fparams->payload == NULL || fparams->udp == NULL) {
+        return 0;
+    }
+
+    if (fparams->payloadlen < 7) {
+        return 0;
+    }
+
+    if (fparams->source_port == 5060 && fparams->dest_port == 5060 && (memcmp(pattern, fparams->payload, 7) == 0) ) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static inline int _apply_udp_iplen_96_filter(corsaro_logger_t *logger,
         libtrace_ip_t *ip) {
 
@@ -763,6 +784,10 @@ static int _apply_erratic_filter(corsaro_logger_t *logger,
         return 1;
     }
 
+    if (_apply_sip_status_filter(logger, fparams) > 0) {
+        return 1;
+    }
+
     if (_apply_udp_iplen_96_filter(logger, fparams->ip) > 0) {
         return 1;
     }
@@ -942,6 +967,13 @@ int corsaro_apply_udp_0x31_filter(corsaro_logger_t *logger,
     return _apply_udp_0x31_filter(logger, &fparams);
 }
 
+int corsaro_apply_sip_status_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+
+    PREPROCESS_PACKET
+    return _apply_sip_status_filter(logger, &fparams);
+}
+
 int corsaro_apply_udp_iplen_96_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
@@ -1033,6 +1065,8 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
             return "bittorrent";
         case CORSARO_FILTERID_UDP_0X31:
             return "udp-0x31";
+        case CORSARO_FILTERID_SIP_STATUS:
+            return "sip-status";
         case CORSARO_FILTERID_UDP_IPLEN_96:
             return "udp-ip-len-96";
         case CORSARO_FILTERID_PORT_53:
@@ -1164,6 +1198,9 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
             case CORSARO_FILTERID_UDP_0X31:
                 torun[i].result =_apply_udp_0x31_filter(logger, &fparams);
                 break;
+            case CORSARO_FILTERID_SIP_STATUS:
+                torun[i].result =_apply_sip_status_filter(logger, &fparams);
+                break;
             case CORSARO_FILTERID_UDP_IPLEN_96:
                 torun[i].result =_apply_udp_iplen_96_filter(logger, fparams.ip);
                 break;
@@ -1238,6 +1275,8 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
             return _apply_bittorrent_filter(logger, &fparams);
         case CORSARO_FILTERID_UDP_0X31:
             return _apply_udp_0x31_filter(logger, &fparams);
+        case CORSARO_FILTERID_SIP_STATUS:
+            return _apply_sip_status_filter(logger, &fparams);
         case CORSARO_FILTERID_UDP_IPLEN_96:
             return _apply_udp_iplen_96_filter(logger, fparams.ip);
         case CORSARO_FILTERID_PORT_53:

@@ -203,6 +203,8 @@ static inline const char * get_filter_stringname(int fbit) {
             return "non-erratic.udp-0x31";
         case CORSARO_FILTERID_UDP_IPLEN_96:
             return "non-erratic.udp-ip-len-96";
+        case CORSARO_FILTERID_SIP_STATUS:
+            return "non-erratic.sip-status";
         case CORSARO_FILTERID_PORT_53:
             return "non-erratic.port-53";
         case CORSARO_FILTERID_TCP_PORT_23:
