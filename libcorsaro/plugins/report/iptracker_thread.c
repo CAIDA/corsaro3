@@ -106,6 +106,9 @@ static void free_metrichash(corsaro_report_iptracker_t *track,
     JLF(pval, methash, index);
     while (pval) {
         ipiter = (corsaro_metric_ip_hash_t *)(*pval);
+        J1FA(ret, ipiter->srcips);
+        J1FA(ret, ipiter->destips);
+        J1FA(ret, ipiter->srcasns);
         free(ipiter);
         JLN(pval, methash, index);
     }
