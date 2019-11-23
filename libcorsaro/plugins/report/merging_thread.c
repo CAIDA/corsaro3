@@ -1123,7 +1123,6 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     Pvoid_t results = NULL;
     uint8_t *trackers_done;
     uint8_t totaldone = 0, skipresult = 0;
-    int mergeret;
 
     uint32_t subtrees_seen = 0;
 
@@ -1212,26 +1211,27 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
          * misleading.
          */
         clean_result_map(&results);
-        mergeret = CORSARO_MERGE_NO_ACTION;
-    } else {
-
-        /* All trackers have reported tallies for this interval and they've
-         * been merged into a single result -- write it out!
-         */
-        if (conf->outformat == CORSARO_OUTPUT_AVRO) {
-            if (report_write_avro_output(p, m, fin->timestamp, &results,
-                    subtrees_seen) < 0) {
-                return CORSARO_MERGE_WRITE_FAILED;
-            }
+        if (reloadsock) {
+            return CORSARO_MERGE_CONTROL_FAILURE;
         }
+        return CORSARO_MERGE_NO_ACTION;
+    }
 
-        if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
-            if (report_write_libtimeseries(p, m, fin->timestamp, &results,
-                    subtrees_seen) < 0) {
-                return CORSARO_MERGE_WRITE_FAILED;
-            }
+    /* All trackers have reported tallies for this interval and they've
+     * been merged into a single result -- write it out!
+     */
+    if (conf->outformat == CORSARO_OUTPUT_AVRO) {
+        if (report_write_avro_output(p, m, fin->timestamp, &results,
+                subtrees_seen) < 0) {
+            return CORSARO_MERGE_WRITE_FAILED;
         }
-        mergeret = CORSARO_MERGE_SUCCESS;
+    }
+
+    if (conf->outformat == CORSARO_OUTPUT_LIBTIMESERIES) {
+        if (report_write_libtimeseries(p, m, fin->timestamp, &results,
+                subtrees_seen) < 0) {
+            return CORSARO_MERGE_WRITE_FAILED;
+        }
     }
 
     for (i = 0; i < fin->threads_ended; i++) {
@@ -1241,7 +1241,7 @@ int corsaro_report_merge_interval_results(corsaro_plugin_t *p, void *local,
     if (reloadsock) {
         return CORSARO_MERGE_CONTROL_FAILURE;
     }
-    return mergeret;
+    return CORSARO_MERGE_SUCCESS;
 }
 
 /** Rotates the output file for the report plugin.
