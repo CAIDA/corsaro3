@@ -568,6 +568,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
         timeseries_kp_set(m->kp, (*pval) + 3, r->pkt_cnt);
         timeseries_kp_set(m->kp, (*pval) + 4, r->bytes);
 
+        J1FA(judyret, r->uniq_src_asns);
         free(r);
         JLN(pval, *results, index);
     }
