@@ -524,6 +524,7 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
          * country.
          */
         if ((subtreemask & (1 << (r->metricid >> 32))) == 0) {
+            J1FA(judyret, r->uniq_src_asns);
             free(r);
             JLN(pval, *results, index);
             continue;
