@@ -125,14 +125,14 @@ The full set of supported config options for corsarowdcap is:
 
     inputuri              A libtrace URI describing where corsarowdcap should
                           read captured packets from. Ideally, this would be
-        	          a live capture interface of some sort (i.e. an
-			  interface name, a DPDK PCI identifier or an
-			  ndag multicast location).
+                          a live capture interface of some sort (i.e. an
+                          interface name, a DPDK PCI identifier or an
+                          ndag multicast location).
 
-    consterfframing	  Tells corsarowdcap that it can automatically assume
+    consterfframing       Tells corsarowdcap that it can automatically assume
                           that the ERF framing for a captured packet has a
                           certain length, which improves performance slightly.
-			  This option only applies to packet captures using an
+                          This option only applies to packet captures using an
                           Endace DAG card (i.e. dag: or ndag: URIs) and should
                           not be used if provenance meta-data is enabled on
                           the capture device.
@@ -143,26 +143,26 @@ The full set of supported config options for corsarowdcap is:
     interval              Specifies the file rotation frequency in seconds.
                           Defaults to 300.
 
-    threads		  The number of processing threads to use to receive
+    threads               The number of processing threads to use to receive
                           and write packets. If using an ndag: input, this
                           should be equal to the number of ndag streams.
 
-    fileformat		  The trace format to use when writing packets into
+    fileformat            The trace format to use when writing packets into
                           trace files. Must be a libtrace format type (e.g.
                           pcapfile, erf)
 
-    stripvlans		  If set to 'yes', any VLAN tags within the captured
+    stripvlans            If set to 'yes', any VLAN tags within the captured
                           packets will be stripped before the packets are
-			  written to disk. IMPORTANT: set this to 'no' if
-			  you know that there will be no VLAN headers in any
+                          written to disk. IMPORTANT: set this to 'no' if
+                          you know that there will be no VLAN headers in any
                           captured packets -- this will improve performance.
 
-    writestats		  If set to 'yes', statistics relating to the number
-			  of packets received and dropped by the corsarowdcap
-			  process will be written to a separate statistics file.
-			  The resulting files will have the same name as the
-			  corresponding trace files, except they will have a
-			  '.stats' extension.
+    writestats            If set to 'yes', statistics relating to the number
+                          of packets received and dropped by the corsarowdcap
+                          process will be written to a separate statistics file.
+                          The resulting files will have the same name as the
+                          corresponding trace files, except they will have a
+                          '.stats' extension.
 
     compresslevel         Compression level to use when writing compressed
                           trace files (defaults to 0, i.e. no compression).
@@ -194,36 +194,36 @@ The full set of supported config options for corsarotagger is:
 
     inputuri              A libtrace URI describing where corsarotagger should
                           read captured packets from. Ideally, this would be
-  			  a live capture interface of some sort (i.e. an
-			  interface name, a DPDK PCI identifier or an
-			  ndag multicast location).
+                          a live capture interface of some sort (i.e. an
+                          interface name, a DPDK PCI identifier or an
+                          ndag multicast location).
 
-    consterfframing	  Tells corsarotagger that it can automatically assume
+    consterfframing       Tells corsarotagger that it can automatically assume
                           that the ERF framing for a captured packet has a
                           certain length, which improves performance slightly.
-			  This option only applies to packet captures using an
+                          This option only applies to packet captures using an
                           Endace DAG card (i.e. dag: or ndag: URIs) and should
                           not be used if provenance meta-data is enabled on
                           the capture device.
 
-    promisc	  	  If set to 'yes', will enable promiscuous mode on the
+    promisc               If set to 'yes', will enable promiscuous mode on the
                           capture interface. Defaults to 'no'.
 
-    dohashing		  If set to 'yes', will instruct the tagger to assign
+    dohashing             If set to 'yes', will instruct the tagger to assign
                           packets to processing threads using a software
                           hasher that ensures all packets for the same
                           bidirectional flow end up on the same thread. If
-			  using an ndag: input, set this to 'no'. Defaults to
-			  'no'.
+                          using an ndag: input, set this to 'no'. Defaults to
+                          'no'.
 
-    basicfilter		  A BPF filter to be applied to all captured packets.
-			  Packets that do not match the filter will be
+    basicfilter           A BPF filter to be applied to all captured packets.
+                          Packets that do not match the filter will be
                           discarded.
 
-    pubqueuename	  The name of the zeroMQ queue to publish the tagged
-			  packets to. This must be a valid zeroMQ socket URI,
-			  preferably using either the ipc:// or tcp://
-			  transports. The default is 'ipc:///tmp/corsarotagger'.
+    pubqueuename          The name of the zeroMQ queue to publish the tagged
+                          packets to. This must be a valid zeroMQ socket URI,
+                          preferably using either the ipc:// or tcp://
+                          transports. The default is 'ipc:///tmp/corsarotagger'.
 
     controlsocketname     The name of the zeroMQ queue which will be listening
                           for meta-data requests from clients. This must be a
@@ -240,15 +240,15 @@ The full set of supported config options for corsarotagger is:
                           allow more packets to be buffered before dropping
                           begins. Default is 125.
 
-    pktthreads		  The number of threads to devote to reading packets
-			  from the input source. If using an ndag: input, this
-			  should be equal to the number of ndag streams. The
-			  default is 2.
+    pktthreads            The number of threads to devote to reading packets
+                          from the input source. If using an ndag: input, this
+                          should be equal to the number of ndag streams. The
+                          default is 2.
 
-    tagthreads		  The number of threads to devote to performing the
-			  tagging work on received packets. The default is 2.
+    tagthreads            The number of threads to devote to performing the
+                          tagging work on received packets. The default is 2.
 
-    tagproviders	  A sequence that specifies which additional tagging
+    tagproviders          A sequence that specifies which additional tagging
                           providers should be used to tag captured packets.
                           More information about tag providers is given below.
 
@@ -342,7 +342,7 @@ The full set of supported global config options is:
                           the given value as the base filename, followed by
                           "-t<thread id>".
 
-    subqueuename	  The name of the zeroMQ queue where the
+    subqueuename          The name of the zeroMQ queue where the
                           corresponding corsarotagger is writing tagged packets
                           to. This MUST match the 'pubqueuename' option being
                           used by the corsarotagger instance.
@@ -400,11 +400,11 @@ The full set of supported global config options is:
                           option. This option must be set if the log mode
                           is set to 'file'.
 
-    subqueuename	  The name of the zeroMQ queue where the corresponding
+    subqueuename          The name of the zeroMQ queue where the corresponding
                           corsarotagger or corsarofanner instance is writing
                           tagged packets to.
-  			  This MUST match the 'pubqueuename' option being used
-  			  by the corsarotagger or corsarofanner instance.
+                          This MUST match the 'pubqueuename' option being used
+                          by the corsarotagger or corsarofanner instance.
                           Defaults to 'ipc:///tmp/corsarotagger'.
 
     controlsocketname     The name of the zeroMQ queue to connect to when
@@ -439,17 +439,17 @@ The full set of supported global config options is:
     endboundaryts         Ignore all packets that have a timestamp after the
                           Unix timestamp specified for this option.
 
-    removespoofed	  If set to 'yes', ignore all packets that the
-  			  corsarotagger has marked as spoofed. Defaults to 'no'.
+    removespoofed         If set to 'yes', ignore all packets that the
+                          corsarotagger has marked as spoofed. Defaults to 'no'.
 
-    removeerratic	  If set to 'yes', ignore all packets that the
+    removeerratic         If set to 'yes', ignore all packets that the
                           corsarotagger has marked as an erratic traffic type.
-  	  		  Defaults to 'no'.
+                          Defaults to 'no'.
 
-    removerouted	  If set to 'yes', ignore all packets that the
-			  corsarotagger has marked as coming from a globally
-			  routable address (i.e. not an RFC5735 address).
-			  Defaults to 'no'.
+    removerouted          If set to 'yes', ignore all packets that the
+                          corsarotagger has marked as coming from a globally
+                          routable address (i.e. not an RFC5735 address).
+                          Defaults to 'no'.
 
     removenotscan         If set to 'yes', only include packets that the
                           corsarotagger has marked as likely to be from a
@@ -564,26 +564,26 @@ capture.
 The dos plugin takes several options which are used to fine-tune the
 sensitivity of the attack detection:
 
-    min_attack_packets		The minimum number of packets that must be
-  				seen from a source IP before it is considered
-				to be the target of an attack. Defaults to 25.
+    min_attack_packets          The minimum number of packets that must be
+                                seen from a source IP before it is considered
+                                to be the target of an attack. Defaults to 25.
 
-    min_attack_duration		The minimum duration in seconds for an attack
-				to be included in the plugin output. Defaults
-				to 60.
+    min_attack_duration         The minimum duration in seconds for an attack
+                                to be included in the plugin output. Defaults
+                                to 60.
 
-    min_attack_packet_rate	The minimum number of packets that must be
-				observed within a single window for an attack
-				to be included in the plugin output. Defaults
-				to 30.
+    min_attack_packet_rate      The minimum number of packets that must be
+                                observed within a single window for an attack
+                                to be included in the plugin output. Defaults
+                                to 30.
 
-    rate_window_size		The size of the window to use when determining
-				the packet rate for an attack (in seconds).
-				Defaults to 60.
+    rate_window_size            The size of the window to use when determining
+                                the packet rate for an attack (in seconds).
+                                Defaults to 60.
 
-    rate_window_slide		The frequency that the window should be moved
-				forward and the packet rate re-calculated
-				(in seconds). Defaults to 10.
+    rate_window_slide           The frequency that the window should be moved
+                                forward and the packet rate re-calculated
+                                (in seconds). Defaults to 10.
 
 DOS output is written to two separate avro files, which are named according to
 the 'outtemplate' option specified at the global config level. The first
@@ -614,9 +614,9 @@ and ICMP codes / types that appear in the packet tags.
 
 The report plugin supports the following configuration options:
 
-    output_row_label	  A label to apply to each time series entry generated
-			  by this instance of corsarotrace. Defaults to
-			  'unlabeled'. For avro output, this will appear in
+    output_row_label      A label to apply to each time series entry generated
+                          by this instance of corsarotrace. Defaults to
+                          'unlabeled'. For avro output, this will appear in
                           the 'source_label' field. For libtimeseries output,
                           this will be prepended to the 'key' string.
 
