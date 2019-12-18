@@ -1,3 +1,12 @@
-Alistair King <corsaro-info@caida.org>	initial versions of all files except
-					functions noted in utils.c, utils.h, 
-					and corsaro_log.c
+Alistair King <corsaro-info@caida.org>
+--------------------------------------
+
+Author of corsaro2 and provided much of the direction for the
+development of corsaro3.
+
+
+Shane Alcock <salcock@waikato.ac.nz>
+------------------------------------
+
+Author of corsaro3, except for the bits that were ported over directly from
+corsaro2.

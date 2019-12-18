@@ -4,6 +4,22 @@ Change Log{#changelog}
 See the [Corsaro](http://www.caida.org/tools/measurement/corsaro/) website for
 download information.
 
+Corsaro 3.0.0
+=============
+  - Complete re-write as part of STARDUST project.
+  - Not backwards-compatible with Corsaro 2 plugins or file formats.
+  - Plugins that produce output files (e.g. flowtuple) now write using the
+    Avro format.
+  - Plugins that produce streams of data (e.g. report) now use libtimeseries
+    to emit results.
+  - Tagging (e.g. geolocation, prefix-to-AS) and filtering is now a separate
+    program: corsarotagger.
+  - Analysis plugins are now run using the corsarotrace tool.
+  - New parallel design to improve performance at high packet rates.
+  - New tool: corsarowdcap, for writing regularly rotated packet trace files.
+  - New tool: corsarofanner, for local multiplexing of tagged packets to
+    analysis programs, such as corsarotrace.
+
 Corsaro 2.0.0
 =============
  - Released 2013-11-21
