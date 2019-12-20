@@ -134,6 +134,11 @@ typedef enum {
      */
     CORSARO_FILTERID_TCP_PORT_0,
 
+    /** Matches if the packet is UDP and has a destination
+     *  port of eighty.
+     */
+    CORSARO_FILTERID_UDP_DESTPORT_80,
+    
     /** Matches if the source address belongs to any of the non-routable
      *  RFC5735 address ranges.
      */
@@ -156,6 +161,9 @@ typedef enum {
     /** Matches UDP packets with an IP length of 96 */
     CORSARO_FILTERID_UDP_IPLEN_96,
 
+    /** Matches UDP packets with an IP length of 1500 */
+    CORSARO_FILTERID_UDP_IPLEN_1500,
+    
     /** Matches packets where either the source or destination port is 53
      *  (i.e. DNS)
      */
@@ -251,6 +259,8 @@ int corsaro_apply_udp_port_zero_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_tcp_port_zero_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
+int corsaro_apply_udp_destport_eighty_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet);
 int corsaro_apply_rfc5735_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_backscatter_filter(corsaro_logger_t *logger,
@@ -259,7 +269,11 @@ int corsaro_apply_bittorrent_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_udp_0x31_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
+int corsaro_apply_sip_status_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet);
 int corsaro_apply_udp_iplen_96_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet);
+int corsaro_apply_udp_iplen_1500_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_port_53_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);

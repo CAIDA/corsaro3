@@ -210,6 +210,24 @@ static inline int _apply_tcp_port_zero_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+static inline int _apply_udp_destport_eighty_filter(corsaro_logger_t *logger,
+        filter_params_t *fparams) {
+
+    if (!fparams->udp) {
+        return 0;
+    }
+
+    if (fparams->translen < 4) {
+        return -1;
+    }
+
+    if (fparams->dest_port == 80) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static inline int _apply_udp_0x31_filter(corsaro_logger_t *logger,
         filter_params_t *fparams) {
 
@@ -264,6 +282,20 @@ static inline int _apply_udp_iplen_96_filter(corsaro_logger_t *logger,
     }
 
     if (ip->ip_p == TRACE_IPPROTO_UDP && ntohs(ip->ip_len) == 96) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static inline int _apply_udp_iplen_1500_filter(corsaro_logger_t *logger,
+        libtrace_ip_t *ip) {
+
+    if (!ip) {
+        return -1;
+    }
+
+    if (ip->ip_p == TRACE_IPPROTO_UDP && ntohs(ip->ip_len) == 1500) {
         return 1;
     }
 
@@ -791,6 +823,10 @@ static int _apply_spoofing_filter(corsaro_logger_t *logger,
     if (_apply_tcp_port_zero_filter(logger, fparams) > 0) {
         return 1;
     }
+
+    if (_apply_udp_destport_eighty_filter(logger, fparams) > 0) {
+        return 1;
+    }
     return 0;
 }
 
@@ -814,6 +850,10 @@ static int _apply_erratic_filter(corsaro_logger_t *logger,
         return 1;
     }
 
+    if (_apply_udp_iplen_1500_filter(logger, fparams->ip) > 0) {
+        return 1;
+    }
+    
     if (_apply_port_53_filter(logger, fparams->source_port, fparams->dest_port) > 0) {
         return 1;
     }
@@ -962,6 +1002,13 @@ int corsaro_apply_tcp_port_zero_filter(corsaro_logger_t *logger,
     return _apply_tcp_port_zero_filter(logger, &fparams);
 }
 
+int corsaro_apply_udp_destport_eighty_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+
+    PREPROCESS_PACKET
+    return _apply_udp_destport_eighty_filter(logger, &fparams);
+}
+
 int corsaro_apply_rfc5735_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
     PREPROCESS_PACKET
@@ -1001,6 +1048,13 @@ int corsaro_apply_udp_iplen_96_filter(corsaro_logger_t *logger,
 
     PREPROCESS_PACKET
     return _apply_udp_iplen_96_filter(logger, fparams.ip);
+}
+
+int corsaro_apply_udp_iplen_1500_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+
+    PREPROCESS_PACKET
+    return _apply_udp_iplen_1500_filter(logger, fparams.ip);
 }
 
 int corsaro_apply_port_53_filter(corsaro_logger_t *logger,
@@ -1079,6 +1133,8 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
             return "udp-port-0";
         case CORSARO_FILTERID_TCP_PORT_0:
             return "tcp-port-0";
+        case CORSARO_FILTERID_UDP_DESTPORT_80:
+            return "udp-destport-80";
         case CORSARO_FILTERID_RFC5735:
             return "rfc5735";
         case CORSARO_FILTERID_BACKSCATTER:
@@ -1091,6 +1147,8 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
             return "sip-status";
         case CORSARO_FILTERID_UDP_IPLEN_96:
             return "udp-ip-len-96";
+        case CORSARO_FILTERID_UDP_IPLEN_1500:
+            return "udp-ip-len-1500";
         case CORSARO_FILTERID_PORT_53:
             return "port-53";
         case CORSARO_FILTERID_TCP_PORT_23:
@@ -1208,6 +1266,9 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
             case CORSARO_FILTERID_TCP_PORT_0:
                 torun[i].result =_apply_tcp_port_zero_filter(logger, &fparams);
                 break;
+            case CORSARO_FILTERID_UDP_DESTPORT_80:
+                torun[i].result =_apply_udp_destport_eighty_filter(logger, &fparams);
+                break;
             case CORSARO_FILTERID_RFC5735:
                 torun[i].result =_apply_rfc5735_filter(logger, fparams.ip);
                 break;
@@ -1225,6 +1286,9 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
                 break;
             case CORSARO_FILTERID_UDP_IPLEN_96:
                 torun[i].result =_apply_udp_iplen_96_filter(logger, fparams.ip);
+                break;
+            case CORSARO_FILTERID_UDP_IPLEN_1500:
+                torun[i].result =_apply_udp_iplen_1500_filter(logger, fparams.ip);
                 break;
             case CORSARO_FILTERID_PORT_53:
                 torun[i].result =_apply_port_53_filter(logger, fparams.source_port,
@@ -1289,6 +1353,8 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
             return _apply_udp_port_zero_filter(logger, &fparams);
         case CORSARO_FILTERID_TCP_PORT_0:
             return _apply_tcp_port_zero_filter(logger, &fparams);
+        case CORSARO_FILTERID_UDP_DESTPORT_80:
+            return _apply_udp_destport_eighty_filter(logger, &fparams);
         case CORSARO_FILTERID_RFC5735:
             return _apply_rfc5735_filter(logger, fparams.ip);
         case CORSARO_FILTERID_BACKSCATTER:
@@ -1301,6 +1367,8 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
             return _apply_sip_status_filter(logger, &fparams);
         case CORSARO_FILTERID_UDP_IPLEN_96:
             return _apply_udp_iplen_96_filter(logger, fparams.ip);
+        case CORSARO_FILTERID_UDP_IPLEN_1500:
+            return _apply_udp_iplen_1500_filter(logger, fparams.ip);
         case CORSARO_FILTERID_PORT_53:
             return _apply_port_53_filter(logger, fparams.source_port, fparams.dest_port);
         case CORSARO_FILTERID_TCP_PORT_23:
