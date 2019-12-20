@@ -6,23 +6,45 @@
  *
  * corsaro-info@caida.org
  *
- * Copyright (C) 2012 The Regents of the University of California.
+ * Copyright (C) 2012-2019 The Regents of the University of California.
+ * All Rights Reserved.
  *
  * This file is part of corsaro.
  *
- * corsaro is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Permission to copy, modify, and distribute this software and its
+ * documentation for academic research and education purposes, without fee, and
+ * without a written agreement is hereby granted, provided that
+ * the above copyright notice, this paragraph and the following paragraphs
+ * appear in all copies.
  *
- * corsaro is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Permission to make use of this software for other than academic research and
+ * education purposes may be obtained by contacting:
  *
- * You should have received a copy of the GNU General Public License
- * along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
+ * Office of Innovation and Commercialization
+ * 9500 Gilman Drive, Mail Code 0910
+ * University of California
+ * La Jolla, CA 92093-0910
+ * (858) 534-5815
+ * invent@ucsd.edu
  *
+ * This software program and documentation are copyrighted by The Regents of the
+ * University of California. The software program and documentation are supplied
+ * “as is”, without any accompanying services from The Regents. The Regents does
+ * not warrant that the operation of the program will be uninterrupted or
+ * error-free. The end-user understands that the program was developed for
+ * research purposes and is advised not to rely exclusively on the program for
+ * any reason.
+ *
+ * IN NO EVENT SHALL THE UNIVERSITY OF CALIFORNIA BE LIABLE TO ANY PARTY FOR
+ * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+ * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION,
+ * EVEN IF THE UNIVERSITY OF CALIFORNIA HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE. THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE SOFTWARE PROVIDED
+ * HEREUNDER IS ON AN “AS IS” BASIS, AND THE UNIVERSITY OF CALIFORNIA HAS NO
+ * OBLIGATIONS TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR
+ * MODIFICATIONS.
  */
 
 #ifndef CORSARO_FLOWTUPLE_PLUGIN_H_
@@ -124,6 +146,9 @@ struct corsaro_flowtuple {
    */
   corsaro_memsource_t *memsrc;
 
+  uint64_t sort_key_top;
+  uint64_t sort_key_bot;
+
   /** Local variables used for merging sorted flowtuple maps */
   size_t pqueue_pos;
   pqueue_pri_t pqueue_pri;
@@ -202,6 +227,40 @@ uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
                 (((alpha)->dst_port < (bravo)->dst_port) ||                  \
                  (((alpha)->dst_port == (bravo)->dst_port) &&                \
                   (((alpha)->ip_len < (bravo)->ip_len))))))))))))))))))
+
+
+/* Top key looks like (IP DST1 is assumed constant) :
+ *
+ *      -----------------------------------------
+ *      | PROTO   | TTL     | FLAGS   | IP_SRC1 |
+ *      -----------------------------------------
+ *      | IP_SRC2 | IP_SRC3 | IP_SRC4 | IP_DST2 |
+ *      -----------------------------------------
+ */
+#define FT_CALC_SORT_KEY_TOP(ft) \
+    ( \
+        (((uint64_t)(ft->protocol)) << 56) | \
+        (((uint64_t)(ft->ttl)) << 48) | \
+        (((uint64_t)(ft->tcp_flags)) << 40) | \
+        (((uint64_t)(ft->src_ip)) << 8) | \
+        (((uint64_t)(ft->dst_ip & 0x00FFFFFF)) >> 16) \
+    )
+
+/* Bottom key looks like :
+ *
+ *      -----------------------------------------
+ *      | IP_DST3 | IP_DST4 | SPORT_1 | SPORT_2 |
+ *      -----------------------------------------
+ *      | DPORT_1 | DPORT_2 | IP_LEN1 | IP_LEN2 |
+ *      -----------------------------------------
+ */
+#define FT_CALC_SORT_KEY_BOTTOM(ft) \
+    ( \
+        (((uint64_t)(ft->dst_ip)) << 48) | \
+        (((uint64_t)(ft->src_port)) << 32) | \
+        (((uint64_t)(ft->dst_port)) << 16) | \
+        (((uint64_t)(ft->ip_len))) \
+    )
 
 
 #define FLOWTUPLE_PROC_FUNC_START(name, failret) \

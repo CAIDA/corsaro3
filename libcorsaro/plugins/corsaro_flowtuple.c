@@ -6,23 +6,45 @@
  *
  * corsaro-info@caida.org
  *
- * Copyright (C) 2012 The Regents of the University of California.
+ * Copyright (C) 2012-2019 The Regents of the University of California.
+ * All Rights Reserved.
  *
  * This file is part of corsaro.
  *
- * corsaro is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Permission to copy, modify, and distribute this software and its
+ * documentation for academic research and education purposes, without fee, and
+ * without a written agreement is hereby granted, provided that
+ * the above copyright notice, this paragraph and the following paragraphs
+ * appear in all copies.
  *
- * corsaro is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Permission to make use of this software for other than academic research and
+ * education purposes may be obtained by contacting:
  *
- * You should have received a copy of the GNU General Public License
- * along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
+ * Office of Innovation and Commercialization
+ * 9500 Gilman Drive, Mail Code 0910
+ * University of California
+ * La Jolla, CA 92093-0910
+ * (858) 534-5815
+ * invent@ucsd.edu
  *
+ * This software program and documentation are copyrighted by The Regents of the
+ * University of California. The software program and documentation are supplied
+ * “as is”, without any accompanying services from The Regents. The Regents does
+ * not warrant that the operation of the program will be uninterrupted or
+ * error-free. The end-user understands that the program was developed for
+ * research purposes and is advised not to rely exclusively on the program for
+ * any reason.
+ *
+ * IN NO EVENT SHALL THE UNIVERSITY OF CALIFORNIA BE LIABLE TO ANY PARTY FOR
+ * DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+ * LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION,
+ * EVEN IF THE UNIVERSITY OF CALIFORNIA HAS BEEN ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE. THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE SOFTWARE PROVIDED
+ * HEREUNDER IS ON AN “AS IS” BASIS, AND THE UNIVERSITY OF CALIFORNIA HAS NO
+ * OBLIGATIONS TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR
+ * MODIFICATIONS.
  */
 
 #include "config.h"
@@ -96,6 +118,8 @@ struct corsaro_flowtuple_state_t {
     corsaro_memhandler_t *fthandler;
 
     uint32_t pkt_cnt;
+
+    Pvoid_t keysort_levelone;
 };
 
 enum {
@@ -117,7 +141,7 @@ typedef struct corsaro_flowtuple_interim {
     corsaro_memhandler_t *handler;
     Pvoid_t hmap;
     uint64_t hsize;
-    struct corsaro_flowtuple **sorted_keys;
+    Pvoid_t sorted_keys;
     corsaro_logger_t *logger;
     pthread_mutex_t mutex;
     pthread_t tid;
@@ -130,8 +154,13 @@ typedef struct corsaro_flowtuple_iterator {
     uint64_t hsize;
     Pvoid_t hmap;
     struct corsaro_flowtuple *nextft;
+    Word_t sortindex_top;
+    Word_t sortindex_bot;
     corsaro_result_type_t state;
-    struct corsaro_flowtuple **sorted_keys;
+
+    Pvoid_t sorted_keys;
+    Pvoid_t current_subkeys;
+
     corsaro_flowtuple_interim_t *parent;
 } corsaro_flowtuple_iterator_t;
 
@@ -142,6 +171,7 @@ typedef struct corsaro_flowtuple_merger {
     void *inqueue;
     corsaro_logger_t *logger;
     corsaro_plugin_proc_options_t *baseconf;
+    uint8_t usesnappy;
 } corsaro_flowtuple_merger_t;
 
 struct corsaro_flowtuple_merge_state_t {
@@ -156,6 +186,7 @@ typedef struct corsaro_flowtuple_config {
     corsaro_flowtuple_sort_t sort_enabled;
     void *zmq_ctxt;
     uint8_t maxmergeworkers;
+    uint8_t usesnappy;
 } corsaro_flowtuple_config_t;
 
 /** The name of this plugin */
@@ -212,12 +243,20 @@ static int ft_cmp_pri(void *next, void *curr) {
 
     prevft = (struct corsaro_flowtuple *)curr;
     nextft = (struct corsaro_flowtuple *)next;
+
+    if (prevft->sort_key_top != nextft->sort_key_top) {
+        return (prevft->sort_key_top < nextft->sort_key_top);
+    }
+
+    return (prevft->sort_key_bot < nextft->sort_key_bot);
+    /*
     res = corsaro_flowtuple_lt(nextft, prevft);
 
     if (res == 0) {
         return 1;
     }
     return 0;
+    */
 }
 
 static size_t ft_get_pos(void *a) {
@@ -248,6 +287,7 @@ int corsaro_flowtuple_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     CORSARO_INIT_PLUGIN_PROC_OPTS(conf->basic);
     conf->sort_enabled = CORSARO_FLOWTUPLE_SORT_DEFAULT;
     conf->maxmergeworkers = 2;
+    conf->usesnappy = 0;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -279,6 +319,17 @@ int corsaro_flowtuple_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 } else {
                     conf->sort_enabled = CORSARO_FLOWTUPLE_SORT_DISABLED;
                 }
+            }
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "usesnappy") == 0) {
+
+            uint8_t opt = 0;
+
+            if (parse_onoff_option(p->logger, (char *)value->data.scalar.value,
+                    &(conf->usesnappy), "usesnappy") != 0) {
+                return -1;
             }
         }
 
@@ -317,6 +368,14 @@ int corsaro_flowtuple_finalise_config(corsaro_plugin_t *p,
     } else {
         corsaro_log(p->logger,
                 "flowtuple plugin: NOT sorting flowtuples before output");
+    }
+
+    if (conf->usesnappy) {
+        corsaro_log(p->logger,
+                "flowtuple plugin: using snappy compression for avro output");
+    } else {
+        corsaro_log(p->logger,
+                "flowtuple plugin: using deflate compression for avro output");
     }
 
     return 0;
@@ -390,6 +449,7 @@ void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
 #endif
 
     state->st_hash = NULL;
+    state->keysort_levelone = NULL;
 
     return state;
 }
@@ -462,6 +522,7 @@ int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
 static void *sort_job(void *tdata) {
     corsaro_flowtuple_interim_t *interim = (corsaro_flowtuple_interim_t *)tdata;
 
+#if 0
     if (sort_hash(interim->logger, interim->hmap, &(interim->sorted_keys)) != 0)
     {
         corsaro_log(interim->logger, "unable to sort flowtuple keys");
@@ -473,6 +534,7 @@ static void *sort_job(void *tdata) {
         interim->usable = 1;
     }
     pthread_mutex_unlock(&(interim->mutex));
+#endif
     pthread_exit(NULL);
 }
 
@@ -503,7 +565,9 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
     pthread_mutex_init(&(interim->mutex), NULL);
 
     if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED && hashsize > 0) {
-        pthread_create(&(interim->tid), NULL, sort_job, interim);
+        //pthread_create(&(interim->tid), NULL, sort_job, interim);
+        interim->sorted_keys = state->keysort_levelone;
+        interim->usable = 1;
     } else {
         interim->usable = 1;
     }
@@ -511,7 +575,30 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
     /* Replace the hash map with an empty one -- the merging process
      * will free up everything associated with the old hash map. */
     state->st_hash = NULL;
+    state->keysort_levelone = NULL;
     return interim;
+}
+
+static int insert_sorted_key(Pvoid_t *topmap, struct corsaro_flowtuple *ft,
+    corsaro_logger_t *logger) {
+    PWord_t tval, bval;
+    Pvoid_t botmap = NULL;
+
+    JLI(tval, (*topmap), ft->sort_key_top);
+    botmap = (Pvoid_t) *tval;
+
+    /* TODO figure out multi-dimensional JudyL arrays... */
+
+    JLI(bval, botmap, ft->sort_key_bot);
+    if (*bval == 0) {
+        *bval = (Word_t)ft;
+    } else {
+        corsaro_log(logger, "Attempted to insert new sort key for flowtuple %lu, but there's already something here (%lu:%lu)",
+                ft->hash_val, ft->sort_key_top, ft->sort_key_bot);
+        return -1;
+    }
+    *tval = (Word_t)botmap;
+    return 0;
 }
 
 /** Either add the given flowtuple to the hash, or increment the current count
@@ -547,6 +634,18 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
     memcpy(new_6t, t, sizeof(struct corsaro_flowtuple));
     new_6t->memsrc = memsrc;
     new_6t->packet_cnt = increment;
+
+    new_6t->sort_key_top = FT_CALC_SORT_KEY_TOP(new_6t);
+    new_6t->sort_key_bot = FT_CALC_SORT_KEY_BOTTOM(new_6t);
+
+    if (insert_sorted_key(&(state->keysort_levelone), new_6t, logger) < 0) {
+        if (state->fthandler) {
+            release_corsaro_memhandler_item(state->fthandler, new_6t->memsrc);
+        } else {
+            free(new_6t);
+        }
+        return -1;
+    }
 
     /* add it to the hash */
     *pval = (Word_t)new_6t;
@@ -826,6 +925,8 @@ static void merge_sorted_inputs(corsaro_flowtuple_merger_t *m,
     corsaro_memhandler_t *handler = NULL;
     pqueue_t *pq;
     uint64_t count = 0, exptotal = 0, combines = 0;
+    PWord_t pval;
+    Word_t ret;
 
     pq = pqueue_init(threads_ended, ft_cmp_pri, ft_get_pos, ft_set_pos);
 
@@ -837,14 +938,18 @@ static void merge_sorted_inputs(corsaro_flowtuple_merger_t *m,
     for (i = 0; i < threads_ended; i++) {
 
         exptotal += inputs[i].hsize;
-        while (inputs[i].sortiter < inputs[i].hsize) {
-            nextft = inputs[i].sorted_keys[inputs[i].sortiter];
-            inputs[i].sortiter ++;
 
-            nextft->from = (void *) &(inputs[i]);
-            nextft->fromind = i;
-            pqueue_insert(pq, nextft);
-            break;
+        JLF(pval, inputs[i].sorted_keys, inputs[i].sortindex_top);
+        if (pval) {
+            inputs[i].current_subkeys = (Pvoid_t)(*pval);
+
+            JLF(pval, inputs[i].current_subkeys, inputs[i].sortindex_bot);
+            if (pval) {
+                nextft = (struct corsaro_flowtuple *)*pval;
+                nextft->from = (void *) &(inputs[i]);
+                nextft->fromind = i;
+                pqueue_insert(pq, nextft);
+            }
         }
     }
 
@@ -880,13 +985,29 @@ static void merge_sorted_inputs(corsaro_flowtuple_merger_t *m,
             continue;
         }
 
-        toinsert = ftsrc->sorted_keys[ftsrc->sortiter];
+        JLN(pval, ftsrc->current_subkeys, ftsrc->sortindex_bot);
+        while (pval == NULL) {
+            JLFA(ret, ftsrc->current_subkeys);
+
+            JLN(pval, ftsrc->sorted_keys, ftsrc->sortindex_top);
+            if (pval == NULL) {
+                ftsrc->sortiter = ftsrc->hsize;
+                break;
+            }
+            ftsrc->current_subkeys = (Pvoid_t)(*pval);
+            ftsrc->sortindex_bot = 0;
+            JLF(pval, ftsrc->current_subkeys, ftsrc->sortindex_bot);
+        }
+
+        if (pval == NULL) {
+            continue;
+        }
+
+        toinsert = (struct corsaro_flowtuple *)(*pval);
         ftsrc->sortiter ++;
         toinsert->from = (void *)ftsrc;
         toinsert->fromind = prevft->fromind;
         pqueue_insert(pq, toinsert);
-
-
     }
 
     if (prevft) {
@@ -970,7 +1091,8 @@ static void *start_ftmerge_worker(void *tdata) {
             if (outname == NULL) {
                 continue;
             }
-            if (corsaro_start_avro_writer(m->writer, outname) == -1) {
+            if (corsaro_start_avro_writer(m->writer, outname,
+                    m->usesnappy) == -1) {
                 free(outname);
                 continue;
             }
@@ -988,12 +1110,22 @@ static void *start_ftmerge_worker(void *tdata) {
         for (i = 0; i < msg.input_size; i++) {
             corsaro_flowtuple_interim_t *interim;
             Word_t ret;
+            Word_t index;
+            PWord_t pval;
 
             JLFA(ret, inputs[i].hmap);
 
-            if (inputs[i].sorted_keys) {
-                free(inputs[i].sorted_keys);
+            /*
+            index = 0;
+            JLF(pval, inputs[i].sorted_keys, index);
+            while (pval) {
+                Pvoid_t tofree = (Pvoid_t)(*pval);
+                JLFA(ret, tofree);
+                JLN(pval, inputs[i].sorted_keys, index);
             }
+            */
+            JLFA(ret, inputs[i].sorted_keys);
+
             if (inputs[i].handler) {
                 destroy_corsaro_memhandler(inputs[i].handler);
             }
@@ -1067,6 +1199,7 @@ void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
 
         m->mergethreads[i].thread_num = i;
         m->mergethreads[i].inqueue = zmq_socket(conf->zmq_ctxt, ZMQ_SUB);
+        m->mergethreads[i].usesnappy = conf->usesnappy;
 
         FT_MERGE_THREAD_SUB(255)
         FT_MERGE_THREAD_SUB(m->mergethreads[i].thread_num)
@@ -1186,9 +1319,15 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
                 }
                 if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
                     inputs[i].sorted_keys = interim->sorted_keys;
+                    inputs[i].current_subkeys = NULL;
+                    inputs[i].sortindex_top = 0;
+                    inputs[i].sortindex_bot = 0;
                     inputs[i].sortiter = 0;
                 } else {
                     inputs[i].sorted_keys = NULL;
+                    inputs[i].current_subkeys = NULL;
+                    inputs[i].sortindex_top = 0;
+                    inputs[i].sortindex_bot = 0;
                     inputs[i].sortiter = -1;
                 }
                 inputs[i].parent = interim;
