@@ -20,11 +20,6 @@ PLUGIN_SRC+=corsaro_dos.c corsaro_dos.h
 include_HEADERS+=corsaro_dos.h
 endif
 
-if WITH_PLUGIN_FILTERINGSTATS
-PLUGIN_SRC+=corsaro_filteringstats.c corsaro_filteringstats.h
-include_HEADERS+=corsaro_filteringstats.h
-endif
-
 if WITH_PLUGIN_REPORT
 PLUGIN_SRC+=report/corsaro_report.c report/corsaro_report.h
 PLUGIN_SRC+=report/iptracker_thread.c report/merging_thread.c

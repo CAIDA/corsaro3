@@ -146,6 +146,9 @@ struct corsaro_flowtuple {
    */
   corsaro_memsource_t *memsrc;
 
+  uint64_t sort_key_top;
+  uint64_t sort_key_bot;
+
   /** Local variables used for merging sorted flowtuple maps */
   size_t pqueue_pos;
   pqueue_pri_t pqueue_pri;
@@ -224,6 +227,40 @@ uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
                 (((alpha)->dst_port < (bravo)->dst_port) ||                  \
                  (((alpha)->dst_port == (bravo)->dst_port) &&                \
                   (((alpha)->ip_len < (bravo)->ip_len))))))))))))))))))
+
+
+/* Top key looks like (IP DST1 is assumed constant) :
+ *
+ *      -----------------------------------------
+ *      | PROTO   | TTL     | FLAGS   | IP_SRC1 |
+ *      -----------------------------------------
+ *      | IP_SRC2 | IP_SRC3 | IP_SRC4 | IP_DST2 |
+ *      -----------------------------------------
+ */
+#define FT_CALC_SORT_KEY_TOP(ft) \
+    ( \
+        (((uint64_t)(ft->protocol)) << 56) | \
+        (((uint64_t)(ft->ttl)) << 48) | \
+        (((uint64_t)(ft->tcp_flags)) << 40) | \
+        (((uint64_t)(ft->src_ip)) << 8) | \
+        (((uint64_t)(ft->dst_ip & 0x00FFFFFF)) >> 16) \
+    )
+
+/* Bottom key looks like :
+ *
+ *      -----------------------------------------
+ *      | IP_DST3 | IP_DST4 | SPORT_1 | SPORT_2 |
+ *      -----------------------------------------
+ *      | DPORT_1 | DPORT_2 | IP_LEN1 | IP_LEN2 |
+ *      -----------------------------------------
+ */
+#define FT_CALC_SORT_KEY_BOTTOM(ft) \
+    ( \
+        (((uint64_t)(ft->dst_ip)) << 48) | \
+        (((uint64_t)(ft->src_port)) << 32) | \
+        (((uint64_t)(ft->dst_port)) << 16) | \
+        (((uint64_t)(ft->ip_len))) \
+    )
 
 
 #define FLOWTUPLE_PROC_FUNC_START(name, failret) \

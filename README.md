@@ -554,6 +554,12 @@ The flowtuple plugin can be further configured using the following options:
                           merging flowtuple results into a single coherent
                           file. Defaults to 2.
 
+  usesnappy             If 'yes', the avro files produced as output will be
+                        compressed using the snappy compression method (if
+                        available). Otherwise, deflate will be used.
+                        snappy uses less CPU time but will produce larger
+                        files, deflate is the opposite. Defaults to 'no'.
+
 Flowtuple output is written to an avro file, which is named according to
 the 'outtemplate' option specified at the global config level.
 
@@ -592,17 +598,6 @@ of the attacks observed in each interval, plus some high-level stats about each
 attack. The second file replaces the plugin name modifier with 'dosflows' and
 contains a list of all of the individual flows that were part of an observed
 attack.
-
-**Filteringstats:** This plugin simply reports how frequently each of the
-built-in filters are matched by packets observed by the monitor. This is
-primarily intended for internal use to evaluate the effectiveness of each
-specific filter, but the stats may be of some general interest as well.
-
-The filteringstats plugin takes no configuration options.
-
-Filteringstats output is written to an avro file, which is named according to
-the 'outtemplate' option specified at the global config level.
-
 
 **Report:** The report plugin produces time series of the number of
 packets, bytes, source IPs and destination IPs that matched each of the tags

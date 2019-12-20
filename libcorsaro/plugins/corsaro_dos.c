@@ -1808,7 +1808,7 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
         if (outname == NULL) {
             return -1;
         }
-        if (corsaro_start_avro_writer(m->mainwriter, outname) == -1) {
+        if (corsaro_start_avro_writer(m->mainwriter, outname, 0) == -1) {
             free(outname);
             return -1;
         }
@@ -1823,7 +1823,7 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
                     "failed to generate suitable filename for dos flow output");
             return -1;
         }
-        if (corsaro_start_avro_writer(m->ftwriter, outname) == -1) {
+        if (corsaro_start_avro_writer(m->ftwriter, outname, 0) == -1) {
             free(outname);
             return -1;
         }

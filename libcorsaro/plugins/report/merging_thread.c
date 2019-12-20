@@ -626,7 +626,7 @@ static int report_write_avro_output(corsaro_plugin_t *p,
         if (outname == NULL) {
             return -1;
         }
-        if (corsaro_start_avro_writer(m->writer, outname) == -1) {
+        if (corsaro_start_avro_writer(m->writer, outname, 0) == -1) {
             free(outname);
             return -1;
         }
