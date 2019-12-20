@@ -215,6 +215,8 @@ static inline const char * get_filter_stringname(int fbit) {
             return "non-spoofed.udp-port-0";
         case CORSARO_FILTERID_TCP_PORT_0:
             return "non-spoofed.tcp-port-0";
+        case CORSARO_FILTERID_UDP_DESTPORT_80:
+            return "non-spoofed.udp-destport-80";
         case CORSARO_FILTERID_RFC5735:
             return "non-routed.rfc5735";
         case CORSARO_FILTERID_BACKSCATTER:
@@ -239,6 +241,8 @@ static inline const char * get_filter_stringname(int fbit) {
             return "non-erratic.dns-resp-non-standard-v2";
         case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
             return "non-erratic.netbios-query-name";
+        case CORSARO_FILTERID_UDP_IPLEN_1500:
+            return "non-erratic.udp-ip-len-1500";
         case CORSARO_FILTERID_NOTIP:
             return "not-ip";
     }
