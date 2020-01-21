@@ -605,7 +605,7 @@ static int insert_sorted_key(Pvoid_t *topmap, struct corsaro_flowtuple *ft,
  */
 static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
         struct corsaro_flowtuple_state_t *state, struct corsaro_flowtuple *t,
-        uint32_t increment) {
+        uint32_t increment, corsaro_flowtuple_config_t *conf) {
   int khret;
   khiter_t khiter;
   struct corsaro_flowtuple *new_6t = NULL;
@@ -635,16 +635,21 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
     new_6t->memsrc = memsrc;
     new_6t->packet_cnt = increment;
 
-    new_6t->sort_key_top = FT_CALC_SORT_KEY_TOP(new_6t);
-    new_6t->sort_key_bot = FT_CALC_SORT_KEY_BOTTOM(new_6t);
+    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
+        new_6t->sort_key_top = FT_CALC_SORT_KEY_TOP(new_6t);
+        new_6t->sort_key_bot = FT_CALC_SORT_KEY_BOTTOM(new_6t);
 
-    if (insert_sorted_key(&(state->keysort_levelone), new_6t, logger) < 0) {
-        if (state->fthandler) {
-            release_corsaro_memhandler_item(state->fthandler, new_6t->memsrc);
-        } else {
-            free(new_6t);
+        if (insert_sorted_key(&(state->keysort_levelone), new_6t, logger) < 0) {
+            if (state->fthandler) {
+                release_corsaro_memhandler_item(state->fthandler, new_6t->memsrc);
+            } else {
+                free(new_6t);
+            }
+            return -1;
         }
-        return -1;
+    } else {
+        new_6t->sort_key_top = 0;
+        new_6t->sort_key_bot = 0;
     }
 
     /* add it to the hash */
@@ -747,7 +752,7 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
         t.hash_val = corsaro_flowtuple_hash_func(&t);
     }
 
-    if (corsaro_flowtuple_add_inc(p->logger, state, &t, 1) != 0) {
+    if (corsaro_flowtuple_add_inc(p->logger, state, &t, 1, conf) != 0) {
         corsaro_log(p->logger, "could not increment value for flowtuple");
         return -1;
     }
