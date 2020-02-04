@@ -134,11 +134,10 @@ typedef struct corsaro_ft_merge_msg {
     uint8_t type;
     void *content;
     uint32_t interval_ts;
-    uint8_t input_size;
-} PACKED corsaro_ft_merge_msg_t;
+    uint8_t input_source;
+} PACKED corsaro_ft_write_msg_t;
 
 typedef struct corsaro_flowtuple_interim {
-    corsaro_memhandler_t *handler;
     Pvoid_t hmap;
     uint64_t hsize;
     Pvoid_t sorted_keys;
@@ -167,7 +166,8 @@ typedef struct corsaro_flowtuple_iterator {
 typedef struct corsaro_flowtuple_merger {
     pthread_t tid;
     uint8_t thread_num;
-    corsaro_avro_writer_t *writer;
+    Pvoid_t writers;
+//    corsaro_avro_writer_t *writer;
     void *inqueue;
     corsaro_logger_t *logger;
     corsaro_plugin_proc_options_t *baseconf;
@@ -175,7 +175,7 @@ typedef struct corsaro_flowtuple_merger {
 } corsaro_flowtuple_merger_t;
 
 struct corsaro_flowtuple_merge_state_t {
-    corsaro_flowtuple_merger_t *mergethreads;
+    corsaro_flowtuple_merger_t *writerthreads;
     uint8_t nextworker;
     uint8_t maxworkers;
     void *pubqueue;
@@ -218,7 +218,8 @@ static const char FLOWTUPLE_RESULT_SCHEMA[] =
       {\"name\": \"maxmind_country\", \"type\": \"string\"}, \
       {\"name\": \"netacq_continent\", \"type\": \"string\"}, \
       {\"name\": \"netacq_country\", \"type\": \"string\"}, \
-      {\"name\": \"prefix2asn\", \"type\": \"long\"}]}";
+      {\"name\": \"prefix2asn\", \"type\": \"long\"} \
+      ]}";
 
 static corsaro_plugin_t corsaro_flowtuple_plugin = {
 
@@ -551,7 +552,6 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
 
     interim = (corsaro_flowtuple_interim_t *)calloc(1,
             sizeof(corsaro_flowtuple_interim_t));
-    interim->handler = state->fthandler;
     if (state->fthandler) {
         add_corsaro_memhandler_user(state->fthandler);
     }
@@ -922,146 +922,65 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
 
 }
 
-static void merge_sorted_inputs(corsaro_flowtuple_merger_t *m,
-        corsaro_flowtuple_iterator_t *inputs, uint8_t threads_ended) {
+static void write_sorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
+        corsaro_avro_writer_t *writer, corsaro_flowtuple_iterator_t *input) {
 
-    int i;
-    struct corsaro_flowtuple *nextft, *prevft;
-    corsaro_memhandler_t *handler = NULL;
-    pqueue_t *pq;
-    uint64_t count = 0, exptotal = 0, combines = 0;
     PWord_t pval;
     Word_t ret;
-
-    pq = pqueue_init(threads_ended, ft_cmp_pri, ft_get_pos, ft_set_pos);
-
-    if (!pq) {
-        corsaro_log(m->logger, "error while creating priority queue to sort flowtuple results.");
-        return;
-    }
-
-    for (i = 0; i < threads_ended; i++) {
-
-        exptotal += inputs[i].hsize;
-
-        JLF(pval, inputs[i].sorted_keys, inputs[i].sortindex_top);
-        if (pval) {
-            inputs[i].current_subkeys = (Pvoid_t)(*pval);
-
-            JLF(pval, inputs[i].current_subkeys, inputs[i].sortindex_bot);
-            if (pval) {
-                nextft = (struct corsaro_flowtuple *)*pval;
-                nextft->from = (void *) &(inputs[i]);
-                nextft->fromind = i;
-                pqueue_insert(pq, nextft);
-            }
-        }
-    }
-
-    prevft = NULL;
-    while ((nextft = (struct corsaro_flowtuple *)(pqueue_pop(pq)))) {
-        corsaro_flowtuple_iterator_t *ftsrc;
-        struct corsaro_flowtuple *toinsert;
-
-        ftsrc = (corsaro_flowtuple_iterator_t *)(nextft->from);
-
-        if (prevft && (prevft->hash_val != nextft->hash_val)) {
-            _write_next_merged_ft(prevft,  m->writer, m->logger);
-            if (handler) {
-                release_corsaro_memhandler_item(handler, prevft->memsrc);
-            } else {
-                free(prevft);
-            }
-        } else if (prevft) {
-            combines ++;
-            nextft->packet_cnt += prevft->packet_cnt;
-            if (handler) {
-                release_corsaro_memhandler_item(handler, prevft->memsrc);
-            } else {
-                free(prevft);
-            }
-        }
-
-        count ++;
-
-        prevft = nextft;
-        handler = ftsrc->handler;
-        if (ftsrc->sortiter == ftsrc->hsize) {
-            continue;
-        }
-
-        JLN(pval, ftsrc->current_subkeys, ftsrc->sortindex_bot);
-        while (pval == NULL) {
-            JLFA(ret, ftsrc->current_subkeys);
-
-            JLN(pval, ftsrc->sorted_keys, ftsrc->sortindex_top);
-            if (pval == NULL) {
-                ftsrc->sortiter = ftsrc->hsize;
-                break;
-            }
-            ftsrc->current_subkeys = (Pvoid_t)(*pval);
-            ftsrc->sortindex_bot = 0;
-            JLF(pval, ftsrc->current_subkeys, ftsrc->sortindex_bot);
-        }
-
-        if (pval == NULL) {
-            continue;
-        }
-
-        toinsert = (struct corsaro_flowtuple *)(*pval);
-        ftsrc->sortiter ++;
-        toinsert->from = (void *)ftsrc;
-        toinsert->fromind = prevft->fromind;
-        pqueue_insert(pq, toinsert);
-    }
-
-    if (prevft) {
-        _write_next_merged_ft(prevft,  m->writer, m->logger);
-        if (handler) {
-            release_corsaro_memhandler_item(handler, prevft->memsrc);
-        } else {
-            free(prevft);
-        }
-    }
-
-}
-
-
-static void merge_unsorted_inputs(corsaro_flowtuple_merger_t *m,
-        corsaro_flowtuple_iterator_t *inputs, uint8_t threads_ended) {
-
-    int i;
     struct corsaro_flowtuple *nextft;
-
     uint64_t count = 0;
 
-    for (i = 0; i < threads_ended; i++) {
-        PWord_t pval;
-        Word_t index = 0;
+    input->sortindex_top = 0;
+    JLF(pval, input->sorted_keys, input->sortindex_top);
 
-        JLF(pval, inputs[i].hmap, index);
+    while (pval) {
+        input->current_subkeys = (Pvoid_t) (*pval);
+        input->sortindex_bot = 0;
+
+        JLF(pval, input->current_subkeys, input->sortindex_bot);
         while (pval) {
             nextft = (struct corsaro_flowtuple *)(*pval);
 
-            _write_next_merged_ft(nextft, m->writer, m->logger);
-            if (inputs[i].handler) {
-                release_corsaro_memhandler_item(inputs[i].handler,
-                            nextft->memsrc);
-            } else {
-                free(nextft);
-            }
+            _write_next_merged_ft(nextft, writer, m->logger);
+            free(nextft);
             count ++;
 
-            JLN(pval, inputs[i].hmap, index);
+            JLN(pval, input->current_subkeys, input->sortindex_bot);
         }
+        JLFA(ret, input->current_subkeys);
+        JLN(pval, input->sorted_keys, input->sortindex_top);
+    }
+}
+
+static void write_unsorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
+        corsaro_avro_writer_t *writer, corsaro_flowtuple_iterator_t *input) {
+
+    struct corsaro_flowtuple *nextft;
+    PWord_t pval;
+    Word_t index = 0;
+
+    uint64_t count = 0;
+
+    JLF(pval, input->hmap, index);
+    while (pval) {
+        nextft = (struct corsaro_flowtuple *)(*pval);
+
+        _write_next_merged_ft(nextft, writer, m->logger);
+        free(nextft);
+        count ++;
+
+        JLN(pval, input->hmap, index);
     }
 }
 
 static void *start_ftmerge_worker(void *tdata) {
     corsaro_flowtuple_merger_t *m = (corsaro_flowtuple_merger_t *)tdata;
-    corsaro_ft_merge_msg_t msg;
-    corsaro_flowtuple_iterator_t *inputs;
+    corsaro_ft_write_msg_t msg;
+    corsaro_flowtuple_iterator_t *input;
+    corsaro_avro_writer_t *w;
     int i;
+    PWord_t pval;
+    Word_t rc, index;
 
     while (1) {
         if (zmq_recv(m->inqueue, &(msg), sizeof(msg), ZMQ_DONTWAIT) < 0) {
@@ -1080,8 +999,14 @@ static void *start_ftmerge_worker(void *tdata) {
         }
 
         if (msg.type == CORSARO_FT_MSG_ROTATE) {
-            if (m->writer) {
-                corsaro_close_avro_writer(m->writer);
+            index = 0;
+            JLF(pval, m->writers, index);
+            while (pval) {
+                w = (corsaro_avro_writer_t *)(*pval);
+                if (w) {
+                    corsaro_close_avro_writer(w);
+                }
+                JLN(pval, m->writers, index);
             }
             continue;
         }
@@ -1090,76 +1015,72 @@ static void *start_ftmerge_worker(void *tdata) {
             continue;
         }
 
-        if (!corsaro_is_avro_writer_active(m->writer)) {
+        JLG(pval, m->writers, msg.input_source);
+        if (!pval) {
+            w = corsaro_create_avro_writer(m->logger, FLOWTUPLE_RESULT_SCHEMA);
+
+            JLI(pval, m->writers, msg.input_source);
+            *pval = (Word_t)w;
+        } else {
+            w = (corsaro_avro_writer_t *)(*pval);
+        }
+
+
+        if (!corsaro_is_avro_writer_active(w)) {
             char *outname = _flowtuple_derive_output_name(
-                    m->logger, m->baseconf, msg.interval_ts, -1);
+                    m->logger, m->baseconf, msg.interval_ts, msg.input_source);
             if (outname == NULL) {
                 continue;
             }
-            if (corsaro_start_avro_writer(m->writer, outname,
-                    m->usesnappy) == -1) {
+            if (corsaro_start_avro_writer(w, outname, m->usesnappy) == -1) {
                 free(outname);
                 continue;
             }
             free(outname);
         }
 
-        inputs = (corsaro_flowtuple_iterator_t *)msg.content;
-        if (msg.type == CORSARO_FT_MSG_MERGE_SORTED) {
-            merge_sorted_inputs(m, inputs, msg.input_size);
-        } else {
-            merge_unsorted_inputs(m, inputs, msg.input_size);
+        input = (corsaro_flowtuple_iterator_t *)msg.content;
+
+        if (msg.type == CORSARO_FT_MSG_MERGE_UNSORTED) {
+            write_unsorted_interim_flowtuples(m, w, input);
+        } else if (msg.type == CORSARO_FT_MSG_MERGE_SORTED) {
+            write_sorted_interim_flowtuples(m, w, input);
         }
 
-
-        for (i = 0; i < msg.input_size; i++) {
-            corsaro_flowtuple_interim_t *interim;
-            Word_t ret;
-            Word_t index;
-            PWord_t pval;
-
-            JLFA(ret, inputs[i].hmap);
-
-            /*
-            index = 0;
-            JLF(pval, inputs[i].sorted_keys, index);
-            while (pval) {
-                Pvoid_t tofree = (Pvoid_t)(*pval);
-                JLFA(ret, tofree);
-                JLN(pval, inputs[i].sorted_keys, index);
-            }
-            */
-            JLFA(ret, inputs[i].sorted_keys);
-
-            if (inputs[i].handler) {
-                destroy_corsaro_memhandler(inputs[i].handler);
-            }
-
-
-            pthread_mutex_destroy(&(inputs[i].parent->mutex));
-            free(inputs[i].parent);
-        }
-        free(inputs);
+        JLFA(rc, input->hmap);
+        JLFA(rc, input->sorted_keys);
+        pthread_mutex_destroy(&(input->parent->mutex));
+        free(input->parent);
+        free(input);
 
         corsaro_log(m->logger,
                 "merging thread %d has completed the merge job for %u",
                 m->thread_num, msg.interval_ts);
-        /* Don't close the file -- rotate_output will deal with that */
     }
 
+    index = 0;
+    JLF(pval, m->writers, index);
+    while (pval) {
+        w = (corsaro_avro_writer_t *)(*pval);
+        if (w) {
+            corsaro_destroy_avro_writer(w);
+        }
+        JLN(pval, m->writers, index);
+    }
+    JLFA(rc, m->writers);
     pthread_exit(NULL);
 }
 
 
 #define FT_MERGE_THREAD_SUB(tosub) \
     subval = tosub; \
-    if (zmq_setsockopt(m->mergethreads[i].inqueue, ZMQ_SUBSCRIBE, &subval, \
+    if (zmq_setsockopt(m->writerthreads[i].inqueue, ZMQ_SUBSCRIBE, &subval, \
                 sizeof(subval)) < 0) { \
         corsaro_log(p->logger, \
                 "merge thread %u failed to sub to messages: %s", \
-                m->mergethreads[i].thread_num, strerror(errno)); \
-        zmq_close(m->mergethreads[i].inqueue); \
-        m->mergethreads[i].inqueue = NULL; \
+                m->writerthreads[i].thread_num, strerror(errno)); \
+        zmq_close(m->writerthreads[i].inqueue); \
+        m->writerthreads[i].inqueue = NULL; \
         goto mthreadfail; \
     }
 
@@ -1175,7 +1096,7 @@ void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
             sizeof(struct corsaro_flowtuple_merge_state_t));
 
     m->maxworkers = conf->maxmergeworkers;
-    m->mergethreads = calloc(m->maxworkers,
+    m->writerthreads = calloc(m->maxworkers,
             sizeof(corsaro_flowtuple_merger_t));
     m->nextworker = 0;
 
@@ -1191,34 +1112,27 @@ void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
     }
 
     for (i = 0; i < m->maxworkers; i++) {
-        m->mergethreads[i].writer = corsaro_create_avro_writer(p->logger,
-                FLOWTUPLE_RESULT_SCHEMA);
-        m->mergethreads[i].logger = p->logger;
-        m->mergethreads[i].baseconf = &(conf->basic);
+        m->writerthreads[i].logger = p->logger;
+        m->writerthreads[i].baseconf = &(conf->basic);
+        m->writerthreads[i].writers = NULL;
 
-        if (!m->mergethreads[i].writer) {
-            corsaro_log(p->logger,
-                    "error while creating avro writer for flowtuple plugin!");
-            continue;
-        }
-
-        m->mergethreads[i].thread_num = i;
-        m->mergethreads[i].inqueue = zmq_socket(conf->zmq_ctxt, ZMQ_SUB);
-        m->mergethreads[i].usesnappy = conf->usesnappy;
+        m->writerthreads[i].thread_num = i;
+        m->writerthreads[i].inqueue = zmq_socket(conf->zmq_ctxt, ZMQ_SUB);
+        m->writerthreads[i].usesnappy = conf->usesnappy;
 
         FT_MERGE_THREAD_SUB(255)
-        FT_MERGE_THREAD_SUB(m->mergethreads[i].thread_num)
-        if (zmq_connect(m->mergethreads[i].inqueue,
+        FT_MERGE_THREAD_SUB(m->writerthreads[i].thread_num)
+        if (zmq_connect(m->writerthreads[i].inqueue,
                     CORSARO_FT_INTERNAL_QUEUE) < 0) {
             corsaro_log(p->logger,
                     "error connecting sub socket for flowtuple merging thread %d: %s",
                     i, strerror(errno));
-            zmq_close(m->mergethreads[i].inqueue);
-            m->mergethreads[i].inqueue = NULL;
+            zmq_close(m->writerthreads[i].inqueue);
+            m->writerthreads[i].inqueue = NULL;
         }
 
-        pthread_create(&(m->mergethreads[i].tid), NULL, start_ftmerge_worker,
-                &(m->mergethreads[i]));
+        pthread_create(&(m->writerthreads[i].tid), NULL, start_ftmerge_worker,
+                &(m->writerthreads[i]));
 
 mthreadfail:
         continue;
@@ -1228,7 +1142,7 @@ mthreadfail:
 
 initfail:
     zmq_close(m->pubqueue);
-    free(m->mergethreads);
+    free(m->writerthreads);
     free(m);
     return NULL;
 }
@@ -1243,21 +1157,18 @@ int corsaro_flowtuple_halt_merging(corsaro_plugin_t *p, void *local) {
     }
 
     for (i = 0; i < m->maxworkers; i++) {
-        corsaro_ft_merge_msg_t msg;
-        if (m->mergethreads[i].inqueue) {
+        corsaro_ft_write_msg_t msg;
+        if (m->writerthreads[i].inqueue) {
             msg.dest = 255;
             msg.type = CORSARO_FT_MSG_STOP;
             msg.content = NULL;
             msg.interval_ts = 0;
-            msg.input_size = 0;
+            msg.input_source = 0;
 
             zmq_send(m->pubqueue, &(msg), sizeof(msg), 0);
 
-            pthread_join(m->mergethreads[i].tid, NULL);
-            zmq_close(m->mergethreads[i].inqueue);
-        }
-        if (m->mergethreads[i].writer) {
-            corsaro_destroy_avro_writer(m->mergethreads[i].writer);
+            pthread_join(m->writerthreads[i].tid, NULL);
+            zmq_close(m->writerthreads[i].inqueue);
         }
     }
 
@@ -1265,7 +1176,7 @@ int corsaro_flowtuple_halt_merging(corsaro_plugin_t *p, void *local) {
         zmq_close(m->pubqueue);
     }
 
-    free(m->mergethreads);
+    free(m->writerthreads);
     free(m);
     return 0;
 }
@@ -1274,10 +1185,10 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     struct corsaro_flowtuple_merge_state_t *m;
     corsaro_flowtuple_config_t *conf;
-    corsaro_flowtuple_iterator_t *inputs;
-    corsaro_ft_merge_msg_t msg;
+    corsaro_ft_write_msg_t msg;
     int i, candind;
     int inputsready;
+    uint8_t *donethreads;
 
     conf = (corsaro_flowtuple_config_t *)(p->config);
     m = (struct corsaro_flowtuple_merge_state_t *)local;
@@ -1288,15 +1199,16 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
     if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
         corsaro_log(p->logger, "waiting on flowtuple sort jobs to finish");
     }
-    inputs = (corsaro_flowtuple_iterator_t *)calloc(fin->threads_ended,
-            sizeof(corsaro_flowtuple_iterator_t));
+
+    donethreads = calloc(fin->threads_ended, sizeof(uint8_t));
 
     inputsready = 0;
     while (inputsready < fin->threads_ended) {
         for (i = 0; i < fin->threads_ended; i++) {
             corsaro_flowtuple_interim_t *interim;
+            corsaro_flowtuple_iterator_t *input = NULL;
 
-            if (inputs[i].hmap != NULL) {
+            if (donethreads[i] != 0) {
                 continue;
             }
 
@@ -1312,32 +1224,52 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
                             "flowtuple sort failed for input %d\n", i);
                 }
                 inputsready ++;
+                input = calloc(1, sizeof(corsaro_flowtuple_iterator_t));
 
-                inputs[i].hmap = interim->hmap;
-                inputs[i].hsize = interim->hsize;
-                inputs[i].handler = interim->handler;
-                inputs[i].nextft = NULL;
+                input->hmap = interim->hmap;
+                input->hsize = interim->hsize;
+                input->nextft = NULL;
+
                 if (interim->usable == 1) {
-                    inputs[i].state = CORSARO_RESULT_TYPE_DATA;
+                    input->state = CORSARO_RESULT_TYPE_DATA;
                 } else {
-                    inputs[i].state = CORSARO_RESULT_TYPE_EOF;
+                    input->state = CORSARO_RESULT_TYPE_EOF;
                 }
                 if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
-                    inputs[i].sorted_keys = interim->sorted_keys;
-                    inputs[i].current_subkeys = NULL;
-                    inputs[i].sortindex_top = 0;
-                    inputs[i].sortindex_bot = 0;
-                    inputs[i].sortiter = 0;
+                    input->sorted_keys = interim->sorted_keys;
+                    input->current_subkeys = NULL;
+                    input->sortindex_top = 0;
+                    input->sortindex_bot = 0;
+                    input->sortiter = 0;
                 } else {
-                    inputs[i].sorted_keys = NULL;
-                    inputs[i].current_subkeys = NULL;
-                    inputs[i].sortindex_top = 0;
-                    inputs[i].sortindex_bot = 0;
-                    inputs[i].sortiter = -1;
+                    input->sorted_keys = NULL;
+                    input->current_subkeys = NULL;
+                    input->sortindex_top = 0;
+                    input->sortindex_bot = 0;
+                    input->sortiter = -1;
                 }
-                inputs[i].parent = interim;
+                input->parent = interim;
                 pthread_join(interim->tid, NULL);
                 pthread_mutex_unlock(&(interim->mutex));
+            }
+
+            if (input) {
+                msg.dest = m->nextworker;
+
+                m->nextworker = (m->nextworker + 1) % m->maxworkers;
+
+                if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
+                    msg.type = CORSARO_FT_MSG_MERGE_SORTED;
+                } else {
+                    msg.type = CORSARO_FT_MSG_MERGE_UNSORTED;
+                }
+
+                msg.content = input;
+                msg.interval_ts = fin->timestamp;
+                msg.input_source = i;
+
+                zmq_send(m->pubqueue, &(msg), sizeof(msg), 0);
+                donethreads[i] = 1;
             }
         }
 
@@ -1346,21 +1278,6 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
         }
     }
 
-    msg.dest = m->nextworker;
-
-    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
-        corsaro_log(p->logger, "flowtuple sorting is complete, now merging");
-        msg.type = CORSARO_FT_MSG_MERGE_SORTED;
-    } else {
-        msg.type = CORSARO_FT_MSG_MERGE_UNSORTED;
-    }
-
-    msg.content = inputs;
-    msg.interval_ts = fin->timestamp;
-    msg.input_size = fin->threads_ended;
-
-    corsaro_log(p->logger, "pushed merge job to thread %u", msg.dest);
-    zmq_send(m->pubqueue, &(msg), sizeof(msg), 0);
 
     return 0;
 }
@@ -1368,22 +1285,23 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
 int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local) {
 
     struct corsaro_flowtuple_merge_state_t *m;
-    corsaro_ft_merge_msg_t msg;
+    corsaro_ft_write_msg_t msg;
+    int i;
 
     m = (struct corsaro_flowtuple_merge_state_t *)local;
     if (m == NULL) {
         return -1;
     }
 
-    msg.dest = m->nextworker;
     msg.type = CORSARO_FT_MSG_ROTATE;
     msg.content = NULL;
     msg.interval_ts = 0;
-    msg.input_size = 0;
+    msg.input_source = 0;
 
-    zmq_send(m->pubqueue, &(msg), sizeof(msg), 0);
-
-    m->nextworker = (m->nextworker + 1) % m->maxworkers;
+    for (i = 0; i < m->maxworkers; i++) {
+        msg.dest = i;
+        zmq_send(m->pubqueue, &(msg), sizeof(msg), 0);
+    }
 
     return 0;
 }
