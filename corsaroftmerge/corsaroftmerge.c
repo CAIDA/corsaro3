@@ -205,7 +205,7 @@ static void *start_reader(void *arg) {
             rdata->source);
     avro_value_t *record;
 
-    int ret = 1;
+    int ret = 1, sendret;
     struct merger_ft *tosend, **end;
 
     while (ret > 0 && !halted) {
@@ -220,16 +220,24 @@ static void *start_reader(void *arg) {
 
         decode_flowtuple_from_avro(record, &(tosend->ft));
 
-        if (zmq_send(rdata->outsock, &(tosend), sizeof(struct merger_ft **),
-                0) != sizeof(struct merger_ft **)) {
-            corsaro_log(rdata->logger, "Error sending message on push socket %s: %s",
-                    rdata->sockname, strerror(errno));
-            goto endreader;
+        while (!halted) {
+            sendret = zmq_send(rdata->outsock, &(tosend),
+                    sizeof(struct merger_ft **), ZMQ_DONTWAIT);
+            if (sendret != sizeof(struct merger_ft **)) {
+                if (errno == EAGAIN) {
+                    if (halted) {
+                        free(tosend);
+                        goto endreader;
+                    }
+                    continue;
+                }
+                corsaro_log(rdata->logger,
+                        "Error sending message on push socket %s: %s",
+                        rdata->sockname, strerror(errno));
+                goto endreader;
+            }
+            break;
         }
-    }
-
-    if (halted) {
-        goto endreader;
     }
 
     end = calloc(1, sizeof(struct merger_ft *));
@@ -309,16 +317,26 @@ void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
             free(prev);
         }
         prev = next;
-        ret = zmq_recv(insocks[next->source], recvbuf, 1024, 0);
-        if (ret < 0) {
-            corsaro_log(logger, "failed to read flowtuple from pull socket %s: %s",
-                    sockname, strerror(errno));
-            goto endmerger;
-        }
+        while (!halted) {
+            ret = zmq_recv(insocks[next->source], recvbuf, 1024, ZMQ_DONTWAIT);
+            if (ret < 0) {
+                if (errno == EAGAIN) {
+                    if (halted) {
+                        goto endmerger;
+                    }
+                    usleep(10);
+                    continue;
+                }
+                corsaro_log(logger, "failed to read flowtuple from pull socket %s: %s",
+                        sockname, strerror(errno));
+                goto endmerger;
+            }
 
-        recvd = (struct merger_ft **)recvbuf;
-        if (*recvd != NULL) {
-            pqueue_insert(pq, *recvd);
+            recvd = (struct merger_ft **)recvbuf;
+            if (*recvd != NULL) {
+                pqueue_insert(pq, *recvd);
+            }
+            break;
         }
     }
 
