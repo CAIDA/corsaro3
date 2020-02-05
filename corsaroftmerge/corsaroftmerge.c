@@ -62,34 +62,58 @@
 #include <Judy.h>
 #include <zmq.h>
 
+/** Tool that will merge the flowtuple records from sorted interim files
+ *  (e.g. the output produced by corsarotrace + the flowtuple plugin) into
+ *  a single sorted avro file, combining any duplicate flowtuples together.
+ */
+
 #define BASE_SOCKETNAME "inproc://ftmerger"
 
+/** Describes a flowtuple record that is ready to be merged */
 struct merger_ft {
+    /** The flowtuple record itself, decoded from avro into a native struct */
     struct corsaro_flowtuple ft;
+    /** The identifier of the reader thread that sent us this record */
     int source;
+    /** The flowtuple's position in the priority queue */
     size_t pqueue_pos;
 };
 
+/** Thread-local data for a reader thread */
 typedef struct avromerge_reader {
     pthread_t threadid;
+
+    /** Name of the file that this thread is reading from */
     char *source;
+    /** The name of the zeromq socket being used by this thread for output */
     char *sockname;
+
+    /** The zeromq socket to write decoded flowtuple records to */
     void *outsock;
+    /** The identifer for this reader thread */
     int readerid;
+    /** A corsaro logger instance, used to write log messages */
     corsaro_logger_t *logger;
 
 } avromerge_reader_t;
 
+/** Getter function for the pqueue position of a merger_ft instance */
 static size_t ft_get_pos(void *a) {
     struct merger_ft *ft = (struct merger_ft *)a;
     return ft->pqueue_pos;
 }
 
+/** Setter function for the pqueue position of a merger_ft instance */
 static void ft_set_pos(void *a, size_t pos) {
     struct merger_ft *ft = (struct merger_ft *)a;
     ft->pqueue_pos = pos;
 }
 
+/** Tests if two flowtuple records are the same.
+ *
+ *  Parameters: a and b     two flowtuple records to be compared
+ *  Returns: 1 if the flowtuples are the same, 0 if they are not.
+ */
 static int ft_same(struct merger_ft *a, struct merger_ft *b) {
 
     if (a == NULL || b == NULL) {
@@ -129,9 +153,26 @@ static int ft_same(struct merger_ft *a, struct merger_ft *b) {
     if (a->ft.tcp_synwinlen != b->ft.tcp_synwinlen) {
         return 0;
     }
+
+    /* Ignore derived properties, such as ASN, "is spoofed" or country, as these
+     * should be the same as long as the source IP is the same.
+     */
+
+    /* Also ignore statistics like packet count -- these don't describe
+     * the flowtuple itself and are just a reflection of how often it was
+     * seen by that corsarotrace thread.
+     */
+
     return 1;
 }
 
+/** Function that determines a flowtuple record's relative sort order
+ *  within a priority queue.
+ *
+ *  This is basically a replica of the flowtuple sort key used by the
+ *  flowtuple plugin, except I've also added the SYN length and initial
+ *  TCP window size to ensure a more deterministic result.
+ */
 static int ft_cmp_pri(void *next, void *curr) {
 
     struct merger_ft *nextft = (struct merger_ft *)next;
@@ -187,18 +228,25 @@ static int ft_cmp_pri(void *next, void *curr) {
 
 volatile int halted = 0;
 
+/** Signal handler for when we get a haltable signal (SIGINT, SIGTERM)
+ */
 static void cleanup_signal(int sig) {
     (void)sig;
     halted = 1;
 }
 
+/** Merges two equivalent flowtuple records together. After calling
+ *  this function, 'prev' can be discarded.
+ */
 static inline void combine_flowtuple_records(struct merger_ft *prev,
         struct merger_ft *next) {
 
+    /** Packet count needs to be added together. */
     next->ft.packet_cnt += prev->ft.packet_cnt;
 
 }
 
+/** Function that operates a reader thread */
 static void *start_reader(void *arg) {
     avromerge_reader_t *rdata = (avromerge_reader_t *)arg;
     corsaro_avro_reader_t *avrdr = corsaro_create_avro_reader(rdata->logger,
@@ -207,6 +255,17 @@ static void *start_reader(void *arg) {
 
     int ret = 1, sendret;
     struct merger_ft *tosend, **end;
+
+    /* The reader thread is very simple -- it opens the given avro file,
+     * reads records from it, decodes them back into 'struct flowtuple'
+     * instances then forwards them back to the main thread via a zeromq
+     * queue.
+     *
+     * The queue is deliberately configured with a relatively low HWM to
+     * ensure that we don't create a large backlog of messages; instead
+     * the reader will effectively block until the main thread has processed
+     * the previous messages it had sent.
+     */
 
     while (ret > 0 && !halted) {
         ret = corsaro_read_next_avro_record(avrdr, &(record));
@@ -220,15 +279,25 @@ static void *start_reader(void *arg) {
 
         decode_flowtuple_from_avro(record, &(tosend->ft));
 
+        /* Don't actually block inside zeromq -- we want to be able to detect
+         * when the user wants the program to halt, so we end up with this
+         * slightly messy block of code.
+         */
         while (!halted) {
+            /* non-blocking send */
             sendret = zmq_send(rdata->outsock, &(tosend),
                     sizeof(struct merger_ft **), ZMQ_DONTWAIT);
             if (sendret != sizeof(struct merger_ft **)) {
                 if (errno == EAGAIN) {
+                    /* send would have blocked, check for halt condition */
                     if (halted) {
+                        /* free tosend here, since we're never going to send it.
+                         * the merger recv loop might already be over.
+                         */
                         free(tosend);
                         goto endreader;
                     }
+                    usleep(10);
                     continue;
                 }
                 corsaro_log(rdata->logger,
@@ -240,13 +309,18 @@ static void *start_reader(void *arg) {
         }
     }
 
-    end = calloc(1, sizeof(struct merger_ft *));
-    *end = NULL;
-    if (zmq_send(rdata->outsock, end, sizeof(struct merger_ft **),
-                0) != sizeof(struct merger_ft **)) {
-        corsaro_log(rdata->logger, "Error sending final message on push socket %s: %s",
+    /* If we get here, we've run out of records to send. Send an obvious
+     * "end" marker to let the merger know that we're done.
+     */
+    if (!halted) {
+        end = calloc(1, sizeof(struct merger_ft *));
+        *end = NULL;
+        if (zmq_send(rdata->outsock, end, sizeof(struct merger_ft **),
+                    0) != sizeof(struct merger_ft **)) {
+            corsaro_log(rdata->logger,
+                "Error sending final message on push socket %s: %s",
                 rdata->sockname, strerror(errno));
-        goto endreader;
+        }
     }
 
 endreader:
@@ -254,6 +328,15 @@ endreader:
     pthread_exit(NULL);
 }
 
+/** Merges flowtuple records received from the reader threads, making
+ *  sure to emit them in sorted order. The records are then re-encoded as
+ *  avro and written to a file using the given avro writer.
+ *
+ *  Parameters: logger      a corsaro logging instance
+ *              avwrt       an open and started corsaro avro writer instance
+ *              zmq_ctxt    the zeromq context for this process
+ *              tcount      the number of reader threads that have been started
+ */
 void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
         void *zmq_ctxt, int tcount) {
     void **insocks;
@@ -267,6 +350,9 @@ void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
     insocks = calloc(tcount, sizeof(void *));
 	pq = pqueue_init(tcount, ft_cmp_pri, ft_get_pos, ft_set_pos);
 
+    /* Set up a zeromq socket to receive flowtuples from each of the reader
+     * threads.
+     */
     for (i = 0; i < tcount; i++) {
         insocks[i] = zmq_socket(zmq_ctxt, ZMQ_PULL);
 
@@ -284,6 +370,7 @@ void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
             goto endmerger;
         }
 
+        /* Read the first available record and put it in the priority queue */
         ret = zmq_recv(insocks[i], recvbuf, 1024, 0);
         if (ret < 0) {
             corsaro_log(logger, "failed to read first flowtuple from pull socket %s: %s",
@@ -300,13 +387,11 @@ void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
     prev = NULL;
     while (!halted && (next = (struct merger_ft *)(pqueue_pop(pq)))) {
 
+        /* If we see two flowtuples that are the same (but presumably
+         * came from different interim files), we need to combine them
+         * into a single entry.
+         */
         if (ft_same(prev, next)) {
-        /*
-            printf("%d %ld %d %d %d %ld %ld %d %d %d\n", next->source,
-                    next->ft.interval_ts, next->ft.protocol, next->ft.ttl,
-                    next->ft.tcp_flags, next->ft.src_ip, next->ft.dst_ip,
-                    next->ft.src_port, next->ft.dst_port, next->ft.ip_len);
-        */
             combine_flowtuple_records(prev, next);
             free(prev);
         } else if (prev) {
@@ -317,6 +402,12 @@ void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
             free(prev);
         }
         prev = next;
+
+        /* Read the next record from the reader thread that provided the
+         * one we just popped and put it in the priority queue.
+         * Again, make sure we don't let zeromq block so that we can
+         * react to user interrupts.
+         */
         while (!halted) {
             ret = zmq_recv(insocks[next->source], recvbuf, 1024, ZMQ_DONTWAIT);
             if (ret < 0) {
@@ -340,6 +431,7 @@ void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
         }
     }
 
+    /* Make sure we write out the last flowtuple */
     if (prev != NULL) {
         encode_flowtuple_as_avro(&(prev->ft), avwrt, logger);
         if (corsaro_append_avro_writer(avwrt, NULL) < 0) {
@@ -408,6 +500,7 @@ int main(int argc, char *argv[]) {
 
     }
 
+    /* Configure our logging */
 	if (logmodestr != NULL) {
         if (strcmp(logmodestr, "stderr") == 0 ||
                     strcmp(logmodestr, "terminal") == 0) {
@@ -443,6 +536,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    /* Create one reader thread per input file specified on the command line */
     input_c = argc - optind;
     readers = calloc(input_c, sizeof(avromerge_reader_t));
     push_sockets = calloc(input_c, sizeof(void *));
@@ -456,6 +550,10 @@ int main(int argc, char *argv[]) {
     for (i = 0; i < input_c; i++) {
         char sockname[1024];
 
+        /* Create the reader output sockets here, so we can close them
+         * once both the reader threads have ended and the merging process
+         * has finished reading from them. Helps avoid deadlocks on exit.
+         */
         snprintf(sockname, 1024, "%s-%d", BASE_SOCKETNAME, i);
         push_sockets[i] = zmq_socket(zmq_ctxt, ZMQ_PUSH);
 
@@ -485,6 +583,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Set up the avro writer that we're going to use for writing all
+     * of the flowtuples to a single avro file on disk.
+     * FLOWTUPLE_RESULT_SCHEMA is defined in corsaro_flowtuple.h
+     */
 	avwrt = corsaro_create_avro_writer(logger, FLOWTUPLE_RESULT_SCHEMA);
 	if (avwrt == NULL) {
 		return 1;
@@ -496,6 +598,7 @@ int main(int argc, char *argv[]) {
 
     run_merger(logger, avwrt, zmq_ctxt, input_c);
 
+    /* All done -- tidy everything up */
 	corsaro_destroy_avro_writer(avwrt);
     for (i = 0; i < input_c; i++) {
         pthread_join(readers[i].threadid, NULL);
