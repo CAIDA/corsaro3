@@ -65,11 +65,20 @@
 #define BASE_SOCKETNAME "inproc://ftmerger"
 
 struct merger_ft {
-
     struct corsaro_flowtuple ft;
     int source;
     size_t pqueue_pos;
 };
+
+typedef struct avromerge_reader {
+    pthread_t threadid;
+    char *source;
+    char *sockname;
+    void *outsock;
+    int readerid;
+    corsaro_logger_t *logger;
+
+} avromerge_reader_t;
 
 static size_t ft_get_pos(void *a) {
     struct merger_ft *ft = (struct merger_ft *)a;
@@ -176,16 +185,6 @@ static int ft_cmp_pri(void *next, void *curr) {
 }
 
 
-typedef struct avromerge_reader {
-    pthread_t threadid;
-    char *source;
-    char *sockname;
-    void *outsock;
-    int readerid;
-    corsaro_logger_t *logger;
-
-} avromerge_reader_t;
-
 volatile int halted = 0;
 
 static void cleanup_signal(int sig) {
@@ -206,10 +205,10 @@ static void *start_reader(void *arg) {
             rdata->source);
     avro_value_t *record;
 
-    int ret = 1, c = 0;
+    int ret = 1;
     struct merger_ft *tosend, **end;
 
-    while (ret > 0) {
+    while (ret > 0 && !halted) {
         ret = corsaro_read_next_avro_record(avrdr, &(record));
 
         if (ret <= 0) {
@@ -229,6 +228,10 @@ static void *start_reader(void *arg) {
         }
     }
 
+    if (halted) {
+        goto endreader;
+    }
+
     end = calloc(1, sizeof(struct merger_ft *));
     *end = NULL;
     if (zmq_send(rdata->outsock, end, sizeof(struct merger_ft **),
@@ -237,7 +240,6 @@ static void *start_reader(void *arg) {
                 rdata->sockname, strerror(errno));
         goto endreader;
     }
-
 
 endreader:
 	corsaro_destroy_avro_reader(avrdr);
