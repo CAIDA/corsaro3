@@ -62,6 +62,9 @@
 #include <Judy.h>
 #include <zmq.h>
 
+#include "khash.h"
+#include "ksort.h"
+
 #include "pqueue.h"
 #include "libcorsaro.h"
 #include "libcorsaro_plugin.h"
@@ -193,33 +196,6 @@ typedef struct corsaro_flowtuple_config {
 #define PLUGIN_NAME "flowtuple"
 
 #define CORSARO_FT_INTERNAL_QUEUE "inproc://flowtuplemergejobs"
-
-static const char FLOWTUPLE_RESULT_SCHEMA[] =
-"{\"type\": \"record\",\
-  \"namespace\":\"org.caida.corsaro\",\
-  \"name\":\"flowtuple\",\
-  \"doc\":\"A Corsaro FlowTuple record. All byte fields are in network byte order.\",\
-  \"fields\":[\
-      {\"name\": \"time\", \"type\": \"long\"}, \
-      {\"name\": \"src_ip\", \"type\": \"long\"}, \
-      {\"name\": \"dst_ip\", \"type\": \"long\"}, \
-      {\"name\": \"src_port\", \"type\": \"int\"}, \
-      {\"name\": \"dst_port\", \"type\": \"int\"}, \
-      {\"name\": \"protocol\", \"type\": \"int\"}, \
-      {\"name\": \"ttl\", \"type\": \"int\"}, \
-      {\"name\": \"tcp_flags\", \"type\": \"int\"}, \
-      {\"name\": \"ip_len\", \"type\": \"int\"}, \
-      {\"name\": \"tcp_synlen\", \"type\": \"int\"}, \
-      {\"name\": \"tcp_synwinlen\", \"type\": \"int\"}, \
-      {\"name\": \"packet_cnt\", \"type\": \"long\"}, \
-      {\"name\": \"is_spoofed\", \"type\": \"int\"}, \
-      {\"name\": \"is_masscan\", \"type\": \"int\"}, \
-      {\"name\": \"maxmind_continent\", \"type\": \"string\"}, \
-      {\"name\": \"maxmind_country\", \"type\": \"string\"}, \
-      {\"name\": \"netacq_continent\", \"type\": \"string\"}, \
-      {\"name\": \"netacq_country\", \"type\": \"string\"}, \
-      {\"name\": \"prefix2asn\", \"type\": \"long\"} \
-      ]}";
 
 static corsaro_plugin_t corsaro_flowtuple_plugin = {
 
@@ -760,7 +736,115 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
-static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
+int decode_flowtuple_from_avro(avro_value_t *record,
+        struct corsaro_flowtuple *ft) {
+
+    avro_value_t av;
+    int32_t tmp32;
+    int64_t tmp64;
+    const char *str = NULL;
+    size_t strsize = 0;
+
+    /* TODO error detection and handling... */
+
+    avro_value_get_by_index(record, 0, &av, NULL);
+    avro_value_get_long(&av, &(tmp64));
+    ft->interval_ts = (uint32_t)tmp64;
+
+    avro_value_get_by_index(record, 1, &av, NULL);
+    avro_value_get_long(&av, &(tmp64));
+    ft->src_ip = (uint32_t)tmp64;
+
+    avro_value_get_by_index(record, 2, &av, NULL);
+    avro_value_get_long(&av, &(tmp64));
+    ft->dst_ip = (uint32_t)tmp64;
+
+    avro_value_get_by_index(record, 3, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->src_port = (uint16_t)tmp32;
+
+    avro_value_get_by_index(record, 4, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->dst_port = (uint16_t)tmp32;
+
+    avro_value_get_by_index(record, 5, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->protocol = (uint8_t)tmp32;
+
+    avro_value_get_by_index(record, 6, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->ttl = (uint8_t)tmp32;
+
+    avro_value_get_by_index(record, 7, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->tcp_flags = (uint8_t)tmp32;
+
+    avro_value_get_by_index(record, 8, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->ip_len = (uint16_t)tmp32;
+
+    avro_value_get_by_index(record, 9, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->tcp_synlen = (uint16_t)tmp32;
+
+    avro_value_get_by_index(record, 10, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->tcp_synwinlen = (uint16_t)tmp32;
+
+    avro_value_get_by_index(record, 11, &av, NULL);
+    avro_value_get_long(&av, &(tmp64));
+    ft->packet_cnt = (uint32_t)tmp64;
+
+    avro_value_get_by_index(record, 12, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->is_spoofed = (uint8_t)tmp32;
+
+    avro_value_get_by_index(record, 13, &av, NULL);
+    avro_value_get_int(&av, &(tmp32));
+    ft->is_masscan = (uint8_t)tmp32;
+
+    avro_value_get_by_index(record, 14, &av, NULL);
+    avro_value_get_string(&av, &str, &strsize);
+    assert(strsize == 2);
+    ft->maxmind_continent = (uint16_t)(str[0]) + (((uint16_t)str[1]) << 8);
+
+    avro_value_get_by_index(record, 15, &av, NULL);
+    avro_value_get_string(&av, &str, &strsize);
+    assert(strsize == 2);
+    ft->maxmind_country = (uint16_t)(str[0]) + (((uint16_t)str[1]) << 8);
+
+    avro_value_get_by_index(record, 16, &av, NULL);
+    avro_value_get_string(&av, &str, &strsize);
+    assert(strsize == 2);
+    ft->netacq_continent = (uint16_t)(str[0]) + (((uint16_t)str[1]) << 8);
+
+    avro_value_get_by_index(record, 17, &av, NULL);
+    avro_value_get_string(&av, &str, &strsize);
+    assert(strsize == 2);
+    ft->netacq_country = (uint16_t)(str[0]) + (((uint16_t)str[1]) << 8);
+
+
+    avro_value_get_by_index(record, 18, &av, NULL);
+    avro_value_get_long(&av, &(tmp64));
+    ft->prefixasn = (uint32_t)tmp64;
+
+    ft->tagproviders = (1 << IPMETA_PROVIDER_MAXMIND) |
+            (1 << IPMETA_PROVIDER_NETACQ_EDGE) |
+            (1 << IPMETA_PROVIDER_PFX2AS);
+
+    ft->hash_val = 0;
+    ft->memsrc = NULL;
+    ft->sort_key_top = 0;
+    ft->sort_key_bot = 0;
+    ft->pqueue_pos = 0;
+    ft->from = NULL;
+    ft->fromind = 0;
+    ft->pqueue_pri = 0;
+
+    return 1;
+}
+
+void encode_flowtuple_as_avro(struct corsaro_flowtuple *ft,
         corsaro_avro_writer_t *writer, corsaro_logger_t *logger) {
 
     char valspace[128];
@@ -771,80 +855,80 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->interval_ts), sizeof(nextft->interval_ts)) < 0) {
+                &(ft->interval_ts), sizeof(ft->interval_ts)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->src_ip), sizeof(nextft->src_ip)) < 0) {
+                &(ft->src_ip), sizeof(ft->src_ip)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->dst_ip), sizeof(nextft->dst_ip)) < 0) {
+                &(ft->dst_ip), sizeof(ft->dst_ip)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->src_port), sizeof(nextft->src_port)) < 0) {
+                &(ft->src_port), sizeof(ft->src_port)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->dst_port), sizeof(nextft->dst_port)) < 0) {
+                &(ft->dst_port), sizeof(ft->dst_port)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->protocol), sizeof(nextft->protocol)) < 0) {
+                &(ft->protocol), sizeof(ft->protocol)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->ttl), sizeof(nextft->ttl)) < 0) {
+                &(ft->ttl), sizeof(ft->ttl)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->tcp_flags), sizeof(nextft->tcp_flags)) < 0) {
+                &(ft->tcp_flags), sizeof(ft->tcp_flags)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->ip_len), sizeof(nextft->ip_len)) < 0) {
+                &(ft->ip_len), sizeof(ft->ip_len)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->tcp_synlen), sizeof(nextft->tcp_synlen)) < 0) {
+                &(ft->tcp_synlen), sizeof(ft->tcp_synlen)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->tcp_synwinlen), sizeof(nextft->tcp_synwinlen)) < 0) {
+                &(ft->tcp_synwinlen), sizeof(ft->tcp_synwinlen)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->packet_cnt), sizeof(nextft->packet_cnt)) < 0) {
+                &(ft->packet_cnt), sizeof(ft->packet_cnt)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->is_spoofed), sizeof(nextft->is_spoofed)) < 0) {
+                &(ft->is_spoofed), sizeof(ft->is_spoofed)) < 0) {
         return;
     }
 
     if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                &(nextft->is_masscan), sizeof(nextft->is_masscan)) < 0) {
+                &(ft->is_masscan), sizeof(ft->is_masscan)) < 0) {
         return;
     }
 
-    assert(nextft->tagproviders != 0);
+    assert(ft->tagproviders != 0);
 
-    if (nextft->tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
-        valspace[0] = (char)(nextft->maxmind_continent & 0xff);
-        valspace[1] = (char)((nextft->maxmind_continent >> 8) & 0xff);
+    if (ft->tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
+        valspace[0] = (char)(ft->maxmind_continent & 0xff);
+        valspace[1] = (char)((ft->maxmind_continent >> 8) & 0xff);
         valspace[2] = '\0';
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
@@ -852,39 +936,8 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
             return;
         }
 
-        valspace[0] = (char)(nextft->maxmind_country & 0xff);
-        valspace[1] = (char)((nextft->maxmind_country >> 8) & 0xff);
-        valspace[2] = '\0';
-
-        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                    valspace, 2) < 0) {
-            return;
-        }
-
-    } else {
-        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                "??", 2) < 0) {
-            return;
-        }
-        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                "??", 2) < 0) {
-            return;
-        }
-    }
-
-
-    if (nextft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
-        valspace[0] = (char)(nextft->netacq_continent & 0xff);
-        valspace[1] = (char)((nextft->netacq_continent >> 8) & 0xff);
-        valspace[2] = '\0';
-
-        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
-                    valspace, 2) < 0) {
-            return;
-        }
-
-        valspace[0] = (char)(nextft->netacq_country & 0xff);
-        valspace[1] = (char)((nextft->netacq_country >> 8) & 0xff);
+        valspace[0] = (char)(ft->maxmind_country & 0xff);
+        valspace[1] = (char)((ft->maxmind_country >> 8) & 0xff);
         valspace[2] = '\0';
 
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
@@ -903,9 +956,40 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
         }
     }
 
-    if (nextft->tagproviders & (1 << IPMETA_PROVIDER_PFX2AS)) {
+
+    if (ft->tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+        valspace[0] = (char)(ft->netacq_continent & 0xff);
+        valspace[1] = (char)((ft->netacq_continent >> 8) & 0xff);
+        valspace[2] = '\0';
+
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                    valspace, 2) < 0) {
+            return;
+        }
+
+        valspace[0] = (char)(ft->netacq_country & 0xff);
+        valspace[1] = (char)((ft->netacq_country >> 8) & 0xff);
+        valspace[2] = '\0';
+
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                    valspace, 2) < 0) {
+            return;
+        }
+
+    } else {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                "??", 2) < 0) {
+            return;
+        }
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_STRING,
+                "??", 2) < 0) {
+            return;
+        }
+    }
+
+    if (ft->tagproviders & (1 << IPMETA_PROVIDER_PFX2AS)) {
         if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
-                    &(nextft->prefixasn), sizeof(nextft->prefixasn)) < 0) {
+                    &(ft->prefixasn), sizeof(ft->prefixasn)) < 0) {
             return;
         }
 
@@ -916,9 +1000,6 @@ static inline void _write_next_merged_ft(struct corsaro_flowtuple *nextft,
         }
     }
 
-    if (corsaro_append_avro_writer(writer, NULL) < 0) {
-        return;
-    }
 
 }
 
@@ -941,7 +1022,10 @@ static void write_sorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
         while (pval) {
             nextft = (struct corsaro_flowtuple *)(*pval);
 
-            _write_next_merged_ft(nextft, writer, m->logger);
+            encode_flowtuple_as_avro(nextft, writer, m->logger);
+            if (corsaro_append_avro_writer(writer, NULL) < 0) {
+                continue;
+            }
             free(nextft);
             count ++;
 
@@ -965,7 +1049,10 @@ static void write_unsorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
     while (pval) {
         nextft = (struct corsaro_flowtuple *)(*pval);
 
-        _write_next_merged_ft(nextft, writer, m->logger);
+        encode_flowtuple_as_avro(nextft, writer, m->logger);
+        if (corsaro_append_avro_writer(writer, NULL) < 0) {
+            continue;
+        }
         free(nextft);
         count ++;
 

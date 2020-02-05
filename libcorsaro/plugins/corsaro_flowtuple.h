@@ -51,12 +51,38 @@
 #define CORSARO_FLOWTUPLE_PLUGIN_H_
 
 #include "pqueue.h"
-#include "config.h"
-#include "khash.h"
-#include "ksort.h"
 #include "libcorsaro.h"
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_memhandler.h"
+#include "libcorsaro_avro.h"
+
+static const char FLOWTUPLE_RESULT_SCHEMA[] =
+"{\"type\": \"record\",\
+  \"namespace\":\"org.caida.corsaro\",\
+  \"name\":\"flowtuple\",\
+  \"doc\":\"A Corsaro FlowTuple record. All byte fields are in network byte order.\",\
+  \"fields\":[\
+      {\"name\": \"time\", \"type\": \"long\"}, \
+      {\"name\": \"src_ip\", \"type\": \"long\"}, \
+      {\"name\": \"dst_ip\", \"type\": \"long\"}, \
+      {\"name\": \"src_port\", \"type\": \"int\"}, \
+      {\"name\": \"dst_port\", \"type\": \"int\"}, \
+      {\"name\": \"protocol\", \"type\": \"int\"}, \
+      {\"name\": \"ttl\", \"type\": \"int\"}, \
+      {\"name\": \"tcp_flags\", \"type\": \"int\"}, \
+      {\"name\": \"ip_len\", \"type\": \"int\"}, \
+      {\"name\": \"tcp_synlen\", \"type\": \"int\"}, \
+      {\"name\": \"tcp_synwinlen\", \"type\": \"int\"}, \
+      {\"name\": \"packet_cnt\", \"type\": \"long\"}, \
+      {\"name\": \"is_spoofed\", \"type\": \"int\"}, \
+      {\"name\": \"is_masscan\", \"type\": \"int\"}, \
+      {\"name\": \"maxmind_continent\", \"type\": \"string\"}, \
+      {\"name\": \"maxmind_country\", \"type\": \"string\"}, \
+      {\"name\": \"netacq_continent\", \"type\": \"string\"}, \
+      {\"name\": \"netacq_country\", \"type\": \"string\"}, \
+      {\"name\": \"prefix2asn\", \"type\": \"long\"} \
+      ]}";
+
 
 corsaro_plugin_t *corsaro_flowtuple_alloc(void);
 
@@ -155,6 +181,15 @@ struct corsaro_flowtuple {
   void *from;
   int fromind;
 } PACKED;
+
+/* Utility functions for other programs that want to handle flowtuple
+ * objects, e.g. corsaroftmerge
+ */
+void encode_flowtuple_as_avro(struct corsaro_flowtuple *ft,
+		corsaro_avro_writer_t *writer, corsaro_logger_t *logger);
+
+int decode_flowtuple_from_avro(avro_value_t *record,
+		struct corsaro_flowtuple *ft);
 
 CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_flowtuple)
 
