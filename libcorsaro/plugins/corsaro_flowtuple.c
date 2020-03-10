@@ -540,7 +540,7 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
 
     pthread_mutex_init(&(interim->mutex), NULL);
 
-    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED && hashsize > 0) {
+    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
         //pthread_create(&(interim->tid), NULL, sort_job, interim);
         interim->sorted_keys = state->keysort_levelone;
         interim->usable = 1;
@@ -555,26 +555,43 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
     return interim;
 }
 
-static int insert_sorted_key(Pvoid_t *topmap, struct corsaro_flowtuple *ft,
-    corsaro_logger_t *logger) {
+static struct corsaro_flowtuple *insert_sorted_key(Pvoid_t *topmap,
+        struct corsaro_flowtuple *ft, corsaro_logger_t *logger) {
+
     PWord_t tval, bval;
     Pvoid_t botmap = NULL;
+    struct corsaro_flowtuple *newft;
+    uint32_t sk_top, sk_bot;
 
-    JLI(tval, (*topmap), ft->sort_key_top);
+    sk_top = FT_CALC_SORT_KEY_TOP(ft);
+    sk_bot = FT_CALC_SORT_KEY_BOTTOM(ft);
+
+    JLI(tval, (*topmap), sk_top);
     botmap = (Pvoid_t) *tval;
 
     /* TODO figure out multi-dimensional JudyL arrays... */
 
-    JLI(bval, botmap, ft->sort_key_bot);
+    JLI(bval, botmap, sk_bot);
     if (*bval == 0) {
-        *bval = (Word_t)ft;
+        newft = calloc(1, sizeof(struct corsaro_flowtuple));
+
+        if (newft == NULL) {
+          corsaro_log(logger, "malloc of flowtuple failed");
+          return NULL;
+        }
+
+        /* fill it */
+        memcpy(newft, ft, sizeof(struct corsaro_flowtuple));
+        newft->memsrc = NULL;
+        newft->packet_cnt = 0;
+        newft->sort_key_top = sk_top;
+        newft->sort_key_bot = sk_bot;
+        *bval = (Word_t)newft;
     } else {
-        corsaro_log(logger, "Attempted to insert new sort key for flowtuple %lu, but there's already something here (%lu:%lu)",
-                ft->hash_val, ft->sort_key_top, ft->sort_key_bot);
-        return -1;
+        newft =(struct corsaro_flowtuple *)(*bval);
     }
     *tval = (Word_t)botmap;
-    return 0;
+    return newft;
 }
 
 /** Either add the given flowtuple to the hash, or increment the current count
@@ -582,65 +599,46 @@ static int insert_sorted_key(Pvoid_t *topmap, struct corsaro_flowtuple *ft,
 static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
         struct corsaro_flowtuple_state_t *state, struct corsaro_flowtuple *t,
         uint32_t increment, corsaro_flowtuple_config_t *conf) {
-  int khret;
-  khiter_t khiter;
   struct corsaro_flowtuple *new_6t = NULL;
   corsaro_memsource_t *memsrc = NULL;
   PWord_t pval;
 
-  /* check if this is in the hash already */
-  JLI(pval, state->st_hash, t->hash_val);
-  if (*pval == 0) {
-
-    /* create a new tuple struct */
-    if (state->fthandler) {
-        new_6t = (struct corsaro_flowtuple *)
-                get_corsaro_memhandler_item(state->fthandler, &memsrc);
-    } else {
-        new_6t = calloc(1, sizeof(struct corsaro_flowtuple));
-    }
-
+  if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
+    new_6t = insert_sorted_key(&(state->keysort_levelone), t, logger);
 
     if (new_6t == NULL) {
-      corsaro_log(logger, "malloc of flowtuple failed");
-      return -1;
+        return -1;
     }
-
-    /* fill it */
-    memcpy(new_6t, t, sizeof(struct corsaro_flowtuple));
-    new_6t->memsrc = memsrc;
-    new_6t->packet_cnt = increment;
-
-    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
-        new_6t->sort_key_top = FT_CALC_SORT_KEY_TOP(new_6t);
-        new_6t->sort_key_bot = FT_CALC_SORT_KEY_BOTTOM(new_6t);
-
-        if (insert_sorted_key(&(state->keysort_levelone), new_6t, logger) < 0) {
-            if (state->fthandler) {
-                release_corsaro_memhandler_item(state->fthandler, new_6t->memsrc);
-            } else {
-                free(new_6t);
-            }
-            return -1;
-        }
-    } else {
-        new_6t->sort_key_top = 0;
-        new_6t->sort_key_bot = 0;
-    }
-
-    /* add it to the hash */
-    *pval = (Word_t)new_6t;
   } else {
-    /* simply increment the existing one */
-    new_6t =(struct corsaro_flowtuple *)(*pval);
+    JLI(pval, state->st_hash, t->hash_val);
+    if (*pval == 0) {
+      new_6t = calloc(1, sizeof(struct corsaro_flowtuple));
+      if (new_6t == NULL) {
+          corsaro_log(logger, "malloc of flowtuple failed");
+          return -1;
+      }
 
-    /* will this cause a wrap? */
-    assert((UINT32_MAX - new_6t->packet_cnt) > increment);
-
-    new_6t->packet_cnt = (new_6t->packet_cnt) + increment;
+      /* fill it */
+      memcpy(new_6t, t, sizeof(struct corsaro_flowtuple));
+      new_6t->memsrc = NULL;
+      new_6t->packet_cnt = 0;
+      new_6t->sort_key_top = 0;
+      new_6t->sort_key_bot = 0;
+      *pval = (Word_t)new_6t;
+    } else {
+      new_6t =(struct corsaro_flowtuple *)(*pval);
+    }
   }
+
+  assert(new_6t != NULL);
+
+  /* will this cause a wrap? */
+  assert((UINT32_MAX - new_6t->packet_cnt) > increment);
+
+  new_6t->packet_cnt = (new_6t->packet_cnt) + increment;
   return 0;
 }
+
 
 
 int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
@@ -1012,7 +1010,11 @@ static void write_sorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
     uint64_t count = 0;
 
     input->sortindex_top = 0;
+
+    JLC(ret, input->sorted_keys, 0, -1);
     JLF(pval, input->sorted_keys, input->sortindex_top);
+
+    fprintf(stderr, "dumping %u toplevel keys\n", ret);
 
     while (pval) {
         input->current_subkeys = (Pvoid_t) (*pval);
