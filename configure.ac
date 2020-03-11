@@ -191,6 +191,7 @@ AC_DEFINE_UNQUOTED([CORSARO_MONITOR_NAME],[$with_monitorname],[Monitor Name])
 ED_WITH_PLUGIN([corsaro_flowtuple],[flowtuple],[SIXT],[yes])
 ED_WITH_PLUGIN([corsaro_dos],[dos],[DOS],[yes])
 ED_WITH_PLUGIN([corsaro_report],[report],[REPORT],[yes])
+ED_WITH_PLUGIN([corsaro_null],[null],[NULL],[yes])
 
 # this MUST go after all the ED_WITH_PLUGIN macro calls
 AC_DEFINE_UNQUOTED([ED_PLUGIN_INIT_ALL_ENABLED], $ED_PLUGIN_INIT_ALL_ENABLED,
