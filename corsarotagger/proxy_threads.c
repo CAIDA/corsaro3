@@ -215,7 +215,7 @@ void *start_zmq_output_thread(void *data) {
             goto proxyexit;
         }
 
-        if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVHWM, &zero, sizeof(zero)) < 0) {
+        if (zmq_setsockopt(proxy_recv[i], ZMQ_RCVHWM, &hwm, sizeof(hwm)) < 0) {
             corsaro_log(glob->logger,
                     "unable to configure tagger output recv socket %s: %s",
                     sockname,strerror(errno));
@@ -420,7 +420,7 @@ void *start_zmq_proxy_thread(void *data) {
 
 	void *proxy_recv = zmq_socket(glob->zmq_ctxt, proxy->recvtype);
 	void *proxy_fwd = zmq_socket(glob->zmq_ctxt, proxy->pushtype);
-	int zero = 0, hwm=1000;
+	int zero = 0, hwm=100;
 	int onesec = 1000;
 
 	if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {
