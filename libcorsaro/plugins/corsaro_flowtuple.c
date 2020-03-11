@@ -1011,10 +1011,7 @@ static void write_sorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
 
     input->sortindex_top = 0;
 
-    JLC(ret, input->sorted_keys, 0, -1);
     JLF(pval, input->sorted_keys, input->sortindex_top);
-
-    fprintf(stderr, "dumping %u toplevel keys\n", ret);
 
     while (pval) {
         input->current_subkeys = (Pvoid_t) (*pval);
