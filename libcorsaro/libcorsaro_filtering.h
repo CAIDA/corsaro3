@@ -228,6 +228,12 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
         libtrace_ip_t *ip, uint32_t iprem, corsaro_filter_torun_t *torun,
         int torun_count);
 
+/* If you want to run *all* filters, use this function instead for
+ * maximum performance.
+ */
+int corsaro_apply_all_filters(corsaro_logger_t *logger,
+        libtrace_ip_t *ip, uint32_t iprem, corsaro_filter_torun_t *torun);
+
 /* High level built-in filters */
 int corsaro_apply_spoofing_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);

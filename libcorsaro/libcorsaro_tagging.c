@@ -534,17 +534,7 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
         return;
     }
 
-    /* Filtering results are either 0 or 1 (didn't match and
-     * matched, respectively) so we use 255 here as an initial
-     * value to avoid confusion.
-     */
-    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
-        torun[i].filterid = i;
-        torun[i].result = 255;
-    }
-
-    corsaro_apply_multiple_filters(logger, ip, iprem, torun,
-            CORSARO_FILTERID_MAX);
+    corsaro_apply_all_filters(logger, ip, iprem, torun);
 
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
         if (torun[i].result == 1) {
