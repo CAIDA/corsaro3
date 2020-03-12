@@ -420,7 +420,7 @@ void *start_zmq_proxy_thread(void *data) {
 
 	void *proxy_recv = zmq_socket(glob->zmq_ctxt, proxy->recvtype);
 	void *proxy_fwd = zmq_socket(glob->zmq_ctxt, proxy->pushtype);
-	int zero = 0, hwm=20;
+	int zero = 0, hwm=1000;
 	int onesec = 1000;
 
 	if (zmq_setsockopt(proxy_recv, ZMQ_LINGER, &zero, sizeof(zero)) < 0) {

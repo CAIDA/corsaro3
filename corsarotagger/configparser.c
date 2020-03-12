@@ -496,7 +496,7 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->pkt_threads = 2;
     glob->tag_threads = 2;
 
-    glob->outputhwm = 125;
+    glob->outputhwm = 10000;
     glob->pubqueuename = NULL;
     glob->trace = NULL;
     glob->filter = NULL;

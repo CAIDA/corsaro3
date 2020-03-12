@@ -406,7 +406,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->logfilename = NULL;
     glob->threads = 4;
     glob->plugincount = 0;
-    glob->inputhwm = 25;
+    glob->inputhwm = 500;
 
     glob->removeerratic = 0;
     glob->removespoofed = 0;

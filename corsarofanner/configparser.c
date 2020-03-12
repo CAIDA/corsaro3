@@ -131,8 +131,8 @@ corsaro_fanner_global_t *corsaro_fanner_init_global(char *filename, int logmode)
 
     glob->logmode = logmode;
     glob->logfilename = NULL;
-    glob->inputhwm = 25;
-    glob->outputhwm = 25;
+    glob->inputhwm = 500;
+    glob->outputhwm = 500;
     glob->logger = NULL;
     glob->threads = 4;
     glob->zmq_ctxt = zmq_ctx_new();

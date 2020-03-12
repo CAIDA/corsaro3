@@ -69,7 +69,7 @@
 void init_packet_thread_data(corsaro_packet_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
 
-    int hwm = 20;
+    int hwm = 500;
     int one = 1;
     tls->stopped = 0;
     tls->lastmisscount = 0;

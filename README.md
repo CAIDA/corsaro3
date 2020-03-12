@@ -240,7 +240,7 @@ The full set of supported config options for corsarotagger is:
                           HWM values will consume more memory whenever the
                           tagger clients are failing to keep up, but will
                           allow more packets to be buffered before dropping
-                          begins. Default is 125.
+                          begins. Default is 10000.
 
     pktthreads            The number of threads to devote to reading packets
                           from the input source. If using an ndag: input, this
@@ -364,7 +364,7 @@ The full set of supported global config options is:
                           the tagger socket. Larger HWM values will consume more
                           local memory whenever the corsarofanner instance is
                           unable to keep up with the incoming packet rate.
-                          Default is 25.
+                          Default is 500.
 
     outputhwm             The high-water mark for the publishing queue which
                           this corsarofanner instance is emitting tagged packets
@@ -374,7 +374,7 @@ The full set of supported global config options is:
                           publishing socket. Larger HWM values will consume more
                           local memory whenever the downstream clients are
                           unable to keep up with the incoming packet rate.
-                          Default is 25.
+                          Default is 500.
 
 Running corsarotrace
 ====================
@@ -465,7 +465,7 @@ The full set of supported global config options is:
                           tagger socket. Larger HWM values will consume more
                           local memory whenever the corsarotrace instance is
                           unable to keep up with the incoming packet rate.
-                          Default is 25.
+                          Default is 500.
 
     libtimeseriesbackends If a plugin is going to use libtimeseries to stream
                           output into a data platform, this sequence will list
