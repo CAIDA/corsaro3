@@ -129,6 +129,65 @@ static int parse_netacq_tag_options(corsaro_logger_t *logger,
     return 0;
 }
 
+static int parse_multicast_config(corsaro_tagger_global_t *glob,
+        yaml_document_t *doc, yaml_node_t *confmap, corsaro_logger_t *logger) {
+
+    yaml_node_t *key, *value;
+    yaml_node_pair_t *pair;
+
+    if (confmap->type != YAML_MAPPING_NODE) {
+        corsaro_log(logger, "Multicast config should be a map!");
+        return -1;
+    }
+
+    for (pair = confmap->data.mapping.pairs.start;
+            pair < confmap->data.mapping.pairs.top; pair ++) {
+        key = yaml_document_get_node(doc, pair->key);
+        value = yaml_document_get_node(doc, pair->value);
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "monitorid") == 0) {
+
+            glob->ndag_monitorid = (uint16_t) (strtoul(
+                    (char *)value->data.scalar.value, NULL, 0) % 65536);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "beaconport") == 0) {
+
+            glob->ndag_beaconport = (uint16_t) (strtoul(
+                    (char *)value->data.scalar.value, NULL, 0) % 65536);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "mtu") == 0) {
+
+            glob->ndag_mtu = (uint16_t) (strtoul(
+                    (char *)value->data.scalar.value, NULL, 0) % 65536);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "ttl") == 0) {
+
+            glob->ndag_ttl = (uint16_t) (strtoul(
+                    (char *)value->data.scalar.value, NULL, 0) % 256);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "groupaddr") == 0) {
+
+            if (!glob->ndag_mcastgroup) {
+                glob->ndag_mcastgroup = strdup((char *)value->data.scalar.value);
+            }
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "sourceaddr") == 0) {
+
+            if (!glob->ndag_sourceaddr) {
+                glob->ndag_sourceaddr = strdup((char *)value->data.scalar.value);
+            }
+        }
+    }
+
+    return 0;
+}
+
 static int parse_pfx2as_tag_options(corsaro_logger_t *logger,
         pfx2asn_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
 
@@ -411,6 +470,13 @@ static int parse_config(void *globalin,
         }
     }
 
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_MAPPING_NODE
+            && !strcmp((char *)key->data.scalar.value, "multicast")) {
+        if (parse_multicast_config(glob, doc, value, logger) != 0) {
+            return -1;
+        }
+    }
+
     return 1;
 }
 
@@ -471,6 +537,7 @@ static void log_configuration(corsaro_tagger_global_t *glob) {
 
 corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
         int logmode) {
+    struct timeval tv;
     corsaro_tagger_global_t *glob = NULL;
 
     /* Allocate memory for global variables */
@@ -510,6 +577,13 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->hasher_data = NULL;
     glob->hasher_required = 0;
 
+    glob->ndag_monitorid = 0;
+    glob->ndag_beaconport = 9000;
+    glob->ndag_mcastgroup = NULL;
+    glob->ndag_sourceaddr = NULL;
+    glob->ndag_mtu = 9000;
+    glob->ndag_ttl = 4;
+
     memset(&(glob->pfxtagopts), 0, sizeof(pfx2asn_opts_t));
     memset(&(glob->maxtagopts), 0, sizeof(maxmind_opts_t));
     memset(&(glob->netacqtagopts), 0, sizeof(netacq_opts_t));
@@ -520,6 +594,10 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->control_uri = NULL;
     glob->ipmeta_queue_uri = NULL;
     glob->ipmeta_state = NULL;
+
+    gettimeofday(&tv, NULL);
+    glob->starttime = bswap_host_to_le64(((tv.tv_sec - 1509494400) * 1000) +
+                (tv.tv_usec / 1000.0));
 
     /* Parse config file */
     if (parse_corsaro_generic_config((void *)glob, filename, "corsarotagger",
@@ -561,6 +639,14 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
 
     if (glob->ipmeta_queue_uri == NULL) {
         glob->ipmeta_queue_uri = strdup(DEFAULT_IPMETA_SOCKET_URI);
+    }
+
+    if (glob->ndag_mcastgroup == NULL) {
+        glob->ndag_mcastgroup = strdup("225.88.0.1");
+    }
+
+    if (glob->ndag_sourceaddr == NULL) {
+        glob->ndag_sourceaddr = strdup("0.0.0.0");
     }
 
     log_configuration(glob);
@@ -697,6 +783,13 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
 
     if (glob->threaddata) {
         free(glob->threaddata);
+    }
+
+    if (glob->ndag_mcastgroup) {
+        free(glob->ndag_mcastgroup);
+    }
+    if (glob->ndag_sourceaddr) {
+        free(glob->ndag_sourceaddr);
     }
 
     destroy_corsaro_logger(glob->logger);

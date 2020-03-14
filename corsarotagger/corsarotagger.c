@@ -386,6 +386,40 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
     return 0;
 }
 
+static int start_ndag_beaconer(pthread_t *tid, ndag_beacon_params_t *bparams) {
+
+    int ret;
+
+#ifdef __linux__
+    pthread_attr_t attrib;
+    cpu_set_t cpus;
+    //int i;
+#endif
+
+#ifdef __linux__
+
+    /* This thread is low impact so can be bound to core 0 */
+    CPU_ZERO(&cpus);
+    CPU_SET(0, &cpus);
+    pthread_attr_init(&attrib);
+    pthread_attr_setaffinity_np(&attrib, sizeof(cpus), &cpus);
+    ret = pthread_create(tid, &attrib, ndag_start_beacon,
+            (void *)(bparams));
+    pthread_attr_destroy(&attrib);
+
+#else
+    ret = pthread_create(tid, NULL, ndag_start_beacon,
+            (void *)(bparams));
+#endif
+
+
+    if (ret != 0) {
+        return -1;
+    }
+
+    return 1;
+}
+
 static void load_maxmind_country_labels(corsaro_tagger_global_t *glob,
         corsaro_ipmeta_state_t *ipmeta_state) {
 
@@ -953,11 +987,17 @@ int main(int argc, char *argv[]) {
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
-    pthread_t proxythreads[2];
+    pthread_t proxythreads[2], beacon_tid;
     struct timeval tv;
+    uint16_t firstport;
+    ndag_beacon_params_t beaconparams;
+    time_t t;
 
     corsaro_tagger_proxy_data_t internalproxy;
     corsaro_tagger_proxy_data_t externalproxy;
+
+    srand((unsigned) time(&t));
+    firstport = 10000 + (rand() % 50000);
 
     corsaro_halted = 0;
     while (1) {
@@ -1067,7 +1107,7 @@ int main(int argc, char *argv[]) {
     externalproxy.pushtype = ZMQ_PUB;
 
     pthread_create(&proxythreads[0], NULL, start_zmq_proxy_thread, &internalproxy);
-    pthread_create(&proxythreads[1], NULL, start_zmq_output_thread, &externalproxy);
+//    pthread_create(&proxythreads[1], NULL, start_zmq_output_thread, &externalproxy);
 
     /* Load the libipmeta provider data */
     glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
@@ -1091,12 +1131,40 @@ int main(int argc, char *argv[]) {
      * blocking send.
      */
 
+    beaconparams.srcaddr = glob->ndag_sourceaddr;
+    beaconparams.groupaddr = glob->ndag_mcastgroup;
+    beaconparams.beaconport = glob->ndag_beaconport;
+    beaconparams.frequency = 1000;
+    beaconparams.monitorid = glob->ndag_monitorid;
+    beaconparams.numstreams = glob->tag_threads;
+    beaconparams.streamports = (uint16_t *)calloc(glob->tag_threads,
+            sizeof(uint16_t));
+
+	sigemptyset(&sig_block_all);
+	if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
+		corsaro_log(glob->logger, "unable to disable signals before starting threads.");
+		return 1;
+	}
+
     /* Initialise all of our thread local state for the tagging threads */
     for (i = 0; i < glob->tag_threads; i++) {
-        init_tagger_thread_data(&(glob->threaddata[i]), i, glob);
+        uint16_t mcast_port = firstport + (2 * i);
+        beaconparams.streamports[i] = mcast_port;
+        init_tagger_thread_data(&(glob->threaddata[i]), i, glob, mcast_port);
         pthread_create(&(glob->threaddata[i].ptid), NULL, start_tagger_thread,
                 &(glob->threaddata[i]));
     }
+
+    /* Start up the ndag beaconing thread */
+    if (start_ndag_beaconer(&beacon_tid, &beaconparams) == -1) {
+        corsaro_log(glob->logger, "Failed to start ndag beaconing thread");
+        return 1;
+    }
+
+	if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
+		corsaro_log(glob->logger, "unable to re-enable signals after starting threads.");
+		return 1;
+	}
 
     /* Initialise all of our thread local state for the processing threads */
     for (i = 0; i < glob->pkt_threads; i++) {
@@ -1163,6 +1231,11 @@ int main(int argc, char *argv[]) {
         glob->trace = NULL;
     }
 
+	ndag_interrupt_beacon();
+	pthread_join(beacon_tid, NULL);
+
+	free(beaconparams.streamports);
+
     /* Destroy the thread local state for each processing thread */
     for (i = 0; i < glob->tag_threads; i++) {
         pthread_join(glob->threaddata[i].ptid, NULL);
@@ -1177,7 +1250,7 @@ int main(int argc, char *argv[]) {
     corsaro_log(glob->logger, "all threads have joined, exiting.");
     corsaro_tagger_free_global(glob);
     pthread_join(proxythreads[0], NULL);
-    pthread_join(proxythreads[1], NULL);
+    //pthread_join(proxythreads[1], NULL);
 
     if (processing) {
         trace_destroy_callback_set(processing);
