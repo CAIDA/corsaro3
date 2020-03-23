@@ -54,6 +54,7 @@
 #include <unistd.h>
 #include <zmq.h>
 
+#include "libcorsaro_common.h"
 #include "libcorsaro_log.h"
 #include "libcorsaro_tagging.h"
 #include "corsarotagger.h"
@@ -87,6 +88,7 @@ void init_tagger_thread_data(corsaro_tagger_local_t *tls,
     tls->errorcount = 0;
     tls->threadid = threadid;
     tls->mcast_port = mcast_port;
+    tls->next_seq = 1;
 
     if (tls->tagger == NULL) {
         corsaro_log(glob->logger,
@@ -356,6 +358,13 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
         msgused += packet->pktlen + sizeof(corsaro_tagged_packet_header_t);
         reccount += 1;
 
+        packet->pktlen = htons(packet->pktlen);
+        packet->wirelen = htons(packet->wirelen);
+        packet->ts_sec = htonl(packet->ts_sec);
+        packet->ts_usec = htonl(packet->ts_usec);
+        packet->tagger_id = htonl(tls->glob->instance_id);
+        packet->seqno = bswap_host_to_be64(tls->next_seq);
+
         /* Send the packet on to the external proxy for publishing. Don't
          * block -- if the proxy closes its pull socket (i.e. during
          * pre-exit cleanup), we can end up blocking forever.
@@ -377,6 +386,11 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
             break;
         }
         #endif
+
+        tls->next_seq ++;
+        if (tls->next_seq == 0) {
+            tls->next_seq = 1;
+        }
 
     }
 

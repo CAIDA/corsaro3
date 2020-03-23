@@ -176,6 +176,7 @@ int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     tpkt->ts_sec = tv.tv_sec;
     tpkt->ts_usec = tv.tv_usec;
     tpkt->pktlen = rem;
+    tpkt->wirelen = trace_get_wire_length(packet);
     memset(&(tpkt->tags), 0, sizeof(corsaro_packet_tags_t));
 
     tls->buf->used += sizeof(corsaro_tagged_packet_header_t);

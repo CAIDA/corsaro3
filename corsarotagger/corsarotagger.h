@@ -196,6 +196,7 @@ typedef struct corsaro_tagger_glob {
     uint16_t ndag_mtu;
     char *ndag_mcastgroup;
     char *ndag_sourceaddr;
+    uint32_t instance_id;
 
 } corsaro_tagger_global_t;
 
@@ -253,6 +254,8 @@ struct corsaro_tagger_local {
     int mcast_sock;
     ndag_encap_params_t ndag_params;
     struct addrinfo *mcast_target;
+
+    uint64_t next_seq;
 
     /** A zeromq socket to publish tagged packets onto */
     //void *pubsock;

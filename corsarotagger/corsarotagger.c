@@ -320,6 +320,8 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
  */
 static int start_trace_input(corsaro_tagger_global_t *glob) {
 
+    FILE *f = NULL;
+
     /* This is all pretty standard parallel libtrace configuration code */
     glob->trace = trace_create(glob->inputuris[glob->currenturi]);
     if (trace_is_err(glob->trace)) {
@@ -360,6 +362,33 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
                     "unable to push filter to trace object: %s", err.problem);
             return -1;
         }
+    }
+
+    /* Assign ourselves a "random" tagger ID number so that clients can
+     * tell if the tagger is restarted (and therefore its sequence space
+     * will be reset).
+     * Try using /dev/urandom but fall back to current Unix time if that
+     * fails for some reason.
+     */
+    f = fopen("/dev/urandom", "rb");
+    if (f == NULL) {
+        corsaro_log(glob->logger,
+                "unable to open /dev/urandom to generate tagger ID: %s",
+                strerror(errno));
+        glob->instance_id = (uint32_t) time(NULL);
+    }
+
+    while (glob->instance_id == 0) {
+        if (fread(&(glob->instance_id), sizeof(glob->instance_id), 1, f) < 1) {
+            corsaro_log(glob->logger,
+                    "unable to read /dev/urandom to generate tagger ID: %s",
+                    strerror(errno));
+            glob->instance_id = (uint32_t) time(NULL);
+        }
+    }
+
+    if (f) {
+        fclose(f);
     }
 
     if (glob->consterfframing >= 0 &&
