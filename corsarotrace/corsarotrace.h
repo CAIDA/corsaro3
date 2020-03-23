@@ -95,7 +95,7 @@ typedef struct corsaro_trace_glob {
     corsaro_logger_t *logger;
     char *template;
     char *logfilename;
-    char *subqueuename;
+    char *source_uri;
     char *filterstring;
     char *monitorid;
     char *control_uri;
@@ -114,7 +114,6 @@ typedef struct corsaro_trace_glob {
     uint8_t subsource;
     uint8_t logmode;
     uint8_t threads;
-    uint16_t inputhwm;
     uint8_t plugincount;
 
     uint8_t removespoofed;
@@ -124,12 +123,9 @@ typedef struct corsaro_trace_glob {
 
     void *zmq_ctxt;
 
-    uint8_t max_hashbins;
 } corsaro_trace_global_t;
 
 struct corsaro_trace_worker {
-    corsaro_trace_global_t *glob;
-    pthread_t threadid;
     int workerid;
 
     corsaro_interval_t current_interval;
@@ -145,10 +141,7 @@ struct corsaro_trace_worker {
     uint8_t stopped;
 
     corsaro_tagged_loss_tracker_t *tracker;
-    void *zmq_pullsock;
     void *zmq_pushsock;
-
-    libtrace_packet_t *packet;
 };
 
 struct corsaro_trace_merger {

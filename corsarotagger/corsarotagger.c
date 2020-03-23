@@ -862,7 +862,7 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
     switch(req.request_type) {
         case TAGGER_REQUEST_HELLO:
             reply = (corsaro_tagger_control_reply_t *)reply_buffer;
-            reply->hashbins = glob->output_hashbins;
+            reply->hashbins = glob->tag_threads;
             reply->ipmeta_version = htonl(glob->ipmeta_version);
             reply->label_count = 0;
 
@@ -871,7 +871,7 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
             break;
         case TAGGER_REQUEST_IPMETA_UPDATE:
             reply = (corsaro_tagger_control_reply_t *)reply_buffer;
-            reply->hashbins = glob->output_hashbins;
+            reply->hashbins = glob->tag_threads;
             reply->ipmeta_version = htonl(glob->ipmeta_version);
             reply->label_count = 0;
 

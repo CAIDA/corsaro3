@@ -192,6 +192,9 @@ typedef enum {
 
     CORSARO_FILTERID_NOTIP,
 
+
+    /* XXX PLEASE ADD ALL FUTURE FILTERS HERE */
+
     /** Special reserved ID for the "last" filter -- this should always
      *  be at the end of enum declaration.
      */
