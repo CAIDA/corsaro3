@@ -130,9 +130,6 @@ typedef struct corsaro_tagger_glob {
     /** The number of packet processing threads to use */
     uint8_t pkt_threads;
 
-    /** The number of tagging threads to use */
-    uint8_t tag_threads;
-
     /** The HWM for the queue used to output tagged packets */
     uint16_t outputhwm;
 

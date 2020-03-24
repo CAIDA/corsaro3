@@ -79,6 +79,7 @@ void init_tagger_thread_data(corsaro_tagger_local_t *tls,
     int hwm = glob->outputhwm / 2;
     int one = 1;
     char sockname[1024];
+    char subqueuename[1024];
 
     tls->ptid = 0;
     tls->glob = glob;
@@ -111,35 +112,9 @@ void init_tagger_thread_data(corsaro_tagger_local_t *tls,
             glob->ndag_monitorid, (uint16_t)threadid, glob->starttime,
             glob->ndag_mtu, NDAG_PKT_CORSAROTAG, 0);
 
-#if 0
-    /* create zmq socket for publishing */
-    tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
-    if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting HWM for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    /* Don't queue messages for incomplete connections */
-    if (zmq_setsockopt(tls->pubsock, ZMQ_IMMEDIATE, &one, sizeof(one)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting immediate for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    snprintf(sockname, 1024, "%s-%d", TAGGER_PUB_QUEUE, threadid);
-    if (zmq_bind(tls->pubsock, sockname) != 0) {
-        corsaro_log(glob->logger,
-                "error while connecting zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-#endif
-
     tls->pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-    if (zmq_connect(tls->pullsock, TAGGER_SUB_QUEUE) != 0) {
+    snprintf(subqueuename, 1024, "%s-%02d", PACKET_PUB_QUEUE, threadid);
+    if (zmq_connect(tls->pullsock, subqueuename) != 0) {
         corsaro_log(glob->logger,
                 "error while binding zeromq publisher socket in tagger thread %d:%s",
                 threadid, strerror(errno));
@@ -175,12 +150,7 @@ void destroy_local_tagger_state(corsaro_tagger_global_t *glob,
         zmq_setsockopt(tls->controlsock, ZMQ_LINGER, &linger, sizeof(linger));
         zmq_close(tls->controlsock);
     }
-/*
-    if (tls->pubsock) {
-        zmq_setsockopt(tls->pubsock, ZMQ_LINGER, &linger, sizeof(linger));
-        zmq_close(tls->pubsock);
-    }
-*/
+
     if (tls->pullsock) {
         zmq_setsockopt(tls->pullsock, ZMQ_LINGER, &linger, sizeof(linger));
         zmq_close(tls->pullsock);

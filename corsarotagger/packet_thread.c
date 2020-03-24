@@ -69,6 +69,7 @@
 void init_packet_thread_data(corsaro_packet_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
 
+    char pubqueuename[1024];
     int hwm = 500;
     int one = 1;
     tls->stopped = 0;
@@ -96,9 +97,11 @@ void init_packet_thread_data(corsaro_packet_local_t *tls,
         tls->stopped = 1;
     }
 
-    if (zmq_connect(tls->pubsock, PACKET_PUB_QUEUE) != 0) {
+    snprintf(pubqueuename, 1024, "%s-%02d", PACKET_PUB_QUEUE, threadid);
+
+    if (zmq_bind(tls->pubsock, pubqueuename) != 0) {
         corsaro_log(glob->logger,
-                "error while connecting zeromq publisher socket in tagger thread %d:%s",
+                "error while binding zeromq publisher socket in tagger thread %d:%s",
                 threadid, strerror(errno));
         tls->stopped = 1;
     }
