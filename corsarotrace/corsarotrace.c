@@ -294,8 +294,10 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
     }
 
     if (ts < tls->current_interval.time) {
+        tls->pkts_from_prev_interval ++;
         return packet;
     }
+
     /* check if we have passed the end of an interval */
     while (tls->next_report && ts >= tls->next_report) {
         uint8_t complete = 0;
@@ -316,13 +318,13 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
             return packet;
         }
 
-        //if (tls->tracker->lostpackets > 0) {
+        if (tls->tracker->lostpackets > 0) {
             corsaro_log(glob->logger,
                     "warning: worker thread %d has observed %lu packets dropped by the tagger in the past interval (%u instances) -- %lu",
                     tls->workerid,
                     tls->tracker->lostpackets, tls->tracker->lossinstances,
                     tls->tracker->packetsreceived);
-        //}
+        }
         corsaro_reset_tagged_loss_tracker(tls->tracker);
 
         if (glob->rotatefreq > 0 && ts >= tls->next_rotate) {
@@ -368,10 +370,6 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
 
     if (glob->removerouted && !(fbits & CORSARO_FILTERBIT_NONROUTABLE)) {
         goto filtered;
-    }
-
-    if (ts < tls->current_interval.time) {
-        tls->pkts_from_prev_interval ++;
     }
 
     tls->pkts_outstanding ++;
