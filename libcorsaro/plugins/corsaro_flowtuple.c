@@ -62,9 +62,6 @@
 #include <Judy.h>
 #include <zmq.h>
 
-#include "khash.h"
-#include "ksort.h"
-
 #include "pqueue.h"
 #include "libcorsaro.h"
 #include "libcorsaro_plugin.h"
@@ -78,13 +75,6 @@
    'sixtuple' */
 /** The magic number for this plugin when not using /8 opts - "SIXU" */
 #define CORSARO_FLOWTUPLE_MAGIC 0x53495855
-
-/** Initialize the sorting functions and datatypes */
-KSORT_INIT(sixt, struct corsaro_flowtuple *, corsaro_flowtuple_lt);
-
-/** Initialize the hash functions and datatypes */
-KHASH_INIT(sixt, struct corsaro_flowtuple *, char, 0,
-        corsaro_flowtuple_hash_func, corsaro_flowtuple_hash_equal);
 
 
 /** The number of output file pointers to support non-blocking close at the end
@@ -358,39 +348,6 @@ int corsaro_flowtuple_finalise_config(corsaro_plugin_t *p,
     return 0;
 }
 
-/** Given a st hash, malloc and return a sorted array of pointers */
-static int sort_hash(corsaro_logger_t *logger, Pvoid_t hash,
-        struct corsaro_flowtuple ***sorted)
-{
-    khiter_t i;
-    struct corsaro_flowtuple **ptr, *ft;
-    Word_t index, hsize;
-    PWord_t pval;
-
-    JLC(hsize, hash, 0, -1);
-    assert(hsize > 0);
-
-    if ((ptr = malloc(sizeof(struct corsaro_flowtuple *) * hsize)) == NULL) {
-        corsaro_log(logger, "could not malloc array for sorted flowtuple keys");
-        return -1;
-    }
-    *sorted = ptr;
-
-    index = 0;
-    JLF(pval, hash, index);
-    while (pval) {
-        ft = (struct corsaro_flowtuple *)(*pval);
-
-        *ptr = ft;
-        ptr ++;
-
-        JLN(pval, hash, index);
-    }
-
-    ks_introsort(sixt, hsize, *sorted);
-    return 0;
-}
-
 
 void corsaro_flowtuple_destroy_self(corsaro_plugin_t *p) {
     if (p->config) {
@@ -496,32 +453,12 @@ int corsaro_flowtuple_start_interval(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
-static void *sort_job(void *tdata) {
-    corsaro_flowtuple_interim_t *interim = (corsaro_flowtuple_interim_t *)tdata;
-
-#if 0
-    if (sort_hash(interim->logger, interim->hmap, &(interim->sorted_keys)) != 0)
-    {
-        corsaro_log(interim->logger, "unable to sort flowtuple keys");
-        interim->sorted_keys = NULL;
-        pthread_mutex_lock(&(interim->mutex));
-        interim->usable = -1;
-    } else {
-        pthread_mutex_lock(&(interim->mutex));
-        interim->usable = 1;
-    }
-    pthread_mutex_unlock(&(interim->mutex));
-#endif
-    pthread_exit(NULL);
-}
-
 void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
         corsaro_interval_t *int_end, uint8_t complete) {
 
     corsaro_flowtuple_config_t *conf;
     struct corsaro_flowtuple_state_t *state;
     corsaro_flowtuple_interim_t *interim = NULL;
-    kh_sixt_t *h;
     Word_t hashsize;
 
     FLOWTUPLE_PROC_FUNC_START("corsaro_flowtuple_end_interval", NULL);
@@ -541,7 +478,6 @@ void *corsaro_flowtuple_end_interval(corsaro_plugin_t *p, void *local,
     pthread_mutex_init(&(interim->mutex), NULL);
 
     if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
-        //pthread_create(&(interim->tid), NULL, sort_job, interim);
         interim->sorted_keys = state->keysort_levelone;
         interim->usable = 1;
     } else {
@@ -1285,10 +1221,6 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
     m = (struct corsaro_flowtuple_merge_state_t *)local;
     if (m == NULL) {
         return -1;
-    }
-
-    if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
-        corsaro_log(p->logger, "waiting on flowtuple sort jobs to finish");
     }
 
     donethreads = calloc(fin->threads_ended, sizeof(uint8_t));
