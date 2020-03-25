@@ -286,8 +286,7 @@ typedef struct prefix2asn_options {
 } pfx2asn_opts_t;
 
 typedef struct corsaro_tagged_loss_tracker {
-    uint64_t *nextseq;
-    uint8_t max_hashbins;
+    uint64_t nextseq;
     uint32_t taggerid;
 
     uint64_t packetsreceived;

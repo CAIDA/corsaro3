@@ -651,13 +651,7 @@ corsaro_tagged_loss_tracker_t *corsaro_create_tagged_loss_tracker(
         return NULL;
     }
 
-    tracker->max_hashbins = maxhashbins;
-    tracker->nextseq = calloc(maxhashbins, sizeof(uint64_t));
-
-    if (!tracker->nextseq) {
-        free(tracker);
-        return NULL;
-    }
+    tracker->nextseq = 0;
     return tracker;
 }
 
@@ -667,9 +661,6 @@ void corsaro_free_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker) {
         return;
     }
 
-    if (tracker->nextseq) {
-        free(tracker->nextseq);
-    }
     free(tracker);
 }
 
@@ -707,24 +698,23 @@ int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
 	if (tagid != tracker->taggerid) {
 		/* tagger has restarted -- reset our sequence numbers */
 		tracker->taggerid = tagid;
-		memset(tracker->nextseq, 0, sizeof(uint64_t) * tracker->max_hashbins);
+        tracker->nextseq = 0;
 	}
 
 	/* seqno of 0 is a reserved value -- we will never receive a seqno
 	 * of 0, so we can use it to mark the next expected sequence number
 	 * as "unknown".
 	 */
-	if (tracker->nextseq[seqindex] != 0 &&
-			thisseq != tracker->nextseq[seqindex]) {
-		tracker->lostpackets += (thisseq - tracker->nextseq[seqindex]);
+	if (tracker->nextseq != 0 && thisseq != tracker->nextseq) {
+		tracker->lostpackets += (thisseq - tracker->nextseq);
 		tracker->lossinstances ++;
 	}
     tracker->packetsreceived ++;
     tracker->bytesreceived += ntohs(taghdr->pktlen);
 
-	tracker->nextseq[seqindex] = thisseq + 1;
-	if (tracker->nextseq[seqindex] == 0) {
-		tracker->nextseq[seqindex] = 1;
+	tracker->nextseq = thisseq + 1;
+	if (tracker->nextseq == 0) {
+		tracker->nextseq = 1;
 	}
 
 	return 0;
