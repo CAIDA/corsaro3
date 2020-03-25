@@ -11,7 +11,7 @@ as nDAG streams or DPDK pipelines.
 Requirements
 ============
 
- * libtrace >= 4.0.10 -- download from https://github.com/LibtraceTeam/libtrace
+ * libtrace >= 4.0.12 -- download from https://github.com/LibtraceTeam/libtrace
  * libwandio >= 4.2.0 -- download from https://github.com/wanduow/wandio
  * libyaml -- https://github.com/yaml/libyaml
  * libipmeta -- https://github.com/CAIDA/libipmeta
@@ -43,15 +43,14 @@ Standard installation instructions apply.
 
 Included Tools
 ==============
-There are five tools included with Corsaro 3:
+There are four tools included with Corsaro 3:
  * corsarotagger -- captures packets from a libtrace source and performs
-                    some preliminary processing (e.g. geolocation).
- * corsarofanner -- receives tagged packets from corsarotagger and
-                    republishes them on a local socket for consumption
-                    by multiple corsarotrace (or other analysis) processes.
- * corsarotrace -- receives tagged packets from either corsarofanner or
-                   corsarotagger and runs one or more of the built-in analysis
-                   plugins against that data stream.
+                    some preliminary processing (e.g. geolocation). Emits
+                    "tagged" packets onto a multicast group for further
+                    downstream analysis.
+ * corsarotrace -- receives tagged packets from corsarotagger and runs one or
+                   more of the built-in analysis plugins against that data
+                   stream.
  * corsarowdcap -- captures packets from a libtrace source and writes them
                    to disk as a set of trace files.
  * corsaroftmerge -- merges interim flowtuple avro files produced by
@@ -222,25 +221,11 @@ The full set of supported config options for corsarotagger is:
                           Packets that do not match the filter will be
                           discarded.
 
-    pubqueuename          The name of the zeroMQ queue to publish the tagged
-                          packets to. This must be a valid zeroMQ socket URI,
-                          preferably using either the ipc:// or tcp://
-                          transports. The default is 'ipc:///tmp/corsarotagger'.
-
     controlsocketname     The name of the zeroMQ queue which will be listening
                           for meta-data requests from clients. This must be a
                           valid zeroMQ socket URI, preferably using either the
                           ipc:// or tcp:// transports. The default is
                           'ipc:///tmp/corsarotagger-control'.
-
-    outputhwm             The high-water mark for the zeroMQ queue that is
-                          publishing tagged packets. If the backlog for this
-                          queue reaches or exceeds this value, then packets
-                          will be dropped rather than sent to clients. Larger
-                          HWM values will consume more memory whenever the
-                          tagger clients are failing to keep up, but will
-                          allow more packets to be buffered before dropping
-                          begins. Default is 10000.
 
     pktthreads            The number of threads to devote to reading packets
                           from the input source. If using an ndag: input, this
@@ -253,6 +238,43 @@ The full set of supported config options for corsarotagger is:
     tagproviders          A sequence that specifies which additional tagging
                           providers should be used to tag captured packets.
                           More information about tag providers is given below.
+
+    multicast             A map that contains configuration options that are
+                          specific to the multicasting of tagged packets to
+                          downstream clients (see below for more details).
+
+
+corsarotagger Multicast
+=======================
+Configuration options for the multicast section of the corsarotagger config
+file are described below.
+
+    monitorid             A number that uniquely identifies this particular
+                          tagger instance.
+
+    beaconport            The port to use for multicasting nDAG beacon messages.
+                          These messages are used to tell clients how many
+                          streams of tagged packets there are and what ports
+                          they are being multicast on. nDAG clients need to
+                          know this port to join the tagged multicast groups.
+
+    groupaddr             The multicast address that will be used for delivering
+                          tagged packets and beacon messages. Must be a valid
+                          IPv4 multicast address.
+
+    sourceaddr            The IP address of the interface that the multicast
+                          should be transmitted on.
+
+    mtu                   The MTU that should be used when constructing nDAG
+                          messages. Note that this should be slightly (e.g. 100
+                          bytes) smaller than your expected MTU on the
+                          path that you will be using to distribute the
+                          multicast to clients, just to account for L2 + IP
+                          encapsulation.
+
+    ttl                   The TTL to set on the emitted multicast packets.
+                          Defaults to 4, to allow multicast to be routed
+                          into containers by receiving hosts.
 
 
 corsarotagger Tag Providers
@@ -310,72 +332,6 @@ To enable NetAcuity geo-location tagging, add the following entry to your
                          (may be specified multiple times)
 
 
-Running corsarofanner
-=====================
-
-To use corsarofanner, write a suitable config file (see below for more
-details) and run the following command:
-
-    ./corsarofanner -c <config filename> -l <logmode>
-
-Use corsarofanner to consume a feed of tagged packets that are being
-published by corsarotagger over a TCP socket and re-publish those packets
-on a local IPC socket on the host running the fanner. This allows you to
-run multiple corsarotrace instances on the same host without each instance
-consuming network bandwidth to receive a separate feed from a remote
-corsarotagger.
-
-The full set of supported global config options is:
-
-    threads               The number of threads to use for consuming and
-                          re-publishing tagged packets. Clients must make sure
-                          that they are consuming from the queues created by
-                          all of the threads (e.g. the number of processing
-                          threads for corsarotrace instances MUST match this
-                          number to avoid missing packets). Defaults to 4.
-
-    logfilename           If the log mode is set to 'file', the log messages
-                          will be written to the file name provided by this
-                          option. This option must be set if the log mode
-                          is set to 'file'.
-
-    statfilename          If specified, each thread will write basic statistics
-                          about received and missing packets to a file using
-                          the given value as the base filename, followed by
-                          "-t<thread id>".
-
-    subqueuename          The name of the zeroMQ queue where the
-                          corresponding corsarotagger is writing tagged packets
-                          to. This MUST match the 'pubqueuename' option being
-                          used by the corsarotagger instance.
-                          If not specified, corsarofanner will immediately halt.
-
-    pubqueuename          The base name of the zeroMQ queue to re-publish any
-                          received packets to. This queue should be an "ipc://"
-                          queue and each thread will extend the base name to
-                          include its thread ID.
-                          Defaults to "ipc://tmp/corsarofanner".
-
-    inputhwm              The high-water mark for the subscription queue which
-                          this corsarofanner instance is receiving tagged
-                          packets from. This is approximately the number of
-                          received packets that each processing thread can
-                          buffer internally before having to stop reading from
-                          the tagger socket. Larger HWM values will consume more
-                          local memory whenever the corsarofanner instance is
-                          unable to keep up with the incoming packet rate.
-                          Default is 500.
-
-    outputhwm             The high-water mark for the publishing queue which
-                          this corsarofanner instance is emitting tagged packets
-                          to. This is approximately the number of received
-                          packets that each processing thread can buffer
-                          internally before having to stop writing to the
-                          publishing socket. Larger HWM values will consume more
-                          local memory whenever the downstream clients are
-                          unable to keep up with the incoming packet rate.
-                          Default is 500.
-
 Running corsarotrace
 ====================
 
@@ -385,8 +341,8 @@ details) and run the following command:
     ./corsarotrace -c <config filename> -l <logmode>
 
 Unlike the other tools, corsarotrace does not read packets directly from the
-capture source -- instead, it expects to received tagged packets either
-directly from corsarotagger or from a corsarofanner local socket. Therefore,
+capture source -- instead, it expects to received tagged packets from
+corsarotagger that are being distributed using the nDAG protocol. Therefore,
 corsarotrace will require a running instance of corsarotagger to be able to
 function correctly.
 
@@ -402,30 +358,20 @@ The full set of supported global config options is:
                           option. This option must be set if the log mode
                           is set to 'file'.
 
-    subqueuename          The name of the zeroMQ queue where the corresponding
-                          corsarotagger or corsarofanner instance is writing
-                          tagged packets to.
-                          This MUST match the 'pubqueuename' option being used
-                          by the corsarotagger or corsarofanner instance.
-                          Defaults to 'ipc:///tmp/corsarotagger'.
+    packetsource          The nDAG protocol URI to use to join a multicast
+                          group where a corsarotagger instance is emitting
+                          tagged packets.
+                          This should look something like:
+                          ndag:<interface>,<groupaddr>,<beaconport>
 
     controlsocketname     The name of the zeroMQ queue to connect to when
                           sending meta-data requests to the corsarotagger
                           instance. This MUST match the 'controlsocketname'
                           option being used by the corsarotagger instance.
-                          A control socket MUST connect to a corsarotagger
-                          instance -- corsarofanner does not have a control
-                          socket to connect to.
                           Defaults to 'ipc:///tmp/corsarotagger-control'.
 
     monitorid             Set the monitor name that will appear in output file
                           names if the %N modifier is present in the template.
-
-    threads               Set the number of threads to be created for packet
-                          processing. Defaults to 4. If connecting to a
-                          corsarofanner instance, ensure that this matches the
-                          number of threads being used by the fanner, otherwise
-                          you will miss packets.
 
     interval              Specifies the distribution interval length in seconds.
                           Defaults to 60.
@@ -456,16 +402,6 @@ The full set of supported global config options is:
     removenotscan         If set to 'yes', only include packets that the
                           corsarotagger has marked as likely to be from a
                           known large-scale scanning system. Defaults to 'no'.
-
-    inputhwm              The high-water mark for the subscription queue which
-                          this corsarotrace instance is receiving tagged packets
-                          from. This is approximately the number of received
-                          packets that each processing thread can buffer
-                          internally before having to stop reading from the
-                          tagger socket. Larger HWM values will consume more
-                          local memory whenever the corsarotrace instance is
-                          unable to keep up with the incoming packet rate.
-                          Default is 500.
 
     libtimeseriesbackends If a plugin is going to use libtimeseries to stream
                           output into a data platform, this sequence will list
