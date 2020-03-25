@@ -236,7 +236,6 @@ AC_CONFIG_FILES([Makefile
                         corsarotrace/Makefile
                         corsarotagger/Makefile
                         corsarowdcap/Makefile
-                        corsarofanner/Makefile
                         corsaroftmerge/Makefile
 			common/Makefile
 			common/libpatricia/Makefile

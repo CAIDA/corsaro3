@@ -1,5 +1,5 @@
 SUBDIRS = common libcorsaro corsarotrace corsarotagger corsarowdcap \
-        corsarofanner corsaroftmerge
+        corsaroftmerge
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common
 
 ACLOCAL_AMFLAGS = -I m4
