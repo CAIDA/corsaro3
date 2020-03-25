@@ -726,6 +726,7 @@ int main(int argc, char *argv[]) {
     corsaro_tagger_control_reply_t ctrlreply;
 	libtrace_stat_t *stats;
 	libtrace_callback_set_t *processing = NULL;
+    corsaro_plugin_proc_options_t stdopts;
 
     glob = configure_corsaro(argc, argv);
     if (glob == NULL) {
@@ -741,6 +742,7 @@ int main(int argc, char *argv[]) {
     ctrlreq.request_type = TAGGER_REQUEST_HELLO;
     ctrlreq.data.last_version = 0;
 
+    corsaro_log(glob->logger, "waiting for message from tagger control socket...");
     if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
         corsaro_log(glob->logger, "unable to send request to corsarotagger via control socket: %s", strerror(errno));
         goto endcorsarotrace;
@@ -756,6 +758,21 @@ int main(int argc, char *argv[]) {
     corsaro_log(glob->logger, "corsarotagger is using %u tagger threads",
             ctrlreply.hashbins);
     glob->threads = ctrlreply.hashbins;
+
+    stdopts.template = glob->template;
+    stdopts.monitorid = glob->monitorid;
+    stdopts.procthreads = glob->threads;
+    stdopts.libtsascii = &(glob->libtsascii);
+    stdopts.libtskafka = &(glob->libtskafka);
+    stdopts.libtsdbats = &(glob->libtsdbats);
+
+    if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts,
+                glob->zmq_ctxt) < 0) {
+        corsaro_log(glob->logger,
+                "error while finishing plugin configuration. Exiting.");
+        goto endcorsarotrace;
+    }
+
 
     merger.glob = glob;
     merger.stops_seen = 0;

@@ -497,21 +497,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         return NULL;
     }
 
-    stdopts.template = glob->template;
-    stdopts.monitorid = glob->monitorid;
-    stdopts.procthreads = glob->threads;
-    stdopts.libtsascii = &(glob->libtsascii);
-    stdopts.libtskafka = &(glob->libtskafka);
-    stdopts.libtsdbats = &(glob->libtsdbats);
-
-    if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts,
-            glob->zmq_ctxt) < 0) {
-        corsaro_log(glob->logger,
-            "error while finishing plugin configuration. Exiting.");
-        corsaro_trace_free_global(glob);
-        return NULL;
-    }
-
     return glob;
 
 }
