@@ -497,7 +497,7 @@ static struct corsaro_flowtuple *insert_sorted_key(Pvoid_t *topmap,
     PWord_t tval, bval;
     Pvoid_t botmap = NULL;
     struct corsaro_flowtuple *newft;
-    uint32_t sk_top, sk_bot;
+    uint64_t sk_top, sk_bot;
 
     sk_top = FT_CALC_SORT_KEY_TOP(ft);
     sk_bot = FT_CALC_SORT_KEY_BOTTOM(ft);
