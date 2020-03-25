@@ -229,6 +229,10 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
 		return packet;
 	}
 
+    if (linktype != TRACE_TYPE_CORSAROTAG) {
+        tags = NULL;
+    }
+
 	ts = ntohl(taghdr->ts_sec);
     if (glob->boundstartts && ts < glob->boundstartts) {
         return packet;
