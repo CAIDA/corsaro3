@@ -671,8 +671,13 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     t.tcp_flags = 0; /* in case we don't find a tcp header */
 
     t.ttl = ip_hdr->ip_ttl;
-    t.src_port = tags->src_port;
-    t.dst_port = tags->dest_port;
+    if (tags) {
+        t.src_port = ntohs(tags->src_port);
+        t.dst_port = ntohs(tags->dest_port);
+    } else {
+        t.src_port = trace_get_source_port(packet);
+        t.dst_port = trace_get_destination_port(packet);
+    }
 
     if (ip_hdr->ip_p == TRACE_IPPROTO_TCP) {
         tcp_hdr = (libtrace_tcp_t *) (((char *)ip_hdr) + (ip_hdr->ip_hl * 4));
@@ -693,36 +698,36 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
         }
     }
 
-    if (tags && tags->providers_used & (1 << IPMETA_PROVIDER_MAXMIND)) {
-        t.maxmind_continent = tags->maxmind_continent;
-        t.maxmind_country = tags->maxmind_country;
-    }
-
-    if (tags && tags->providers_used & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
-        t.netacq_continent = tags->netacq_continent;
-        t.netacq_country = tags->netacq_country;
-    }
-
-    if (tags && tags->providers_used & (1 << IPMETA_PROVIDER_PFX2AS)) {
-        t.prefixasn = tags->prefixasn;
-    }
-
     if (tags) {
-        t.tagproviders = tags->providers_used;
+        uint64_t filterbits = bswap_be_to_host64(tags->filterbits);
 
-        if (tags->filterbits & (1 << CORSARO_FILTERID_SPOOFED)) {
+        t.tagproviders = ntohl(tags->providers_used);
+
+        if (t.tagproviders & (1 << IPMETA_PROVIDER_MAXMIND)) {
+            t.maxmind_continent = tags->maxmind_continent;
+            t.maxmind_country = tags->maxmind_country;
+        }
+
+        if (t.tagproviders & (1 << IPMETA_PROVIDER_NETACQ_EDGE)) {
+            t.netacq_continent = tags->netacq_continent;
+            t.netacq_country = tags->netacq_country;
+        }
+
+        if (t.tagproviders & (1 << IPMETA_PROVIDER_PFX2AS)) {
+            t.prefixasn = ntohl(tags->prefixasn);
+        }
+
+
+        if (filterbits & (1 << CORSARO_FILTERID_SPOOFED)) {
             t.is_spoofed = 1;
         }
-        if (tags->filterbits & (1 << CORSARO_FILTERID_LARGE_SCALE_SCAN)) {
+        if (filterbits & (1 << CORSARO_FILTERID_LARGE_SCALE_SCAN)) {
             t.is_masscan = 1;
         }
+
+        t.hash_val = ntohl(tags->ft_hash);
     } else {
         t.tagproviders = 0;
-    }
-
-    if (tags) {
-        t.hash_val = tags->ft_hash;
-    } else {
         t.hash_val = corsaro_flowtuple_hash_func(&t);
     }
 

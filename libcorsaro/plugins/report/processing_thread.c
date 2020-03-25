@@ -49,6 +49,7 @@
 
 #include "report_internal.h"
 #include "corsaro_report.h"
+#include "libcorsaro_common.h"
 #include "libcorsaro_filtering.h"
 
 /** Structure for maintaining state for each IP tracker thread that a
@@ -561,6 +562,9 @@ static int process_tags(corsaro_report_tracker_state_t *track,
 
     PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_COMBINED, 0, 0);
 
+    tags->providers_used = ntohl(tags->providers_used);
+    tags->filterbits = bswap_be_to_host64(tags->filterbits);
+
     if (!tags || tags->providers_used == 0) {
         return newtags;
     }
@@ -577,20 +581,20 @@ static int process_tags(corsaro_report_tracker_state_t *track,
     }
 
     if (tags->protocol == TRACE_IPPROTO_ICMP) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_TYPE, tags->src_port,
-                METRIC_ICMP_MAX);
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_CODE, tags->dest_port,
-                METRIC_ICMP_MAX);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_TYPE,
+                ntohs(tags->src_port), METRIC_ICMP_MAX);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_CODE,
+                ntohs(tags->dest_port), METRIC_ICMP_MAX);
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
-                tags->src_port, METRIC_PORT_MAX);
+                ntohs(tags->src_port), METRIC_PORT_MAX);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
-                tags->dest_port, METRIC_PORT_MAX);
+                ntohs(tags->dest_port), METRIC_PORT_MAX);
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
-                tags->src_port, METRIC_PORT_MAX);
+                ntohs(tags->src_port), METRIC_PORT_MAX);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
-                tags->dest_port, METRIC_PORT_MAX);
+                ntohs(tags->dest_port), METRIC_PORT_MAX);
     }
 
     if (maxmind_tagged(tags)) {
@@ -606,19 +610,19 @@ static int process_tags(corsaro_report_tracker_state_t *track,
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
                 tags->netacq_country, 0);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_REGION,
-                tags->netacq_region, 0);
+                ntohs(tags->netacq_region), 0);
         for (i = 0; i < MAX_NETACQ_POLYGONS; i++) {
             if (tags->netacq_polygon[i] == 0) {
                 continue;
             }
             PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
-                    tags->netacq_polygon[i], 0);
+                    ntohl(tags->netacq_polygon[i]), 0);
         }
     }
 
     if (pfx2as_tagged(tags)) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_PREFIX_ASN, tags->prefixasn,
-                0);
+        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_PREFIX_ASN,
+                ntohl(tags->prefixasn), 0);
     }
 	return newtags;
 }
@@ -679,7 +683,7 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
 	singleip->issrc = issrc;
     singleip->numtags = newtags;
     if (issrc) {
-        singleip->sourceasn = tags->prefixasn;
+        singleip->sourceasn = ntohl(tags->prefixasn);
     } else {
         singleip->sourceasn = 0;
     }
