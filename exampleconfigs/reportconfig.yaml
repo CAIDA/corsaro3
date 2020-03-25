@@ -23,9 +23,9 @@ rotatefreq: 5
 # Number of threads to use to process incoming tagged packets.
 threads: 4
 
-# Name of the ZeroMQ queue where the corsarotagger instance is writing the
-# tagged packets that will act as our input
-subqueuename: "ipc:///tmp/corsarotagger"
+# nDAG multicast group that we will join to get tagged packets
+# format: ndag:<interface>,<groupaddr>,<beaconport>
+packetsource: ndag:eth1,225.100.0.100,8811
 
 # Ignore all packets with a timestamp earlier than this Unix timestamp
 startboundaryts: 0

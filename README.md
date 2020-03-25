@@ -232,9 +232,6 @@ The full set of supported config options for corsarotagger is:
                           should be equal to the number of ndag streams. The
                           default is 2.
 
-    tagthreads            The number of threads to devote to performing the
-                          tagging work on received packets. The default is 2.
-
     tagproviders          A sequence that specifies which additional tagging
                           providers should be used to tag captured packets.
                           More information about tag providers is given below.

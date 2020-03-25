@@ -20,9 +20,6 @@ basicfilter: "icmp or tcp or udp"
 # Number of packet processing threads to use
 pktthreads: 8
 
-# Number of tagging worker threads to use
-tagthreads: 4
-
 # All of our captured packets are standard Ethernet with no extra meta-data
 # and come from an ERF-based source (e.g. Endace DAG)
 # so we can get tell corsarowdcap to assume a constant ERF framing size of 18.
@@ -31,9 +28,27 @@ tagthreads: 4
 # that your ERF framing size is unlikely to be a constant value.
 consterfframing: 18
 
-# The ZeroMQ queue that our tagged packets will be written to
-pubqueuename: "ipc:///tmp/corsarotagger"
+# Configuration for the nDAG multicast group that will be used to deliver
+# tagged packets to downstream clients
+multicast:
 
+  # A unique identifier for this corsarotagger instance
+  monitorid: 99
+
+  # The port number to use for transmitting nDAG beacon messages
+  beaconport: 8811
+
+  # The multicast group address to use for transmitting nDAG messages
+  groupaddr: 225.100.0.100
+
+  # The address of the interface to transmit nDAG messages onto
+  sourceaddr: 10.200.0.1
+
+  # The maximum size of an nDAG message (i.e. expected MTU minus some headroom)
+  mtu: 1400
+
+  # The TTL to set on all nDAG multicast packets
+  ttl: 4
 
 # Configuration for specific tag-data providers that are supported by
 # this tool. Basic tagging will always take place, regardless of what is
