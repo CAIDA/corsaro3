@@ -453,11 +453,6 @@ static int parse_config(void *globalin,
         glob->pkt_threads = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
-    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && !strcmp((char *)key->data.scalar.value, "outputhwm")) {
-        glob->outputhwm = strtoul((char *)value->data.scalar.value, NULL, 10);
-    }
-
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
             && !strcmp((char *)key->data.scalar.value, "tagproviders")) {
         if (parse_tagprov_config(glob, doc, value, logger) != 0) {
@@ -477,7 +472,6 @@ static int parse_config(void *globalin,
 
 static void log_configuration(corsaro_tagger_global_t *glob) {
     corsaro_log(glob->logger, "using %d processing threads", glob->pkt_threads);
-    corsaro_log(glob->logger, "output queue has a HWM of %u", glob->outputhwm);
 
     if (glob->statfilename) {
         corsaro_log(glob->logger, "writing loss statistics to files beginning with %s", glob->statfilename);
@@ -556,7 +550,6 @@ corsaro_tagger_global_t *corsaro_tagger_init_global(char *filename,
     glob->statfilename = NULL;
     glob->pkt_threads = 2;
 
-    glob->outputhwm = 10000;
     glob->pubqueuename = NULL;
     glob->trace = NULL;
     glob->filter = NULL;
