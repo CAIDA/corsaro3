@@ -72,9 +72,9 @@
  * source (probably an ndag multicaster socket) and attach to each packet
  * a set of "tags" that are useful for filtering or analytic purposes.
  *
- * This seems simple, but is actually a lot more complex in practice.
+ * This seems simple, but is slightly more complex in practice.
  *
- * There are quite a few different classes of threads that run concurrently
+ * There are a few different classes of threads that run concurrently
  * to make this all work optimally:
  *   - packet processing threads        ( see packet_thread.c )
  *   - tagger worker threads            ( see tagger_thread.c )
@@ -91,15 +91,13 @@
  *
  * Tagger worker threads do the actual tagging of each packet. This includes
  * both the "basic" tagging (i.e. port numbers, protocols) as well as
- * computing the flowtuple hash. Packets are also assigned to a hash bin
- * (represented by a single character) that allows clients to subscribe to
- * different portions of our output using different threads to parallelise
- * their own workload easily. The hash bin is based on the flowtuple hash to
- * ensure all packets for the same flow end up in the same hash bin.
- *
+ * computing the flowtuple hash.
  * Advanced tagging can also occur via the libipmeta library, provided
  * suitable source data files are available. These can be used for
  * geo-location and prefix-to-ASN mapping of the packet's source IP address.
+ *
+ * Each tagger thread emits the tagged packets to a multicast group, using the
+ * nDAG protocol.
  *
  * The IPmeta reloading thread has a single purpose: wait for a message
  * from the main thread telling it that a SIGHUP has been observed and once
@@ -110,7 +108,7 @@
  * acts upon them (i.e. trigger a reload or begin a clean halt of the tagger).
  * It also waits for query messages from clients to which it will reply with
  * any useful configuration that the client may want to know (such as the
- * number of hash bins being used by the tagger threads).
+ * number of tagger threads that are emitting packets).
  */
 
 
