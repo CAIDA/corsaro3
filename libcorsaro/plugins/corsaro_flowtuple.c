@@ -203,40 +203,6 @@ corsaro_plugin_t *corsaro_flowtuple_alloc(void) {
       return &corsaro_flowtuple_plugin;
 }
 
-static int ft_cmp_pri(void *next, void *curr) {
-
-    struct corsaro_flowtuple *prevft, *nextft;
-    int res = 0;
-
-    prevft = (struct corsaro_flowtuple *)curr;
-    nextft = (struct corsaro_flowtuple *)next;
-
-    if (prevft->sort_key_top != nextft->sort_key_top) {
-        return (prevft->sort_key_top < nextft->sort_key_top);
-    }
-
-    return (prevft->sort_key_bot < nextft->sort_key_bot);
-    /*
-    res = corsaro_flowtuple_lt(nextft, prevft);
-
-    if (res == 0) {
-        return 1;
-    }
-    return 0;
-    */
-}
-
-static size_t ft_get_pos(void *a) {
-    struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)a;
-    return ft->pqueue_pos;
-}
-
-static void ft_set_pos(void *a, size_t pos) {
-    struct corsaro_flowtuple *ft = (struct corsaro_flowtuple *)a;
-    ft->pqueue_pos = pos;
-}
-
-
 int corsaro_flowtuple_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
         yaml_node_t *options) {
 
