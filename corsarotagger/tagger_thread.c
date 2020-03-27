@@ -76,7 +76,7 @@
  */
 void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob, uint16_t mcast_port) {
-    int hwm = glob->outputhwm / 2;
+    int hwm = 250;
     int one = 1;
     char sockname[1024];
     char subqueuename[1024];
@@ -114,6 +114,15 @@ void init_tagger_thread_data(corsaro_tagger_local_t *tls,
 
     tls->pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
     snprintf(subqueuename, 1024, "%s-%02d", PACKET_PUB_QUEUE, threadid);
+
+    if (zmq_setsockopt(tls->pullsock, ZMQ_RCVHWM, &hwm, sizeof(hwm)) < 0) {
+        corsaro_log(glob->logger,
+                "error while setting recv hwm on publisher socker in tagger thread %d: %s",
+                threadid, strerror(errno));
+        tls->stopped = 1;
+        return;
+    }
+
     if (zmq_connect(tls->pullsock, subqueuename) != 0) {
         corsaro_log(glob->logger,
                 "error while binding zeromq publisher socket in tagger thread %d:%s",
