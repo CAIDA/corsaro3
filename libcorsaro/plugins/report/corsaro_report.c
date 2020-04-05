@@ -172,8 +172,7 @@ static void parse_metric_limits(corsaro_report_config_t *conf,
         }
         if (strcasecmp(name, "icmp") == 0) {
             conf->allowedmetricclasses |=
-                    ((1UL << CORSARO_METRIC_CLASS_ICMP_CODE) |
-                     (1UL << CORSARO_METRIC_CLASS_ICMP_TYPE));
+                    ((1UL << CORSARO_METRIC_CLASS_ICMP_TYPECODE));
         }
         if (strcasecmp(name, "netacq") == 0) {
             conf->allowedmetricclasses |=
@@ -383,8 +382,8 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         if (conf->allowedmetricclasses & (1 << CORSARO_METRIC_CLASS_COMBINED)) {
             corsaro_log(p->logger, "report plugin: tracking basic metrics");
         }
-        if (conf->allowedmetricclasses & (1 << CORSARO_METRIC_CLASS_ICMP_CODE))
-        {
+        if (conf->allowedmetricclasses &
+                (1 << CORSARO_METRIC_CLASS_ICMP_TYPECODE)) {
             corsaro_log(p->logger, "report plugin: tracking ICMP metrics");
         }
         if (conf->allowedmetricclasses &

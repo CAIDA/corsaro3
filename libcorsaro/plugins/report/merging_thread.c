@@ -277,12 +277,8 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
             strncpy(res->metrictype, "traffic.protocol", 128);
             snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
-        case CORSARO_METRIC_CLASS_ICMP_CODE:
-            strncpy(res->metrictype, "traffic.icmp.code", 128);
-            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
-            break;
-        case CORSARO_METRIC_CLASS_ICMP_TYPE:
-            strncpy(res->metrictype, "traffic.icmp.type", 128);
+        case CORSARO_METRIC_CLASS_ICMP_TYPECODE:
+            strncpy(res->metrictype, "traffic.icmp.typecode", 128);
             snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
@@ -714,19 +710,18 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
 
     ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_COMBINED, 0);
 
-    /* IP protocols, ICMP codes and types */
-    for (i = 0; i < METRIC_ICMP_MAX; i++) {
+    /* IP protocols */
+    for (i = 0; i < METRIC_IPPROTOS_MAX; i++) {
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_IP_PROTOCOL, i);
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_CODE, i);
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPE, i);
     }
 
-    /* TCP and UDP ports */
+    /* TCP and UDP ports, ICMP type+code */
     for (i = 0; i < METRIC_PORT_MAX; i++) {
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_DEST_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
+        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPECODE, i);
     }
 
     /* XXX Do NOT add empty results for filters, as they may or
