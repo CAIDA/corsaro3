@@ -119,10 +119,13 @@ enum {
     CORSARO_FT_MSG_MERGE_UNSORTED,
 };
 
+/** Enum describing the different compression methods we support for avro
+ *  output.
+ */
 enum {
-    CORSARO_AVRO_OUTPUT_NONE,
-    CORSARO_AVRO_OUTPUT_DEFLATE,
-    CORSARO_AVRO_OUTPUT_SNAPPY
+    CORSARO_AVRO_OUTPUT_NONE,       /**<< Do not write avro output */
+    CORSARO_AVRO_OUTPUT_DEFLATE,    /**<< Write gzipped avro output */
+    CORSARO_AVRO_OUTPUT_SNAPPY      /**<< Write snappy-compressed avro output */
 };
 
 typedef struct corsaro_ft_merge_msg {
@@ -159,35 +162,79 @@ typedef struct corsaro_flowtuple_iterator {
     corsaro_flowtuple_interim_t *parent;
 } corsaro_flowtuple_iterator_t;
 
+/** Configuration options for publishing via kafka */
 typedef struct corsaro_ft_kafka_options {
+    /** The broker(s) to connect to */
     char *brokeruri;
+
+    /** A custom string to prepend to the topic name */
     char *topicprefix;
+
+    /** Number of messages to send in a single batch */
     int batchsize;
+
+    /** Send an incomplete batch after this number of milliseconds */
     int lingerms;
+
+    /** Publish this number of flows (per 10,000 flows). */
     uint16_t sampling;
 
 } corsaro_ft_kafka_options_t;
 
+/** Parameters used to determine which kafka partition a flow should be
+ *  published to.
+ */
 typedef struct corsaro_ft_kafka_partkey {
-    uint32_t ts;
-    uint32_t hash_val;
+    uint32_t ts;        /**<< The interval that the flow was observed in */
+    uint32_t hash_val;  /**<< The hash value of the flow */
 } corsaro_ft_kafka_partkey_t;
 
+
+/** State for a single flowtuple merging worker thread */
 typedef struct corsaro_flowtuple_merger {
+    /** The pthread identifier for this merging worker thread */
     pthread_t tid;
+
+    /** The internal identifier for this merging worker thread */
     uint8_t thread_num;
+
+    /** A hash map of corsaro avro writers, keyed by the ids of the
+     *  processing threads. If there are less merging threads than
+     *  processing threads, a merging thread will have to manage
+     *  multiple writers -- one for each interim file that the merger
+     *  is responsible for.
+     */
     Pvoid_t writers;
+
+    /** A kafka instance for publishing flowtuple records */
     rd_kafka_t *rdk;
+    /** A kafka topic that flowtuple records can be published to */
     rd_kafka_topic_t *rdktopic;
+
+    /** A zeromq socket for receiving flowtuple records from the processing
+     *  threads.
+     */
     void *inqueue;
+
+    /** A corsaro logger instance for reporting errors, messages */
     corsaro_logger_t *logger;
+
+    /** The standard plugin configuration options, provided by corsarotrace */
     corsaro_plugin_proc_options_t *baseconf;
+    /** The number of merging worker threads being used by this plugin */
     uint8_t maxmergeworkers;
+    /** The compression method to use when writing avro output */
     uint8_t avrooutput;
+    /** The kafka configuration options for this plugin */
     corsaro_ft_kafka_options_t *kafkaopts;
 
+    /** A buffer for constructing messages to publish to kafka */
     uint8_t *buf;
+
+    /** The current write pointer for the kafka message buffer */
     uint8_t *writeptr;
+
+    /** The partitioning key data for the current kafka message */
     corsaro_ft_kafka_partkey_t partkey;
 
 } corsaro_flowtuple_merger_t;
@@ -243,14 +290,15 @@ int corsaro_flowtuple_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
         return -1;
     }
 
+    /* Default config settings: avro using deflate, no kafka output */
     CORSARO_INIT_PLUGIN_PROC_OPTS(conf->basic);
     conf->sort_enabled = CORSARO_FLOWTUPLE_SORT_DEFAULT;
-    conf->maxmergeworkers = 2;
+    conf->maxmergeworkers = 4;
     conf->avrooutput = CORSARO_AVRO_OUTPUT_DEFLATE;
     conf->kafkaopts.brokeruri = NULL;
     conf->kafkaopts.topicprefix = NULL;
     conf->kafkaopts.lingerms = 500;
-    conf->kafkaopts.batchsize = 10000;
+    conf->kafkaopts.batchsize = 50;
     conf->kafkaopts.sampling = 10000;
 
     if (options->type != YAML_MAPPING_NODE) {
@@ -559,8 +607,6 @@ static struct corsaro_flowtuple *insert_sorted_key(Pvoid_t *topmap,
     JLI(tval, (*topmap), sk_top);
     botmap = (Pvoid_t) *tval;
 
-    /* TODO figure out multi-dimensional JudyL arrays... */
-
     JLI(bval, botmap, sk_bot);
     if (*bval == 0) {
         newft = calloc(1, sizeof(struct corsaro_flowtuple));
@@ -729,6 +775,17 @@ int corsaro_flowtuple_process_packet(corsaro_plugin_t *p, void *local,
     return 0;
 }
 
+/** Decodes an avro flowtuple record back into the corsaro flowtuple struct.
+ *
+ *  Used by corsaroftmerge, so don't remove this just because it isn't called
+ *  in this source file!
+ *
+ *  @param record       The avro record to be decoded
+ *  @param ft           The corsaro flowtuple structure to populate with the
+ *                      decoded field contents.
+ *
+ *  @return 1 on success
+ */
 int decode_flowtuple_from_avro(avro_value_t *record,
         struct corsaro_flowtuple *ft) {
 
@@ -994,18 +1051,20 @@ void encode_flowtuple_as_avro(struct corsaro_flowtuple *ft,
     }
 }
 
+/** Push a single flowtuple record onto a kafka topic
+ *
+ *  @param m        The merging thread that has received the flowtuple
+ *  @param ft       The flowtuple record to be published
+ */
 static void kafka_publish_flowtuple(corsaro_flowtuple_merger_t *m,
         struct corsaro_flowtuple *ft) {
 
     corsaro_flowtuple_kafka_record_t rec;
     uint32_t roll;
 
-    if (m->partkey.ts == 0) {
-        m->partkey.ts = ft->interval_ts;
-    }
-
-    m->partkey.hash_val = ft->hash_val;
-
+    /* If we are only publishing a sample of the flowtuples, check to
+     * see if this one is selected for publication.
+     */
     if (m->kafkaopts->sampling < 10000) {
         roll = rand() % 10000;
         if (roll >= m->kafkaopts->sampling) {
@@ -1013,6 +1072,17 @@ static void kafka_publish_flowtuple(corsaro_flowtuple_merger_t *m,
         }
     }
 
+    if (m->partkey.ts == 0) {
+        m->partkey.ts = ft->interval_ts;
+    }
+
+    m->partkey.hash_val = ft->hash_val;
+
+    /* We use a specific struct here because:
+     * a) there's a lot of additional fields in the regular flowtuple structure
+     *    that only have meaning internally and are not worth publishing.
+     * b) we need consistent byte ordering on the fields we do publish
+     */
     rec.interval_ts = htonl(ft->interval_ts);
     rec.src_ip = htonl(ft->src_ip);
     rec.dst_ip = htonl(ft->dst_ip);
@@ -1041,6 +1111,12 @@ static void kafka_publish_flowtuple(corsaro_flowtuple_merger_t *m,
     memcpy(m->writeptr, &rec, sizeof(rec));
     m->writeptr += sizeof(rec);
 
+    /* 512 KB seems to be good number for message sizes with kafka. Larger
+     * messages require extra configuration on the broker.
+     *
+     * Also, we flush the message whenever we switch interval to avoid
+     * mixing intervals in the same message.
+     */
     if (m->writeptr - m->buf > (1024 * 512) || ft->interval_ts !=
             m->partkey.ts) {
 
@@ -1061,6 +1137,9 @@ static void kafka_publish_flowtuple(corsaro_flowtuple_merger_t *m,
             break;
         }
 
+        /* Doing this occasionally allows librdkafka to trigger any extra
+         * callbacks (e.g. errors).
+         */
         rd_kafka_poll(m->rdk, 0);
         m->writeptr = m->buf;
         m->partkey.ts = ft->interval_ts;
@@ -1127,6 +1206,9 @@ static void write_unsorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
                 /* shall we do something? */
             }
         }
+        if (m->rdk) {
+            kafka_publish_flowtuple(m, nextft);
+        }
         free(nextft);
         count ++;
 
@@ -1134,6 +1216,23 @@ static void write_unsorted_interim_flowtuples(corsaro_flowtuple_merger_t *m,
     }
 }
 
+/** Assigns a given flowtuple record to a kafka partition
+ *
+ *  Function prototype cannot be changed as this is a specific callback
+ *  method defined in librdkafka.
+ *
+ *  @param rkt      The kafka topic that this record is being published to
+ *  @param key      The corresponding corsaro_ft_kafka_partkey_t for this record
+ *  @param keylen   The size of the key structure
+ *  @param partition_cnt    The number of partitions supported by the kafka
+ *                          cluster
+ *  @param opaque   Unused
+ *  @param msg_opaque   Contains the total number of interim writer worker
+ *                      threads for this flowtuple plugin instance.
+ *
+ *  @return the index of the partition that should receive this flowtuple record
+ *
+ */
 static int32_t assign_kafka_partition(const rd_kafka_topic_t *rkt,
         const void *key, size_t keylen, int32_t partition_cnt,
         void *opaque, void *msg_opaque) {
@@ -1143,9 +1242,23 @@ static int32_t assign_kafka_partition(const rd_kafka_topic_t *rkt,
     pkey = (corsaro_ft_kafka_partkey_t *)key;
     assert(keylen == sizeof(corsaro_ft_kafka_partkey_t));
 
+    /* Most important thing is that any flows that are split across
+     * multiple records (due to non-flow-specific packet-to-thread
+     * mappings) end up on the same kafka partition so that they can be
+     * combined into a single record.
+     */
     return pkey->hash_val % partition_cnt;
 }
 
+/** Creates and configures a kafka producer instance for publishing
+ *  flowtuple records.
+ *
+ *  @param m        The flowtuple "merger" thread that this producer is
+ *                  being created for.
+ *
+ *  @return 1 if the producer is created successfully, -1 if an error
+ *          occurs.
+ */
 static int init_kafka_producer(corsaro_flowtuple_merger_t *m) {
 
     rd_kafka_conf_t *conf;
@@ -1158,6 +1271,8 @@ static int init_kafka_producer(corsaro_flowtuple_merger_t *m) {
     conf = rd_kafka_conf_new();
     tconf = rd_kafka_topic_conf_new();
 
+    /* Set config options for the kafka instance */
+    /* XXX consider making this configurable? */
     res = rd_kafka_conf_set(conf, "compression.codec", "snappy",
             errstr, sizeof(errstr));
     if (res != RD_KAFKA_CONF_OK) {
@@ -1183,6 +1298,7 @@ static int init_kafka_producer(corsaro_flowtuple_merger_t *m) {
         goto initkafkafail;
     }
 
+    /* Add the broker so kafka can connect to it */
     if (rd_kafka_brokers_add(m->rdk, m->kafkaopts->brokeruri) == 0) {
         corsaro_log(m->logger, "Kafka error connecting to broker: %s",
                 m->kafkaopts->brokeruri);
@@ -1190,6 +1306,7 @@ static int init_kafka_producer(corsaro_flowtuple_merger_t *m) {
         goto initkafkafail;
     }
 
+    /* Configure and create the flowtuple topic */
     if (m->kafkaopts->topicprefix != NULL) {
         snprintf(topicname, 1024, "%s.corsaroflowtuple",
                 m->kafkaopts->topicprefix);
@@ -1197,6 +1314,7 @@ static int init_kafka_producer(corsaro_flowtuple_merger_t *m) {
         snprintf(topicname, 1024, "corsaroflowtuple");
     }
 
+    /* Set a callback for assigning flowtuples to kafka partitions */
     rd_kafka_topic_conf_set_partitioner_cb(tconf, assign_kafka_partition);
 
     m->rdktopic = rd_kafka_topic_new(m->rdk, topicname, tconf);
@@ -1233,6 +1351,10 @@ static void *start_ftmerge_worker(void *tdata) {
     PWord_t pval;
     Word_t rc, index;
 
+    /* Create a kafka producer for this thread if we are doing kafka output */
+    /*  XXX would we be better off having a single producer shared by all
+    *       threads? docs imply that would be ok, but is contention an issue?
+    */
     if (m->kafkaopts->brokeruri) {
         if (init_kafka_producer(m) < 0) {
             corsaro_log(m->logger, "error creating kafka producer for flowtuple interim writer thread %d", m->thread_num);
@@ -1272,12 +1394,14 @@ static void *start_ftmerge_worker(void *tdata) {
             continue;
         }
 
+        /* If we're doing avro output, make sure we have a writer instance
+         * available.
+         */
         if (m->avrooutput != CORSARO_AVRO_OUTPUT_NONE) {
             JLG(pval, m->writers, msg.input_source);
             if (!pval) {
                 w = corsaro_create_avro_writer(m->logger,
                         FLOWTUPLE_RESULT_SCHEMA);
-
                 JLI(pval, m->writers, msg.input_source);
                 *pval = (Word_t)w;
             } else {
@@ -1320,6 +1444,8 @@ static void *start_ftmerge_worker(void *tdata) {
                 "merging thread %d has completed the merge job for %u",
                 m->thread_num, msg.interval_ts);
     }
+
+    /* If we were publishing to kafka, make sure we wind that down nicely */
     if (m->rdk) {
         rd_kafka_flush(m->rdk, 30 * 1000);
         if (m->rdktopic) {
@@ -1328,8 +1454,11 @@ static void *start_ftmerge_worker(void *tdata) {
         rd_kafka_destroy(m->rdk);
     }
 
+    if (m->buf) {
+        free(m->buf);
+    }
 
-endinterim:
+    /* Close any avro writer instances that we were using */
     index = 0;
     JLF(pval, m->writers, index);
     while (pval) {
