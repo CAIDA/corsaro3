@@ -84,6 +84,63 @@ static const char FLOWTUPLE_RESULT_SCHEMA[] =
       ]}";
 
 
+typedef struct corsaro_flowtuple_kafka_record {
+  /** The start time for the interval that this flow appeared in */ 
+  uint32_t interval_ts;
+
+  /** The source IP */
+  uint32_t src_ip;
+
+  /** The destination IP */
+  uint32_t dst_ip;
+
+  /** The source port (or ICMP type) */
+  uint16_t src_port;
+
+  /** The destination port (or ICMP code) */
+  uint16_t dst_port;
+
+  /** The protocol */
+  uint8_t protocol;
+
+  /** The TTL */
+  uint8_t ttl;
+
+  /** TCP Flags (excluding NS) */
+  uint8_t tcp_flags;
+
+  /** Length of the IP packet (from the IP header) */
+  uint16_t ip_len;
+
+  /** Size of the TCP SYN (including options) */
+  uint16_t tcp_synlen;
+
+  /** Announced receive window size in the TCP SYN (including options) */
+  uint16_t tcp_synwinlen;
+
+  /** The number of packets that comprise this flowtuple
+      This is populated immediately before the tuple is written out */
+  uint32_t packet_cnt;
+
+  /** Flag indicating whether the source address was probably spoofed */
+  uint8_t is_spoofed;
+
+  /** Flag indicating whether the flow appeared to be a TCP Masscan attempt */
+  uint8_t is_masscan;
+
+  /** Country that the source IP corresponds to, according to maxmind */
+  char maxmind_country[2];
+  /** Continent that the source IP corresponds to, according to maxmind */
+  char maxmind_continent[2];
+  /** Country that the source IP corresponds to, according to netacq-edge */
+  char netacq_country[2];
+  /** Continent that the source IP corresponds to, according to netacq-edge */
+  char netacq_continent[2];
+  /** ASN that the source IP corresponds to, according to pf2asn data */
+  uint32_t prefixasn;
+
+} PACKED corsaro_flowtuple_kafka_record_t;
+
 corsaro_plugin_t *corsaro_flowtuple_alloc(void);
 
 /**
