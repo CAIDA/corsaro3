@@ -29,6 +29,8 @@ your standard OS package repository -- make sure you install the development
 versions of those libraries. On Debian / Ubuntu, tcmalloc is included in
 the libgoogle-perftools-dev package.
 
+On macOS, using HomeBrew you'll want something like `brew install avro-c zeromq traildb/judy/judy nwoolls/homebrew-xgminer/uthash`.
+
 
 Installing
 ==========
