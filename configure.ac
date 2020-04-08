@@ -22,7 +22,7 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-AC_INIT([corsaro], [3.0.0], [corsaro-info@caida.org])
+AC_INIT([corsaro], [3.1.0], [corsaro-info@caida.org])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 
 # Corsaro versions...
@@ -37,7 +37,7 @@ AM_INIT_AUTOMAKE([foreign subdir-objects])
 # perhaps use the major version to indicate changes in file format
 
 CORSARO_MAJOR_VERSION=3
-CORSARO_MID_VERSION=0
+CORSARO_MID_VERSION=1
 CORSARO_MINOR_VERSION=0
 
 AC_DEFINE_UNQUOTED([CORSARO_MAJOR_VERSION],$CORSARO_MAJOR_VERSION,

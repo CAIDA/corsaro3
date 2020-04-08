@@ -1,3 +1,9 @@
+corsaro (3.1.0) unstable; urgency=medium
+
+  * Restructured tagger to use nDAG multicast instead of ZMQ. See https://github.com/CAIDA/corsaro3/pull/69 for more information.
+
+ -- Alistair King <software@caida.org>  Wed, 08 Apr 2020 16:24:37 -0700
+
 corsaro (3.0.0-1) unstable; urgency=medium
 
   * Fix build-time dependencies of debian packages
