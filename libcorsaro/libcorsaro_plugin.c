@@ -64,6 +64,8 @@
 #include "report/corsaro_report.h"
 #endif
 
+#include "corsaro_null.h"
+
 #define PLUGIN_INIT_ADD(plugin)                                                \
 {                                                                              \
     tail = add_plugin(logger, tail, plugin##_alloc(), 1);                      \

@@ -1170,44 +1170,175 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
     return NULL;
 }
 
+static inline void _set_filter_params(libtrace_ip_t *ip, uint32_t iprem,
+        filter_params_t *fparams) {
+
+    uint32_t rem = iprem;
+    uint8_t proto = 0;
+    void *transport = trace_get_payload_from_ip(ip, &proto, &rem);
+
+    memset(fparams, 0, sizeof(filter_params_t));
+    fparams->ip = ip;
+    fparams->translen = rem;
+
+    /* XXX what about IP in IP?  */
+    if (proto == TRACE_IPPROTO_UDP) {
+        fparams->udp = (libtrace_udp_t *)transport;
+        if (rem >= 4) {
+            fparams->source_port = ntohs(fparams->udp->source);
+            fparams->dest_port = ntohs(fparams->udp->dest);
+        }
+        fparams->payload = (uint8_t *)trace_get_payload_from_udp(fparams->udp, &rem);
+        fparams->payloadlen = rem;
+    }
+    else if (proto == TRACE_IPPROTO_TCP) {
+        fparams->tcp = (libtrace_tcp_t *)transport;
+        if (rem >= 4) {
+            fparams->source_port = ntohs(fparams->tcp->source);
+            fparams->dest_port = ntohs(fparams->tcp->dest);
+        }
+        fparams->payload = (uint8_t *)trace_get_payload_from_tcp(fparams->tcp, &rem);
+        fparams->payloadlen = rem;
+    } else if (proto == TRACE_IPPROTO_ICMP) {
+        fparams->icmp = (libtrace_icmp_t *)transport;
+        if (rem >= 2) {
+            fparams->source_port = fparams->icmp->type;
+            fparams->dest_port = fparams->icmp->code;
+        }
+    }
+
+}
+
+int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
+        uint32_t iprem, corsaro_filter_torun_t *torun) {
+
+    int i;
+    uint8_t spoofedstate = -1;
+    uint8_t erraticstate = -1;
+    filter_params_t fparams;
+
+    _set_filter_params(ip, iprem, &fparams);
+
+    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
+        torun[i].filterid = i;
+        torun[i].result = 255;
+    }
+
+    /* Trying to avoid using a 'switch' in here to save on processing time,
+     * since we're going to be hitting all of the filter checks anyway.
+     *
+     * Similarly, I'm going to try and use the results for the more-specific
+     * filters to automatically infer the result of the broader ones
+     * (e.g. spoofed, erratic, etc.).
+     *
+     * This will make the code uglier, but also hopefully a bit faster */
+    torun[CORSARO_FILTERID_TTL_200].result =
+            _apply_ttl200_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_NO_TCP_OPTIONS].result =
+             _apply_no_tcp_options_filter(logger, fparams.tcp);
+    torun[CORSARO_FILTERID_TCPWIN_1024].result =
+             _apply_tcpwin_1024_filter(logger, fparams.tcp);
+
+    if (torun[CORSARO_FILTERID_TTL_200].result == 1 &&
+            torun[CORSARO_FILTERID_NO_TCP_OPTIONS].result == 1 &&
+            torun[CORSARO_FILTERID_TCPWIN_1024].result == 1) {
+
+        torun[CORSARO_FILTERID_LARGE_SCALE_SCAN].result = 1;
+    }
+
+    torun[CORSARO_FILTERID_ABNORMAL_PROTOCOL].result =
+            _apply_abnormal_protocol_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_FRAGMENT].result =
+            _apply_fragment_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_LAST_SRC_IP_0].result =
+            _apply_last_src_byte0_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_LAST_SRC_IP_255].result =
+            _apply_last_src_byte255_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_SAME_SRC_DEST_IP].result =
+            _apply_same_src_dest_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_UDP_PORT_0].result =
+            _apply_udp_port_zero_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_TCP_PORT_0].result =
+            _apply_tcp_port_zero_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_UDP_DESTPORT_80].result =
+            _apply_udp_destport_eighty_filter(logger, &fparams);
+
+    if (torun[CORSARO_FILTERID_ABNORMAL_PROTOCOL].result == 1 ||
+            torun[CORSARO_FILTERID_UDP_DESTPORT_80].result == 1 ||
+            torun[CORSARO_FILTERID_FRAGMENT].result == 1 ||
+            torun[CORSARO_FILTERID_LAST_SRC_IP_0].result == 1 ||
+            torun[CORSARO_FILTERID_LAST_SRC_IP_255].result == 1 ||
+            torun[CORSARO_FILTERID_SAME_SRC_DEST_IP].result == 1 ||
+            torun[CORSARO_FILTERID_TTL_200].result == 1 ||
+            torun[CORSARO_FILTERID_UDP_PORT_0].result == 1 ||
+            torun[CORSARO_FILTERID_TCP_PORT_0].result == 1) {
+
+        torun[CORSARO_FILTERID_SPOOFED].result = 1;
+        torun[CORSARO_FILTERID_ERRATIC].result = 1;
+    }
+
+    torun[CORSARO_FILTERID_RFC5735].result =
+            _apply_rfc5735_filter(logger, fparams.ip);
+
+    if (torun[CORSARO_FILTERID_RFC5735].result == 1) {
+        torun[CORSARO_FILTERID_ROUTED].result = 1;
+    }
+
+    torun[CORSARO_FILTERID_NOTIP].result = _apply_notip_filter(logger,
+            fparams.ip);
+
+    torun[CORSARO_FILTERID_BACKSCATTER].result =
+            _apply_backscatter_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_BITTORRENT].result =
+            _apply_bittorrent_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_UDP_0X31].result =
+            _apply_udp_0x31_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_SIP_STATUS].result =
+            _apply_sip_status_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_UDP_IPLEN_96].result =
+            _apply_udp_iplen_96_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_UDP_IPLEN_1500].result =
+            _apply_udp_iplen_1500_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_PORT_53].result =
+            _apply_port_53_filter(logger, fparams.source_port,
+                        fparams.dest_port);
+    torun[CORSARO_FILTERID_TCP_PORT_23].result =
+            _apply_port_tcp23_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_TCP_PORT_80].result =
+            _apply_port_tcp80_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_TCP_PORT_5000].result =
+            _apply_port_tcp5000_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_DNS_RESP_NONSTANDARD].result =
+            _apply_dns_resp_oddport_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_NETBIOS_QUERY_NAME].result =
+            _apply_netbios_name_filter(logger, &fparams);
+
+    if (torun[CORSARO_FILTERID_ERRATIC].result != 1 && (
+            torun[CORSARO_FILTERID_BACKSCATTER].result == 1 ||
+            torun[CORSARO_FILTERID_BITTORRENT].result == 1 ||
+            torun[CORSARO_FILTERID_UDP_0X31].result == 1 ||
+            torun[CORSARO_FILTERID_SIP_STATUS].result == 1 ||
+            torun[CORSARO_FILTERID_UDP_IPLEN_96].result == 1 ||
+            torun[CORSARO_FILTERID_UDP_IPLEN_1500].result == 1 ||
+            torun[CORSARO_FILTERID_PORT_53].result == 1 ||
+            torun[CORSARO_FILTERID_TCP_PORT_23].result == 1 ||
+            torun[CORSARO_FILTERID_TCP_PORT_80].result == 1 ||
+            torun[CORSARO_FILTERID_TCP_PORT_5000].result == 1 ||
+            torun[CORSARO_FILTERID_DNS_RESP_NONSTANDARD].result == 1 ||
+            torun[CORSARO_FILTERID_NETBIOS_QUERY_NAME].result == 1)) {
+
+        torun[CORSARO_FILTERID_ERRATIC].result = 1;
+    }
+}
+
 int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
         libtrace_ip_t *ip, uint32_t iprem, corsaro_filter_torun_t *torun,
         int torun_count) {
     int i;
-    uint32_t rem = iprem;
+    uint8_t spoofedstate = -1;
     filter_params_t fparams;
-    uint8_t proto = 0, spoofedstate = -1;
-    void *transport = trace_get_payload_from_ip(ip, &proto, &rem);
 
-    memset(&fparams, 0, sizeof(filter_params_t));
-    fparams.ip = ip;
-    fparams.translen = rem;
-
-    /* XXX what about IP in IP?  */
-    if (proto == TRACE_IPPROTO_UDP) {
-        fparams.udp = (libtrace_udp_t *)transport;
-        if (rem >= 4) {
-            fparams.source_port = ntohs(fparams.udp->source);
-            fparams.dest_port = ntohs(fparams.udp->dest);
-        }
-        fparams.payload = (uint8_t *)trace_get_payload_from_udp(fparams.udp, &rem);
-        fparams.payloadlen = rem;
-    }
-    else if (proto == TRACE_IPPROTO_TCP) {
-        fparams.tcp = (libtrace_tcp_t *)transport;
-        if (rem >= 4) {
-            fparams.source_port = ntohs(fparams.tcp->source);
-            fparams.dest_port = ntohs(fparams.tcp->dest);
-        }
-        fparams.payload = (uint8_t *)trace_get_payload_from_tcp(fparams.tcp, &rem);
-        fparams.payloadlen = rem;
-    } else if (proto == TRACE_IPPROTO_ICMP) {
-        fparams.icmp = (libtrace_icmp_t *)transport;
-        if (rem >= 2) {
-            fparams.source_port = fparams.icmp->type;
-            fparams.dest_port = fparams.icmp->code;
-        }
-    }
+    _set_filter_params(ip, iprem, &fparams);
 
     for (i = 0; i < torun_count; i++) {
         switch(torun[i].filterid) {

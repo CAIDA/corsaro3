@@ -53,6 +53,7 @@
 #include <stdlib.h>
 #include <libtrace.h>
 #include <libtrace_parallel.h>
+#include <ndagmulticaster.h>
 
 #include "libcorsaro.h"
 #include "libcorsaro_log.h"
@@ -129,12 +130,6 @@ typedef struct corsaro_tagger_glob {
     /** The number of packet processing threads to use */
     uint8_t pkt_threads;
 
-    /** The number of tagging threads to use */
-    uint8_t tag_threads;
-
-    /** The HWM for the queue used to output tagged packets */
-    uint16_t outputhwm;
-
     /** The configuration options for the libipmeta prefix to ASN module */
     pfx2asn_opts_t pfxtagopts;
     /** The configuration options for the libipmeta Maxmind geolocation
@@ -186,6 +181,16 @@ typedef struct corsaro_tagger_glob {
      */
     corsaro_tagger_local_t *threaddata;
     corsaro_packet_local_t *packetdata;
+
+    uint64_t starttime;
+
+    uint16_t ndag_monitorid;
+    uint16_t ndag_beaconport;
+    uint8_t ndag_ttl;
+    uint16_t ndag_mtu;
+    char *ndag_mcastgroup;
+    char *ndag_sourceaddr;
+    uint32_t instance_id;
 
 } corsaro_tagger_global_t;
 
@@ -239,8 +244,15 @@ struct corsaro_tagger_local {
 
     void *controlsock;
 
+    uint16_t mcast_port;
+    int mcast_sock;
+    ndag_encap_params_t ndag_params;
+    struct addrinfo *mcast_target;
+
+    uint64_t next_seq;
+
     /** A zeromq socket to publish tagged packets onto */
-    void *pubsock;
+    //void *pubsock;
 
     /** A zeromq socket to pull untagged packets from */
     void *pullsock;
@@ -325,10 +337,11 @@ int corsaro_publish_tags(corsaro_tagger_global_t *glob,
  *  @param threadid     A numeric identifier for the thread that this data
  *                      is going to be attached to
  *  @param glob         The global data for this corsarotagger instance.
+ *  @param mcast_port   The port to use for multicasting tagged packets.
  *
  */
 void init_tagger_thread_data(corsaro_tagger_local_t *tls,
-        int threadid, corsaro_tagger_global_t *glob);
+        int threadid, corsaro_tagger_global_t *glob, uint16_t mcast_port);
 
 /** Destroys the thread local state for a tagging thread.
  *

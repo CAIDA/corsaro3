@@ -410,6 +410,9 @@ static int update_maxmind_tags(corsaro_logger_t *logger,
         return 0;
     }
 
+    /* These can stay in host byte order because they are actually
+     * 2-char fields, rather than representing a numeric value.
+     */
     tags->maxmind_continent = *((uint16_t *)(rec->continent_code));
     tags->maxmind_country = *((uint16_t *)(rec->country_code));
 
@@ -429,14 +432,17 @@ static int update_netacq_tags(corsaro_logger_t *logger,
         return 0;
     }
 
-    tags->netacq_continent = *((uint16_t *)(rec->continent_code));
-    tags->netacq_country = *((uint16_t *)(rec->country_code));
-    tags->netacq_region = rec->region_code;
+    /* These can stay in host byte order because they are actually
+     * 2-char fields, rather than representing a numeric value.
+     */
+    tags->netacq_continent = (*((uint16_t *)(rec->continent_code)));
+    tags->netacq_country = (*((uint16_t *)(rec->country_code)));
 
+    tags->netacq_region = htons(rec->region_code);
     memset(tags->netacq_polygon, 0, sizeof(uint32_t) * MAX_NETACQ_POLYGONS);
     for (i = 0; i < rec->polygon_ids_cnt && i < MAX_NETACQ_POLYGONS; i++) {
-        tags->netacq_polygon[i] = (rec->polygon_ids[i] & 0xFFFFFF) \
-                                  + (((uint32_t)i) << 24);
+        tags->netacq_polygon[i] = htonl((rec->polygon_ids[i] & 0xFFFFFF) \
+                                  + (((uint32_t)i) << 24));
     }
 
     tags->providers_used |= (1 << IPMETA_PROVIDER_NETACQ_EDGE);
@@ -458,7 +464,7 @@ static int update_pfx2as_tags(corsaro_logger_t *logger,
         return 0;
     }
 
-    tags->prefixasn = rec->asn[0];
+    tags->prefixasn = htonl(rec->asn[0]);
     tags->providers_used |= (1 << IPMETA_PROVIDER_PFX2AS);
     return 0;
 }
@@ -499,12 +505,12 @@ static void update_basic_tags(corsaro_logger_t *logger,
         /* ICMP doesn't have ports, but we are interested in the type and
          * code, so why not reuse the space in the tag structure :) */
         icmp = (libtrace_icmp_t *)transport;
-        tags->src_port = icmp->type;
-        tags->dest_port = icmp->code;
+        tags->src_port = htons(icmp->type);
+        tags->dest_port = htons(icmp->code);
     } else if ((proto == TRACE_IPPROTO_TCP || proto == TRACE_IPPROTO_UDP) &&
             *rem >= 4) {
-        tags->src_port = ntohs(*((uint16_t *)transport));
-        tags->dest_port = ntohs(*(((uint16_t *)transport) + 1));
+        tags->src_port = *((uint16_t *)transport);
+        tags->dest_port = *(((uint16_t *)transport) + 1);
 
         if (proto == TRACE_IPPROTO_TCP && *rem >= sizeof(libtrace_tcp_t)) {
             /* Quicker to just read the whole byte direct from the packet,
@@ -515,10 +521,10 @@ static void update_basic_tags(corsaro_logger_t *logger,
         }
     }
 
-    hashdata.src_port = tags->src_port;
-    hashdata.dst_port = tags->dest_port;
+    hashdata.src_port = ntohs(tags->src_port);
+    hashdata.dst_port = ntohs(tags->dest_port);
 
-    tags->ft_hash = calc_flow_hash(&hashdata);
+    tags->ft_hash = htonl(calc_flow_hash(&hashdata));
     tags->providers_used |= 1;
 }
 
@@ -534,23 +540,15 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
         return;
     }
 
-    /* Filtering results are either 0 or 1 (didn't match and
-     * matched, respectively) so we use 255 here as an initial
-     * value to avoid confusion.
-     */
-    for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
-        torun[i].filterid = i;
-        torun[i].result = 255;
-    }
-
-    corsaro_apply_multiple_filters(logger, ip, iprem, torun,
-            CORSARO_FILTERID_MAX);
+    corsaro_apply_all_filters(logger, ip, iprem, torun);
 
     for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
         if (torun[i].result == 1) {
             tags->filterbits |= (1 << i);
         }
     }
+
+    tags->filterbits = bswap_host_to_be64(tags->filterbits);
 
 }
 
@@ -607,6 +605,7 @@ static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
                 printf("???: %u\n", rec->source);
         }
     }
+    tags->providers_used = htonl(tags->providers_used);
     return 0;
 }
 
@@ -652,13 +651,7 @@ corsaro_tagged_loss_tracker_t *corsaro_create_tagged_loss_tracker(
         return NULL;
     }
 
-    tracker->max_hashbins = maxhashbins;
-    tracker->nextseq = calloc(maxhashbins, sizeof(uint64_t));
-
-    if (!tracker->nextseq) {
-        free(tracker);
-        return NULL;
-    }
+    tracker->nextseq = 0;
     return tracker;
 }
 
@@ -668,9 +661,6 @@ void corsaro_free_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker) {
         return;
     }
 
-    if (tracker->nextseq) {
-        free(tracker->nextseq);
-    }
     free(tracker);
 }
 
@@ -696,33 +686,35 @@ int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
 	tagid = ntohl(taghdr->tagger_id);
 	thisseq = bswap_be_to_host64(taghdr->seqno);
 
+    /*
 	if (taghdr->hashbin <= 'Z') {
 		seqindex = taghdr->hashbin - 'A';
 	} else {
 		seqindex = taghdr->hashbin - 'a';
 	}
+    */
+    seqindex = 0;
 
 	if (tagid != tracker->taggerid) {
 		/* tagger has restarted -- reset our sequence numbers */
 		tracker->taggerid = tagid;
-		memset(tracker->nextseq, 0, sizeof(uint64_t) * tracker->max_hashbins);
+        tracker->nextseq = 0;
 	}
 
 	/* seqno of 0 is a reserved value -- we will never receive a seqno
 	 * of 0, so we can use it to mark the next expected sequence number
 	 * as "unknown".
 	 */
-	if (tracker->nextseq[seqindex] != 0 &&
-			thisseq != tracker->nextseq[seqindex]) {
-		tracker->lostpackets += (thisseq - tracker->nextseq[seqindex]);
+	if (tracker->nextseq != 0 && thisseq != tracker->nextseq) {
+		tracker->lostpackets += (thisseq - tracker->nextseq);
 		tracker->lossinstances ++;
 	}
     tracker->packetsreceived ++;
-    tracker->bytesreceived += (taghdr->pktlen);
+    tracker->bytesreceived += ntohs(taghdr->pktlen);
 
-	tracker->nextseq[seqindex] = thisseq + 1;
-	if (tracker->nextseq[seqindex] == 0) {
-		tracker->nextseq[seqindex] = 1;
+	tracker->nextseq = thisseq + 1;
+	if (tracker->nextseq == 0) {
+		tracker->nextseq = 1;
 	}
 
 	return 0;

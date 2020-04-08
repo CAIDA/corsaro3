@@ -69,7 +69,8 @@
 void init_packet_thread_data(corsaro_packet_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob) {
 
-    int hwm = 0;
+    char pubqueuename[1024];
+    int hwm = 500;
     int one = 1;
     tls->stopped = 0;
     tls->lastmisscount = 0;
@@ -96,9 +97,11 @@ void init_packet_thread_data(corsaro_packet_local_t *tls,
         tls->stopped = 1;
     }
 
-    if (zmq_connect(tls->pubsock, PACKET_PUB_QUEUE) != 0) {
+    snprintf(pubqueuename, 1024, "%s-%02d", PACKET_PUB_QUEUE, threadid);
+
+    if (zmq_bind(tls->pubsock, pubqueuename) != 0) {
         corsaro_log(glob->logger,
-                "error while connecting zeromq publisher socket in tagger thread %d:%s",
+                "error while binding zeromq publisher socket in tagger thread %d:%s",
                 threadid, strerror(errno));
         tls->stopped = 1;
     }
@@ -139,7 +142,7 @@ int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     void *pktcontents;
     uint32_t rem;
     libtrace_linktype_t linktype;
-    corsaro_tagger_packet_t *tpkt;
+    corsaro_tagged_packet_header_t *tpkt;
     size_t bufsize;
 
     pktcontents = trace_get_layer2(packet, &linktype, &rem);
@@ -152,7 +155,7 @@ int corsaro_publish_tags(corsaro_tagger_global_t *glob,
     }
     tv = trace_get_timeval(packet);
 
-    bufsize = sizeof(corsaro_tagger_packet_t) + rem;
+    bufsize = sizeof(corsaro_tagged_packet_header_t) + rem;
 
     assert(tls->buf->used <= tls->buf->size);
     if (tls->buf->size - tls->buf->used < bufsize) {
@@ -169,18 +172,17 @@ int corsaro_publish_tags(corsaro_tagger_global_t *glob,
         }
     }
 
-    tpkt = (corsaro_tagger_packet_t *)
+    tpkt = (corsaro_tagged_packet_header_t *)
             (tls->buf->space + tls->buf->used);
 
-    tpkt->taggedby = 255;
-    tpkt->pqueue_pos = 0;
-    tpkt->hdr.filterbits = 0;
-    tpkt->hdr.ts_sec = tv.tv_sec;
-    tpkt->hdr.ts_usec = tv.tv_usec;
-    tpkt->hdr.pktlen = rem;
-    memset(&(tpkt->hdr.tags), 0, sizeof(corsaro_packet_tags_t));
+    tpkt->filterbits = 0;
+    tpkt->ts_sec = tv.tv_sec;
+    tpkt->ts_usec = tv.tv_usec;
+    tpkt->pktlen = rem;
+    tpkt->wirelen = trace_get_wire_length(packet);
+    memset(&(tpkt->tags), 0, sizeof(corsaro_packet_tags_t));
 
-    tls->buf->used += sizeof(corsaro_tagger_packet_t);
+    tls->buf->used += sizeof(corsaro_tagged_packet_header_t);
     /* Put the packet itself in the buffer (minus the capture and
      * meta-data headers -- we don't need them).
      */

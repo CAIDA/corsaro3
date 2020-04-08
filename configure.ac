@@ -139,6 +139,7 @@ AC_SEARCH_LIBS([avro_generic_value_new], [avro], ,[AC_MSG_ERROR(
 AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
 
+AC_SEARCH_LIBS([ndag_close_multicaster_socket], [ndagserver], ,[AC_MSG_ERROR([libndagserver required])])
 AC_SEARCH_LIBS([aio_return], [rt], ,[AC_MSG_ERROR([librt required])])
 AC_SEARCH_LIBS([lrint], [m], ,[AC_MSG_ERROR([libm required])])
 
@@ -191,6 +192,7 @@ AC_DEFINE_UNQUOTED([CORSARO_MONITOR_NAME],[$with_monitorname],[Monitor Name])
 ED_WITH_PLUGIN([corsaro_flowtuple],[flowtuple],[SIXT],[yes])
 ED_WITH_PLUGIN([corsaro_dos],[dos],[DOS],[yes])
 ED_WITH_PLUGIN([corsaro_report],[report],[REPORT],[yes])
+ED_WITH_PLUGIN([corsaro_null],[null],[NULL],[yes])
 
 # this MUST go after all the ED_WITH_PLUGIN macro calls
 AC_DEFINE_UNQUOTED([ED_PLUGIN_INIT_ALL_ENABLED], $ED_PLUGIN_INIT_ALL_ENABLED,
@@ -234,7 +236,7 @@ AC_CONFIG_FILES([Makefile
                         corsarotrace/Makefile
                         corsarotagger/Makefile
                         corsarowdcap/Makefile
-                        corsarofanner/Makefile
+                        corsaroftmerge/Makefile
 			common/Makefile
 			common/libpatricia/Makefile
                         common/libinterval3/Makefile

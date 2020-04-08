@@ -72,14 +72,12 @@
  * source (probably an ndag multicaster socket) and attach to each packet
  * a set of "tags" that are useful for filtering or analytic purposes.
  *
- * This seems simple, but is actually a lot more complex in practice.
+ * This seems simple, but is slightly more complex in practice.
  *
- * There are quite a few different classes of threads that run concurrently
+ * There are a few different classes of threads that run concurrently
  * to make this all work optimally:
  *   - packet processing threads        ( see packet_thread.c )
  *   - tagger worker threads            ( see tagger_thread.c )
- *   - the internal proxy thread        ( see proxy_threads.c )
- *   - the external proxy thread        ( see proxy_threads.c )
  *   - the IPmeta reloading thread
  *   - the main thread
  *
@@ -93,26 +91,13 @@
  *
  * Tagger worker threads do the actual tagging of each packet. This includes
  * both the "basic" tagging (i.e. port numbers, protocols) as well as
- * computing the flowtuple hash. Packets are also assigned to a hash bin
- * (represented by a single character) that allows clients to subscribe to
- * different portions of our output using different threads to parallelise
- * their own workload easily. The hash bin is based on the flowtuple hash to
- * ensure all packets for the same flow end up in the same hash bin.
- *
+ * computing the flowtuple hash.
  * Advanced tagging can also occur via the libipmeta library, provided
  * suitable source data files are available. These can be used for
  * geo-location and prefix-to-ASN mapping of the packet's source IP address.
  *
- * The internal proxy thread is used to move packets between the packet
- * processing and tagger worker threads. This is required to make the
- * multiple-publisher, multiple-consumer model that we are using work
- * smoothly. Since the tagging process itself is relatively state-less on
- * a per-packet basis, it doesn't matter which worker thread each packet is
- * assigned to.
- *
- * The external proxy thread is used to publish the tagged packets produced
- * by the worker threads onto a single queue for consumption by any number
- * of interested subscribers.
+ * Each tagger thread emits the tagged packets to a multicast group, using the
+ * nDAG protocol.
  *
  * The IPmeta reloading thread has a single purpose: wait for a message
  * from the main thread telling it that a SIGHUP has been observed and once
@@ -123,7 +108,7 @@
  * acts upon them (i.e. trigger a reload or begin a clean halt of the tagger).
  * It also waits for query messages from clients to which it will reply with
  * any useful configuration that the client may want to know (such as the
- * number of hash bins being used by the tagger threads).
+ * number of tagger threads that are emitting packets).
  */
 
 
@@ -320,6 +305,8 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
  */
 static int start_trace_input(corsaro_tagger_global_t *glob) {
 
+    FILE *f = NULL;
+
     /* This is all pretty standard parallel libtrace configuration code */
     glob->trace = trace_create(glob->inputuris[glob->currenturi]);
     if (trace_is_err(glob->trace)) {
@@ -362,6 +349,33 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
         }
     }
 
+    /* Assign ourselves a "random" tagger ID number so that clients can
+     * tell if the tagger is restarted (and therefore its sequence space
+     * will be reset).
+     * Try using /dev/urandom but fall back to current Unix time if that
+     * fails for some reason.
+     */
+    f = fopen("/dev/urandom", "rb");
+    if (f == NULL) {
+        corsaro_log(glob->logger,
+                "unable to open /dev/urandom to generate tagger ID: %s",
+                strerror(errno));
+        glob->instance_id = (uint32_t) time(NULL);
+    }
+
+    while (glob->instance_id == 0) {
+        if (fread(&(glob->instance_id), sizeof(glob->instance_id), 1, f) < 1) {
+            corsaro_log(glob->logger,
+                    "unable to read /dev/urandom to generate tagger ID: %s",
+                    strerror(errno));
+            glob->instance_id = (uint32_t) time(NULL);
+        }
+    }
+
+    if (f) {
+        fclose(f);
+    }
+
     if (glob->consterfframing >= 0 &&
             trace_config(glob->trace, TRACE_OPTION_CONSTANT_ERF_FRAMING,
             &(glob->consterfframing)) < 0) {
@@ -384,6 +398,40 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
             glob->inputuris[glob->currenturi]);
 
     return 0;
+}
+
+static int start_ndag_beaconer(pthread_t *tid, ndag_beacon_params_t *bparams) {
+
+    int ret;
+
+#ifdef __linux__
+    pthread_attr_t attrib;
+    cpu_set_t cpus;
+    //int i;
+#endif
+
+#ifdef __linux__
+
+    /* This thread is low impact so can be bound to core 0 */
+    CPU_ZERO(&cpus);
+    CPU_SET(0, &cpus);
+    pthread_attr_init(&attrib);
+    pthread_attr_setaffinity_np(&attrib, sizeof(cpus), &cpus);
+    ret = pthread_create(tid, &attrib, ndag_start_beacon,
+            (void *)(bparams));
+    pthread_attr_destroy(&attrib);
+
+#else
+    ret = pthread_create(tid, NULL, ndag_start_beacon,
+            (void *)(bparams));
+#endif
+
+
+    if (ret != 0) {
+        return -1;
+    }
+
+    return 1;
 }
 
 static void load_maxmind_country_labels(corsaro_tagger_global_t *glob,
@@ -602,9 +650,9 @@ static void *ipmeta_reload_thread(void *tdata) {
     /* These sockets allow us to tell the tagger threads to use the
      * newly reloaded IPMeta data.
      */
-    taggercontrolsocks = calloc(glob->tag_threads, sizeof(void *));
+    taggercontrolsocks = calloc(glob->pkt_threads, sizeof(void *));
 
-    for (i = 0; i < glob->tag_threads; i++) {
+    for (i = 0; i < glob->pkt_threads; i++) {
         char sockname[56];
 
         taggercontrolsocks[i] = zmq_socket(glob->zmq_ctxt, ZMQ_PAIR);
@@ -650,7 +698,7 @@ static void *ipmeta_reload_thread(void *tdata) {
         load_ipmeta_data(glob, replace);
 
         /* Send the replacement IPmeta data to all of the tagger threads */
-        for (i = 0; i < glob->tag_threads; i++) {
+        for (i = 0; i < glob->pkt_threads; i++) {
             if (zmq_send(taggercontrolsocks[i], &replace,
                         sizeof(corsaro_ipmeta_state_t *), 0) < 0) {
                 corsaro_log(glob->logger,
@@ -674,7 +722,7 @@ static void *ipmeta_reload_thread(void *tdata) {
     }
 
 ipmeta_exit:
-    for (i = 0; i < glob->tag_threads; i++) {
+    for (i = 0; i < glob->pkt_threads; i++) {
         zmq_close(taggercontrolsocks[i]);
     }
     zmq_close(incoming);
@@ -799,7 +847,7 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
     switch(req.request_type) {
         case TAGGER_REQUEST_HELLO:
             reply = (corsaro_tagger_control_reply_t *)reply_buffer;
-            reply->hashbins = glob->output_hashbins;
+            reply->hashbins = glob->pkt_threads;
             reply->ipmeta_version = htonl(glob->ipmeta_version);
             reply->label_count = 0;
 
@@ -808,7 +856,7 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
             break;
         case TAGGER_REQUEST_IPMETA_UPDATE:
             reply = (corsaro_tagger_control_reply_t *)reply_buffer;
-            reply->hashbins = glob->output_hashbins;
+            reply->hashbins = glob->pkt_threads;
             reply->ipmeta_version = htonl(glob->ipmeta_version);
             reply->label_count = 0;
 
@@ -953,11 +1001,14 @@ int main(int argc, char *argv[]) {
     struct sigaction sigact;
     sigset_t sig_before, sig_block_all;
     libtrace_stat_t *stats;
-    pthread_t proxythreads[2];
+    pthread_t beacon_tid;
     struct timeval tv;
+    uint16_t firstport;
+    ndag_beacon_params_t beaconparams;
+    time_t t;
 
-    corsaro_tagger_proxy_data_t internalproxy;
-    corsaro_tagger_proxy_data_t externalproxy;
+    srand((unsigned) time(&t));
+    firstport = 10000 + (rand() % 50000);
 
     corsaro_halted = 0;
     while (1) {
@@ -1053,22 +1104,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Start the zeromq proxy threads */
-    internalproxy.glob = glob;
-    internalproxy.insockname = PACKET_PUB_QUEUE;
-    internalproxy.outsockname = TAGGER_SUB_QUEUE;
-    internalproxy.recvtype = ZMQ_PULL;
-    internalproxy.pushtype = ZMQ_PUSH;
-
-    externalproxy.glob = glob;
-    externalproxy.insockname = TAGGER_PUB_QUEUE;
-    externalproxy.outsockname = glob->pubqueuename;
-    externalproxy.recvtype = ZMQ_PULL;
-    externalproxy.pushtype = ZMQ_PUB;
-
-    pthread_create(&proxythreads[0], NULL, start_zmq_proxy_thread, &internalproxy);
-    pthread_create(&proxythreads[1], NULL, start_zmq_output_thread, &externalproxy);
-
     /* Load the libipmeta provider data */
     glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
     load_ipmeta_data(glob, glob->ipmeta_state);
@@ -1076,7 +1111,7 @@ int main(int argc, char *argv[]) {
     glob->ipmeta_version = tv.tv_sec;
     glob->ipmeta_state->last_reload = tv.tv_sec;
 
-    glob->threaddata = calloc(glob->tag_threads, sizeof(corsaro_tagger_local_t));
+    glob->threaddata = calloc(glob->pkt_threads, sizeof(corsaro_tagger_local_t));
     glob->packetdata = calloc(glob->pkt_threads, sizeof(corsaro_packet_local_t));
     pthread_create(&(glob->ipmeta_reloader), NULL, ipmeta_reload_thread, glob);
 
@@ -1091,12 +1126,40 @@ int main(int argc, char *argv[]) {
      * blocking send.
      */
 
+    beaconparams.srcaddr = glob->ndag_sourceaddr;
+    beaconparams.groupaddr = glob->ndag_mcastgroup;
+    beaconparams.beaconport = glob->ndag_beaconport;
+    beaconparams.frequency = 1000;
+    beaconparams.monitorid = glob->ndag_monitorid;
+    beaconparams.numstreams = glob->pkt_threads;
+    beaconparams.streamports = (uint16_t *)calloc(glob->pkt_threads,
+            sizeof(uint16_t));
+
+	sigemptyset(&sig_block_all);
+	if (pthread_sigmask(SIG_SETMASK, &sig_block_all, &sig_before) < 0) {
+		corsaro_log(glob->logger, "unable to disable signals before starting threads.");
+		return 1;
+	}
+
     /* Initialise all of our thread local state for the tagging threads */
-    for (i = 0; i < glob->tag_threads; i++) {
-        init_tagger_thread_data(&(glob->threaddata[i]), i, glob);
+    for (i = 0; i < glob->pkt_threads; i++) {
+        uint16_t mcast_port = firstport + (2 * i);
+        beaconparams.streamports[i] = mcast_port;
+        init_tagger_thread_data(&(glob->threaddata[i]), i, glob, mcast_port);
         pthread_create(&(glob->threaddata[i].ptid), NULL, start_tagger_thread,
                 &(glob->threaddata[i]));
     }
+
+    /* Start up the ndag beaconing thread */
+    if (start_ndag_beaconer(&beacon_tid, &beaconparams) == -1) {
+        corsaro_log(glob->logger, "Failed to start ndag beaconing thread");
+        return 1;
+    }
+
+	if (pthread_sigmask(SIG_SETMASK, &sig_before, NULL) < 0) {
+		corsaro_log(glob->logger, "unable to re-enable signals after starting threads.");
+		return 1;
+	}
 
     /* Initialise all of our thread local state for the processing threads */
     for (i = 0; i < glob->pkt_threads; i++) {
@@ -1163,8 +1226,13 @@ int main(int argc, char *argv[]) {
         glob->trace = NULL;
     }
 
+	ndag_interrupt_beacon();
+	pthread_join(beacon_tid, NULL);
+
+	free(beaconparams.streamports);
+
     /* Destroy the thread local state for each processing thread */
-    for (i = 0; i < glob->tag_threads; i++) {
+    for (i = 0; i < glob->pkt_threads; i++) {
         pthread_join(glob->threaddata[i].ptid, NULL);
         destroy_local_tagger_state(glob, &(glob->threaddata[i]), i);
 
@@ -1176,8 +1244,6 @@ int main(int argc, char *argv[]) {
 
     corsaro_log(glob->logger, "all threads have joined, exiting.");
     corsaro_tagger_free_global(glob);
-    pthread_join(proxythreads[0], NULL);
-    pthread_join(proxythreads[1], NULL);
 
     if (processing) {
         trace_destroy_callback_set(processing);

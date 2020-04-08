@@ -57,7 +57,7 @@
 
 #include "libcorsaro_log.h"
 
-#define TAGGER_MAX_MSGSIZE (10 * 1024 * 1024)
+#define TAGGER_MAX_MSGSIZE (1 * 1024 * 1024)
 
 /* These are our "built-in" tags */
 /* TODO think about how we could support "custom" tags? */
@@ -189,6 +189,8 @@ typedef struct corsaro_tagged_packet_header {
     /** The length of the packet, starting from the Ethernet header */
     uint16_t pktlen;
 
+    uint16_t wirelen;
+
     uint32_t tagger_id;
 
     uint64_t seqno;
@@ -284,8 +286,7 @@ typedef struct prefix2asn_options {
 } pfx2asn_opts_t;
 
 typedef struct corsaro_tagged_loss_tracker {
-    uint64_t *nextseq;
-    uint8_t max_hashbins;
+    uint64_t nextseq;
     uint32_t taggerid;
 
     uint64_t packetsreceived;

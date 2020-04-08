@@ -217,8 +217,8 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && !strcmp((char *)key->data.scalar.value, "subqueuename")) {
-        glob->subqueuename = strdup((char *)value->data.scalar.value);
+            && !strcmp((char *)key->data.scalar.value, "packetsource")) {
+        glob->source_uri = strdup((char *)value->data.scalar.value);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -234,16 +234,6 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "rotatefreq")) {
         glob->rotatefreq = strtoul((char *)value->data.scalar.value, NULL, 10);
-    }
-
-    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && !strcmp((char *)key->data.scalar.value, "threads")) {
-        glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
-    }
-
-    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-            && !strcmp((char *)key->data.scalar.value, "inputhwm")) {
-        glob->inputhwm = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
@@ -275,16 +265,12 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
 
 static void log_configuration(corsaro_trace_global_t *glob) {
     corsaro_log(glob->logger, "running on monitor %s", glob->monitorid);
-    corsaro_log(glob->logger, "using %d processing threads", glob->threads);
-    corsaro_log(glob->logger, "setting input queue high water mark to %u",
-            glob->inputhwm);
     corsaro_log(glob->logger, "interval length is set to %u seconds",
             glob->interval);
     corsaro_log(glob->logger, "rotating files every %u intervals",
             glob->rotatefreq);
-    corsaro_log(glob->logger, "subscribing to tagged packets on %s zeromq socket: %s",
-            (glob->subsource == CORSARO_TRACE_SOURCE_FANNER ? "fanner" : "tagger"),
-            glob->subqueuename);
+    corsaro_log(glob->logger, "subscribing to tagged packets from %s",
+            glob->source_uri);
     corsaro_log(glob->logger, "connecting to corsarotagger control socket: %s",
             glob->control_uri);
 
@@ -406,7 +392,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->logfilename = NULL;
     glob->threads = 4;
     glob->plugincount = 0;
-    glob->inputhwm = 25;
 
     glob->removeerratic = 0;
     glob->removespoofed = 0;
@@ -415,7 +400,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
     glob->subsource = CORSARO_TRACE_SOURCE_FANNER;
     glob->logger = NULL;
-    glob->subqueuename = NULL;
+    glob->source_uri = NULL;
     glob->control_uri = NULL;
     glob->zmq_ctxt = zmq_ctx_new();
 
@@ -474,19 +459,14 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         return NULL;
     }
 
-    if (glob->subqueuename == NULL) {
-        glob->subqueuename = strdup("ipc:///tmp/corsarofanner");
+    if (glob->source_uri == NULL) {
+        corsaro_log(glob->logger,
+                "corsarotrace: no source of tagged packets specified in configuration file ('packetsource')");
+        corsaro_trace_free_global(glob);
+        corsaro_cleanse_plugin_list(allplugins);
+        return NULL;
     }
 
-    /* XXX slightly dirty hack to determine whether our packets are
-     *     coming from a fanner or directly from the tagger. Assumes
-     *     that we're not going to use tcp for fanner publishing sockets.
-     */
-    if (strncmp(glob->subqueuename, "ipc://", 6) == 0) {
-        glob->subsource = CORSARO_TRACE_SOURCE_FANNER;
-    } else {
-        glob->subsource = CORSARO_TRACE_SOURCE_TAGGER;
-    }
 
     if (glob->control_uri == NULL) {
         glob->control_uri = strdup(DEFAULT_CONTROL_SOCKET_URI);
@@ -513,21 +493,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
     if (glob->interval == 0) {
         corsaro_log(glob->logger, "interval must be a non-zero, non-negative number of seconds, exiting.");
-        corsaro_trace_free_global(glob);
-        return NULL;
-    }
-
-    stdopts.template = glob->template;
-    stdopts.monitorid = glob->monitorid;
-    stdopts.procthreads = glob->threads;
-    stdopts.libtsascii = &(glob->libtsascii);
-    stdopts.libtskafka = &(glob->libtskafka);
-    stdopts.libtsdbats = &(glob->libtsdbats);
-
-    if (corsaro_finish_plugin_config(glob->active_plugins, &stdopts,
-            glob->zmq_ctxt) < 0) {
-        corsaro_log(glob->logger,
-            "error while finishing plugin configuration. Exiting.");
         corsaro_trace_free_global(glob);
         return NULL;
     }
@@ -561,8 +526,8 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
         free(glob->logfilename);
     }
 
-    if (glob->subqueuename) {
-        free(glob->subqueuename);
+    if (glob->source_uri) {
+        free(glob->source_uri);
     }
 
     if (glob->control_uri) {

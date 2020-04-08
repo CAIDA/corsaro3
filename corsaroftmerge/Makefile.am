@@ -1,17 +1,15 @@
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/libcorsaro \
 	-I$(top_srcdir)/common @TCMALLOC_FLAGS@
 
-bin_PROGRAMS = corsarofanner
+bin_PROGRAMS = corsaroftmerge
 
 # main corsaro program
-corsarofanner_SOURCES = \
-	corsarofanner.c \
-        configparser.c \
-        corsarofanner.h
+corsaroftmerge_SOURCES = \
+	corsaroftmerge.c
 
-corsarofanner_LDADD = -lcorsaro
+corsaroftmerge_LDADD = -lcorsaro
 
-corsarofanner_LDFLAGS = -L$(top_builddir)/libcorsaro
+corsaroftmerge_LDFLAGS = -L$(top_builddir)/libcorsaro
 
 ACLOCAL_AMFLAGS = -I m4
 

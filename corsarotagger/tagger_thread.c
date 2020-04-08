@@ -54,6 +54,7 @@
 #include <unistd.h>
 #include <zmq.h>
 
+#include "libcorsaro_common.h"
 #include "libcorsaro_log.h"
 #include "libcorsaro_tagging.h"
 #include "corsarotagger.h"
@@ -74,10 +75,11 @@
  *
  */
 void init_tagger_thread_data(corsaro_tagger_local_t *tls,
-        int threadid, corsaro_tagger_global_t *glob) {
-    int hwm = 0;
+        int threadid, corsaro_tagger_global_t *glob, uint16_t mcast_port) {
+    int hwm = 250;
     int one = 1;
     char sockname[1024];
+    char subqueuename[1024];
 
     tls->ptid = 0;
     tls->glob = glob;
@@ -86,6 +88,8 @@ void init_tagger_thread_data(corsaro_tagger_local_t *tls,
             glob->ipmeta_state);
     tls->errorcount = 0;
     tls->threadid = threadid;
+    tls->mcast_port = mcast_port;
+    tls->next_seq = 1;
 
     if (tls->tagger == NULL) {
         corsaro_log(glob->logger,
@@ -94,33 +98,32 @@ void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         return;
     }
 
-    /* create zmq socket for publishing */
-    tls->pubsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
-    if (zmq_setsockopt(tls->pubsock, ZMQ_SNDHWM, &hwm, sizeof(hwm)) != 0) {
+    tls->mcast_sock = ndag_create_multicaster_socket(mcast_port,
+            glob->ndag_mcastgroup, glob->ndag_sourceaddr, &(tls->mcast_target),
+            glob->ndag_ttl);
+    if (tls->mcast_sock == -1) {
         corsaro_log(glob->logger,
-                "error while setting HWM for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
+                "error while creating multicast socket in tagger thread %d",
+                threadid);
         tls->stopped = 1;
     }
 
-    /* Don't queue messages for incomplete connections */
-    if (zmq_setsockopt(tls->pubsock, ZMQ_IMMEDIATE, &one, sizeof(one)) != 0) {
-        corsaro_log(glob->logger,
-                "error while setting immediate for zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
-
-    snprintf(sockname, 1024, "%s-%d", TAGGER_PUB_QUEUE, threadid);
-    if (zmq_bind(tls->pubsock, sockname) != 0) {
-        corsaro_log(glob->logger,
-                "error while connecting zeromq publisher socket in tagger thread %d:%s",
-                threadid, strerror(errno));
-        tls->stopped = 1;
-    }
+    ndag_init_encap(&(tls->ndag_params), tls->mcast_sock, tls->mcast_target,
+            glob->ndag_monitorid, (uint16_t)threadid, glob->starttime,
+            glob->ndag_mtu, NDAG_PKT_CORSAROTAG, 0);
 
     tls->pullsock = zmq_socket(glob->zmq_ctxt, ZMQ_PULL);
-    if (zmq_connect(tls->pullsock, TAGGER_SUB_QUEUE) != 0) {
+    snprintf(subqueuename, 1024, "%s-%02d", PACKET_PUB_QUEUE, threadid);
+
+    if (zmq_setsockopt(tls->pullsock, ZMQ_RCVHWM, &hwm, sizeof(hwm)) < 0) {
+        corsaro_log(glob->logger,
+                "error while setting recv hwm on publisher socker in tagger thread %d: %s",
+                threadid, strerror(errno));
+        tls->stopped = 1;
+        return;
+    }
+
+    if (zmq_connect(tls->pullsock, subqueuename) != 0) {
         corsaro_log(glob->logger,
                 "error while binding zeromq publisher socket in tagger thread %d:%s",
                 threadid, strerror(errno));
@@ -157,16 +160,45 @@ void destroy_local_tagger_state(corsaro_tagger_global_t *glob,
         zmq_close(tls->controlsock);
     }
 
-    if (tls->pubsock) {
-        zmq_setsockopt(tls->pubsock, ZMQ_LINGER, &linger, sizeof(linger));
-        zmq_close(tls->pubsock);
-    }
-
     if (tls->pullsock) {
         zmq_setsockopt(tls->pullsock, ZMQ_LINGER, &linger, sizeof(linger));
         zmq_close(tls->pullsock);
     }
 
+    ndag_destroy_encap(&(tls->ndag_params));
+    ndag_close_multicaster_socket(tls->mcast_sock, tls->mcast_target);
+
+}
+
+static inline int push_message_to_ndag(ndag_encap_params_t *params,
+        uint8_t *msgstart, uint16_t msgused, uint16_t reccount,
+        uint16_t *savedtosend, corsaro_logger_t *logger, uint8_t force_send) {
+
+    struct iovec iov;
+
+    iov.iov_base = msgstart;
+    iov.iov_len = msgused;
+
+    if (ndag_push_encap_iovecs(params, &iov, 1, reccount, *savedtosend) == 0) {
+        corsaro_log(logger,
+                "error: unable to push tagged packets onto ndag buffer");
+        return -1;
+    }
+
+    (*savedtosend) = (*savedtosend) + 1;
+
+    if (*savedtosend >= NDAG_BATCH_SIZE || force_send) {
+
+        if (ndag_send_encap_records(params, *savedtosend) == 0) {
+            corsaro_log(logger,
+                    "error: unable to send tagged packets via ndag");
+            return -1;
+        }
+        ndag_reset_encap_state(params);
+        *savedtosend = 0;
+    }
+
+    return 0;
 }
 
 
@@ -180,11 +212,18 @@ void destroy_local_tagger_state(corsaro_tagger_global_t *glob,
  */
 static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
     uint8_t recvbuf[TAGGER_BUFFER_SIZE];
-    int r;
+    int r, ret;
     uint32_t processed;
     corsaro_tagger_buffer_t *buf = NULL;
     corsaro_tagger_internal_msg_t *recvd = NULL;
+    uint16_t maxmsg = tls->glob->ndag_mtu - sizeof(ndag_common_t) -
+            sizeof(ndag_encap_t);
+    uint16_t msgused = 0;
+    uint16_t reccount = 0;
+    uint8_t *msgstart = NULL;;
+    uint16_t savedtosend = 0;
 
+    ret = 1;
     memset(recvbuf, 0, TAGGER_BUFFER_SIZE);
     r = zmq_recv(tls->pullsock, recvbuf, TAGGER_BUFFER_SIZE, 0);
     if (r < 0) {
@@ -202,34 +241,52 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
     recvd = (corsaro_tagger_internal_msg_t *)recvbuf;
     buf = recvd->content.buf;
     processed = 0;
+    msgstart = buf->space;
+
+    ndag_reset_encap_state(&(tls->ndag_params));
 
     /* The buffer probably contains multiple untagged packets, so keep
      * looping until we've tagged them all */
     while (processed < buf->used) {
-        corsaro_tagger_packet_t *packet;
+        corsaro_tagged_packet_header_t *packet;
         libtrace_ip_t *ip;
         void *l2, *next;
         uint32_t rem;
         uint16_t ethertype, filtbits;
 
-        packet = (corsaro_tagger_packet_t *)(buf->space + processed);
+        packet = (corsaro_tagged_packet_header_t *)(buf->space + processed);
 
-        if (buf->used - processed < sizeof(corsaro_tagger_packet_t)) {
+        if (buf->used - processed < sizeof(corsaro_tagged_packet_header_t)) {
             corsaro_log(tls->glob->logger,
                     "error: not enough buffer content for a complete header...");
-            exit(2);
+            ret = -1;
+            break;
         }
-        processed += sizeof(corsaro_tagger_packet_t);
-        if (buf->used - processed < packet->hdr.pktlen) {
+        processed += sizeof(corsaro_tagged_packet_header_t);
+        if (buf->used - processed < packet->pktlen) {
             corsaro_log(tls->glob->logger,
                     "error: missing packet contents in tagger thread...");
-            exit(2);
+            ret = -1;
+            break;
         }
 
         /* Find the IP header in the packet contents.
          * The packet should start with an Ethernet header */
         l2 = buf->space + processed;
-        rem = packet->hdr.pktlen;
+        rem = packet->pktlen;
+
+        if (rem + sizeof(corsaro_tagged_packet_header_t) > maxmsg - msgused) {
+            if (push_message_to_ndag(&(tls->ndag_params), msgstart, msgused,
+                    reccount, &savedtosend, tls->glob->logger, 0) < 0) {
+                ret = -1;
+                break;
+            }
+
+            msgstart = buf->space + processed -
+                    sizeof(corsaro_tagged_packet_header_t);
+            reccount = 0;
+            msgused = 0;
+        }
 
         next = trace_get_payload_from_layer2(l2, TRACE_TYPE_ETH,
                 &ethertype, &rem);
@@ -257,7 +314,7 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
         ip = (libtrace_ip_t *)next;
 
         /* Actually do the tagging */
-        if (corsaro_tag_ippayload(tls->tagger, &(packet->hdr.tags),
+        if (corsaro_tag_ippayload(tls->tagger, &(packet->tags),
                     ip, rem) < 0) {
             corsaro_log(tls->glob->logger,
                     "error while tagging IP payload in tagger thread.");
@@ -268,22 +325,32 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
          * to one of our output hash bins, so clients will be able to
          * receive the tagged packets in parallel if they desire.
          */
-        ASSIGN_HASH_BIN(packet->hdr.tags.ft_hash,
-                tls->glob->output_hashbins, packet->hdr.hashbin);
+        ASSIGN_HASH_BIN(packet->tags.ft_hash,
+                tls->glob->output_hashbins, packet->hashbin);
 
         filtbits = 0;
-        filtbits = (uint16_t)(packet->hdr.tags.filterbits & 0x0f);
+        filtbits = (uint16_t)(packet->tags.filterbits & 0x0f);
 
-        packet->hdr.filterbits = htons(filtbits);
-        packet->taggedby = tls->threadid;
-        processed += packet->hdr.pktlen;
+        packet->filterbits = htons(filtbits);
+        processed += packet->pktlen;
+
+        msgused += packet->pktlen + sizeof(corsaro_tagged_packet_header_t);
+        reccount += 1;
+
+        packet->pktlen = htons(packet->pktlen);
+        packet->wirelen = htons(packet->wirelen);
+        packet->ts_sec = htonl(packet->ts_sec);
+        packet->ts_usec = htonl(packet->ts_usec);
+        packet->tagger_id = htonl(tls->glob->instance_id);
+        packet->seqno = bswap_host_to_be64(tls->next_seq);
 
         /* Send the packet on to the external proxy for publishing. Don't
          * block -- if the proxy closes its pull socket (i.e. during
          * pre-exit cleanup), we can end up blocking forever.
          */
+        #if 0
         while (!corsaro_halted) {
-            r = zmq_send(tls->pubsock, packet, sizeof(corsaro_tagger_packet_t)
+            r = zmq_send(tls->pubsock, packet, sizeof(corsaro_tagged_packet_header_t)
                     + packet->hdr.pktlen, ZMQ_DONTWAIT);
             if (r < 0) {
                 if (errno == EAGAIN) {
@@ -297,10 +364,23 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
             }
             break;
         }
+        #endif
+
+        tls->next_seq ++;
+        if (tls->next_seq == 0) {
+            tls->next_seq = 1;
+        }
 
     }
+
+    if (msgused > 0) {
+        if (push_message_to_ndag(&(tls->ndag_params), msgstart, msgused,
+                reccount, &savedtosend, tls->glob->logger, 1) < 0) {
+            ret = -1;
+        }
+    }
     free_tls_buffer(buf);
-    return 1;
+    return ret;
 }
 
 /** Main loop for a tagger thread. */

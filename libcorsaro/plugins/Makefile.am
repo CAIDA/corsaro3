@@ -10,6 +10,9 @@ include_HEADERS =
 PLUGIN_SRC=
 PLUGIN_LIBS=
 
+PLUGIN_SRC+=corsaro_null.c corsaro_null.h
+include_HEADERS+=corsaro_null.h
+
 if WITH_PLUGIN_SIXT
 PLUGIN_SRC+=corsaro_flowtuple.c corsaro_flowtuple.h
 include_HEADERS+=corsaro_flowtuple.h
