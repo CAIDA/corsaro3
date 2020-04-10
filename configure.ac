@@ -138,6 +138,7 @@ AC_SEARCH_LIBS([avro_generic_value_new], [avro], ,[AC_MSG_ERROR(
 		 )])
 AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
+AC_SEARCH_LIBS([rd_kafka_new], [rdkafka], ,[AC_MSG_ERROR([librdkafka required])])
 
 AC_SEARCH_LIBS([ndag_close_multicaster_socket], [ndagserver], ,[AC_MSG_ERROR([libndagserver required])])
 AC_SEARCH_LIBS([aio_return], [rt], ,[AC_MSG_ERROR([librt required])])

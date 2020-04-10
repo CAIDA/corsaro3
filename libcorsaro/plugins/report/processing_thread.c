@@ -216,10 +216,8 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
             return "combined";
         case CORSARO_METRIC_CLASS_IP_PROTOCOL:
             return "IP protocol";
-        case CORSARO_METRIC_CLASS_ICMP_TYPE:
-            return "ICMP type";
-        case CORSARO_METRIC_CLASS_ICMP_CODE:
-            return "ICMP code";
+        case CORSARO_METRIC_CLASS_ICMP_TYPECODE:
+            return "ICMP type+code";
         case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
             return "TCP source port";
         case CORSARO_METRIC_CLASS_TCP_DEST_PORT:
@@ -581,10 +579,24 @@ static int process_tags(corsaro_report_tracker_state_t *track,
     }
 
     if (tags->protocol == TRACE_IPPROTO_ICMP) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_TYPE,
-                ntohs(tags->src_port), METRIC_ICMP_MAX);
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_ICMP_CODE,
-                ntohs(tags->dest_port), METRIC_ICMP_MAX);
+        /* We want to combine ICMP type (stored in src_port) and ICMP code
+         * (stored in dest_port) into a single value for reporting, just to
+         * reduce the number of fields we need to have in our database.
+         * Code is meaningless without the context of type anyway.
+         */
+        if (allowedmetricclasses == 0 ||
+                ((1UL << CORSARO_METRIC_CLASS_ICMP_TYPECODE) &
+                    allowedmetricclasses)) {
+            uint16_t typecode = (ntohs(tags->src_port) << 8) +
+                    ntohs(tags->dest_port);
+
+            if ((ret = process_single_tag(CORSARO_METRIC_CLASS_ICMP_TYPECODE,
+                    typecode, 65535, track, logger, iplen)) < 0) {
+                return -1;
+            } else {
+                newtags += ret;
+            }
+        }
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
                 ntohs(tags->src_port), METRIC_PORT_MAX);
