@@ -22,22 +22,11 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-AC_INIT([corsaro], [3.1.0], [corsaro-info@caida.org])
+AC_INIT([corsaro], [3.2.0], [corsaro-info@caida.org])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 
-# Corsaro versions...
-# this may need some re-thinking
-# currently increment:
-# MAJOR: if the interfaces have been added, removed or changed
-# MID:   if source code has been changed
-# MINOR: if interfaces have been added
-#
-# there will need to be some thought put into the binary file versioning
-# if the format changes
-# perhaps use the major version to indicate changes in file format
-
 CORSARO_MAJOR_VERSION=3
-CORSARO_MID_VERSION=1
+CORSARO_MID_VERSION=2
 CORSARO_MINOR_VERSION=0
 
 AC_DEFINE_UNQUOTED([CORSARO_MAJOR_VERSION],$CORSARO_MAJOR_VERSION,
