@@ -1,3 +1,9 @@
+corsaro (3.2.0) unstable; urgency=medium
+
+  * Add Kafka output to the FlowTuple plugin
+
+ -- Alistair King <software@caida.org>  Fri, 10 Apr 2020 10:45:17 -0700
+
 corsaro (3.1.0) unstable; urgency=medium
 
   * Restructured tagger to use nDAG multicast instead of ZMQ. See https://github.com/CAIDA/corsaro3/pull/69 for more information.
