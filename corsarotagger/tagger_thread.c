@@ -59,13 +59,6 @@
 #include "libcorsaro_tagging.h"
 #include "corsarotagger.h"
 
-#define ASSIGN_HASH_BIN(hash_val, hash_bins, result) { \
-    int hmod; \
-    hmod = hash_val % hash_bins; \
-    if (hmod < 26) {result = 'A' + hmod;} \
-    else {result = 'a' + (hmod - 26); } \
-}
-
 /** Initialises the local data for a tagging thread.
  *
  *  @param tls          The thread-local data to be initialised
@@ -325,11 +318,10 @@ static int tagger_thread_process_buffer(corsaro_tagger_local_t *tls) {
          * to one of our output hash bins, so clients will be able to
          * receive the tagged packets in parallel if they desire.
          */
-        ASSIGN_HASH_BIN(packet->tags.ft_hash,
-                tls->glob->output_hashbins, packet->hashbin);
 
         filtbits = 0;
-        filtbits = (uint16_t)(packet->tags.filterbits & 0x0f);
+        filtbits =(uint16_t)bswap_be_to_host64(packet->tags.filterbits);
+        filtbits = filtbits & 0x0f;
 
         packet->filterbits = htons(filtbits);
         processed += packet->pktlen;
