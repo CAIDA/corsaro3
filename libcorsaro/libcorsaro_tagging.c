@@ -685,14 +685,6 @@ int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
 
 	tagid = ntohl(taghdr->tagger_id);
 	thisseq = bswap_be_to_host64(taghdr->seqno);
-
-    /*
-	if (taghdr->hashbin <= 'Z') {
-		seqindex = taghdr->hashbin - 'A';
-	} else {
-		seqindex = taghdr->hashbin - 'a';
-	}
-    */
     seqindex = 0;
 
 	if (tagid != tracker->taggerid) {
