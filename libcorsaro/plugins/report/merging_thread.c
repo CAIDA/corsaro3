@@ -278,8 +278,10 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
             snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_ICMP_TYPECODE:
-            strncpy(res->metrictype, "traffic.icmp.typecode", 128);
-            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
+            strncpy(res->metrictype, "traffic.icmp", 128);
+            snprintf(res->metricval, 128, "type.%u.code.%u",
+                     (uint8_t)((res->metricid >> 8) & 0xff),
+                     (uint8_t)(res->metricid & 0xff));
             break;
         case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
             strncpy(res->metrictype, "traffic.port.tcp.src_port", 128);
@@ -721,7 +723,8 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_DEST_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPECODE, i);
+        // AK: only create ICMP metrics when they are seen
+        // ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPECODE, i);
     }
 
     /* XXX Do NOT add empty results for filters, as they may or
