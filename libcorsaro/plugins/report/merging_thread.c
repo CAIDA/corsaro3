@@ -723,7 +723,8 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_DEST_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
         ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPECODE, i);
+        // AK: only create ICMP metrics when they are seen
+        // ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPECODE, i);
     }
 
     /* XXX Do NOT add empty results for filters, as they may or
