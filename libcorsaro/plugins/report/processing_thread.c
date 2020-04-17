@@ -624,9 +624,6 @@ static int process_tags(corsaro_report_tracker_state_t *track,
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_REGION,
                 ntohs(tags->netacq_region), 0);
         for (i = 0; i < MAX_NETACQ_POLYGONS; i++) {
-            if (tags->netacq_polygon[i] == 0) {
-                continue;
-            }
             PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
                     ntohl(tags->netacq_polygon[i]), 0);
         }
