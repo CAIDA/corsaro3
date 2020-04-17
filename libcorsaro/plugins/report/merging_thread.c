@@ -278,8 +278,10 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
             snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
             break;
         case CORSARO_METRIC_CLASS_ICMP_TYPECODE:
-            strncpy(res->metrictype, "traffic.icmp.typecode", 128);
-            snprintf(res->metricval, 128, "%lu", res->metricid & 0xffffffff);
+            strncpy(res->metrictype, "traffic.icmp", 128);
+            snprintf(res->metricval, 128, "type.%u.code.%u",
+                     (uint8_t)((res->metricid >> 8) & 0xff),
+                     (uint8_t)(res->metricid & 0xff));
             break;
         case CORSARO_METRIC_CLASS_TCP_SOURCE_PORT:
             strncpy(res->metrictype, "traffic.port.tcp.src_port", 128);
