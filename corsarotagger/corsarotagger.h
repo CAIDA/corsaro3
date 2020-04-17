@@ -164,9 +164,6 @@ typedef struct corsaro_tagger_glob {
     /** A zeromq socket for managing new subscribers */
     void *zmq_control;
 
-    /** Number of unique labels to use when streaming tagged packets */
-    uint8_t output_hashbins;
-
     /** ID of the IP meta reloading thread */
     pthread_t ipmeta_reloader;
 
