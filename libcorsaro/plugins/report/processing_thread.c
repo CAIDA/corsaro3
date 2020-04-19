@@ -416,10 +416,12 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
     }
 
     /* Wait for the tracker threads to stop */
-    for (i = 0; i < conf->tracker_count; i++) {
-        if (conf->iptrackers[i].tid != 0) {
-            pthread_join(conf->iptrackers[i].tid, NULL);
-            conf->iptrackers[i].tid = 0;
+    if (state->threadid == 0) {
+        for (i = 0; i < conf->tracker_count; i++) {
+            if (conf->iptrackers[i].tid != 0) {
+                pthread_join(conf->iptrackers[i].tid, NULL);
+                conf->iptrackers[i].tid = 0;
+            }
         }
     }
 
