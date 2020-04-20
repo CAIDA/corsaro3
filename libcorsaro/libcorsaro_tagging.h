@@ -54,6 +54,7 @@
 #include <libipmeta.h>
 #include <libtrace.h>
 #include <Judy.h>
+#include <yaml.h>
 
 #include "libcorsaro_log.h"
 
@@ -426,7 +427,17 @@ int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
 void corsaro_reset_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker);
 void corsaro_free_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker);
 
+int corsaro_parse_tagging_provider_config(pfx2asn_opts_t *pfxopts,
+        maxmind_opts_t *maxopts, netacq_opts_t *netacqopts,
+        yaml_document_t *doc, yaml_node_t *provlist,
+        corsaro_logger_t *logger);
 
+void corsaro_load_ipmeta_data(corsaro_logger_t *logger, pfx2asn_opts_t *pfxopts,
+        maxmind_opts_t *maxopts, netacq_opts_t *netacqopts,
+        corsaro_ipmeta_state_t *ipmeta_state);
+
+void corsaro_free_tagging_provider_config(pfx2asn_opts_t *pfxopts,
+        maxmind_opts_t *maxopts, netacq_opts_t *netacqopts);
 #endif
 
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

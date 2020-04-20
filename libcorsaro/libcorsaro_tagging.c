@@ -51,6 +51,7 @@
 #include <string.h>
 #include <assert.h>
 
+#include <yaml.h>
 #include <libipmeta.h>
 #include "libcorsaro_filtering.h"
 #include "libcorsaro_common.h"
@@ -711,4 +712,472 @@ int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
 
 	return 0;
 }
+
+static int parse_netacq_tag_options(corsaro_logger_t *logger,
+        netacq_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
+
+    yaml_node_t *key, *value;
+    yaml_node_pair_t *pair;
+
+    if (confmap->type != YAML_MAPPING_NODE) {
+        corsaro_log(logger, "Netacq-edge tagging config should be a map!");
+        return -1;
+    }
+
+    for (pair = confmap->data.mapping.pairs.start;
+            pair < confmap->data.mapping.pairs.top; pair ++) {
+        key = yaml_document_get_node(doc, pair->key);
+        value = yaml_document_get_node(doc, pair->value);
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "blocksfile") == 0) {
+            if (opts->blocks_file) {
+                free(opts->blocks_file);
+            }
+            opts->blocks_file = strdup((char *)value->data.scalar.value);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "locationsfile") == 0) {
+            if (opts->locations_file) {
+                free(opts->locations_file);
+            }
+            opts->locations_file = strdup((char *)value->data.scalar.value);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "countryfile") == 0) {
+            if (opts->country_file) {
+                free(opts->country_file);
+            }
+            opts->country_file = strdup((char *)value->data.scalar.value);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "regionfile") == 0) {
+            if (opts->region_file) {
+                free(opts->region_file);
+            }
+            opts->region_file = strdup((char *)value->data.scalar.value);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "polygonmapfile") == 0) {
+            if (opts->polygon_map_file) {
+                free(opts->polygon_map_file);
+            }
+            opts->polygon_map_file = strdup((char *)value->data.scalar.value);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "polygontablefile") == 0) {
+            char *copy;
+            if (opts->polygon_table_files == NULL) {
+                opts->polygon_table_files = libtrace_list_init(sizeof(char *));
+            }
+            copy = strdup((char *)value->data.scalar.value);
+            libtrace_list_push_back(opts->polygon_table_files, &copy);
+        }
+    }
+
+    opts->enabled = 1;
+    return 0;
+}
+
+static int parse_pfx2as_tag_options(corsaro_logger_t *logger,
+        pfx2asn_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
+
+    yaml_node_t *key, *value;
+    yaml_node_pair_t *pair;
+
+    if (confmap->type != YAML_MAPPING_NODE) {
+        corsaro_log(logger, "Prefix->ASN tagging config should be a map!");
+        return -1;
+    }
+
+    for (pair = confmap->data.mapping.pairs.start;
+            pair < confmap->data.mapping.pairs.top; pair ++) {
+        key = yaml_document_get_node(doc, pair->key);
+        value = yaml_document_get_node(doc, pair->value);
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "prefixfile") == 0) {
+            if (opts->pfx2as_file) {
+                free(opts->pfx2as_file);
+            }
+            opts->pfx2as_file = strdup((char *)value->data.scalar.value);
+        }
+
+    }
+
+    if (opts->pfx2as_file == NULL) {
+        corsaro_log(logger,
+                "Prefix->ASN tagging requires a 'prefixfile' config option.");
+        return -1;
+    }
+
+    opts->enabled = 1;
+    return 0;
+}
+
+static int parse_maxmind_tag_options(corsaro_logger_t *logger,
+        maxmind_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
+
+    yaml_node_t *key, *value;
+    yaml_node_pair_t *pair;
+
+    if (confmap->type != YAML_MAPPING_NODE) {
+        corsaro_log(logger, "Maxmind tagging config should be a map!");
+        return -1;
+    }
+
+    for (pair = confmap->data.mapping.pairs.start;
+            pair < confmap->data.mapping.pairs.top; pair ++) {
+        key = yaml_document_get_node(doc, pair->key);
+        value = yaml_document_get_node(doc, pair->value);
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "directory") == 0) {
+            if (opts->directory) {
+                free(opts->directory);
+            }
+            opts->directory = strdup((char *)value->data.scalar.value);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "blocksfile") == 0) {
+            if (opts->blocks_file) {
+                free(opts->blocks_file);
+            }
+            opts->blocks_file = strdup((char *)value->data.scalar.value);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "locationsfile") == 0) {
+            if (opts->locations_file) {
+                free(opts->locations_file);
+            }
+            opts->locations_file = strdup((char *)value->data.scalar.value);
+        }
+    }
+    /* Sanity-checks */
+    if (opts->directory == NULL) {
+        if (opts->locations_file == NULL || opts->blocks_file == NULL) {
+            corsaro_log(logger,
+                    "Maxmind config: both 'locationsfile' and 'blocksfile' must be present in the config file (unless you have set 'directory' instead).");
+            return -1;
+        }
+    } else {
+        if (opts->locations_file || opts->blocks_file) {
+            corsaro_log(logger,
+                    "Maxmind config: 'directory' option is mutually exclusive with the 'blocksfiles' and 'locationsfile' options. Ignoring the latter options.");
+        }
+    }
+    opts->enabled = 1;
+    return 0;
+}
+
+void corsaro_free_tagging_provider_config(pfx2asn_opts_t *pfxopts,
+        maxmind_opts_t *maxopts, netacq_opts_t *netacqopts) {
+
+    if (pfxopts->pfx2as_file) {
+        free(pfxopts->pfx2as_file);
+    }
+
+    if (maxopts->directory) {
+        free(maxopts->directory);
+    }
+
+    if (maxopts->blocks_file) {
+        free(maxopts->blocks_file);
+    }
+
+    if (maxopts->locations_file) {
+        free(maxopts->locations_file);
+    }
+
+    if (netacqopts->blocks_file) {
+        free(netacqopts->blocks_file);
+    }
+
+    if (netacqopts->country_file) {
+        free(netacqopts->country_file);
+    }
+
+    if (netacqopts->locations_file) {
+        free(netacqopts->locations_file);
+    }
+
+    if (netacqopts->region_file) {
+        free(netacqopts->region_file);
+    }
+
+    if (netacqopts->polygon_table_files) {
+        libtrace_list_node_t *n;
+        char *str;
+
+        n = netacqopts->polygon_table_files->head;
+        while (n) {
+            str = (char *)(n->data);
+            free(str);
+            n = n->next;
+        }
+        libtrace_list_deinit(netacqopts->polygon_table_files);
+    }
+}
+
+int corsaro_parse_tagging_provider_config(pfx2asn_opts_t *pfxopts,
+		maxmind_opts_t *maxopts, netacq_opts_t *netacqopts,
+        yaml_document_t *doc, yaml_node_t *provlist,
+        corsaro_logger_t *logger) {
+
+    yaml_node_item_t *item;
+    int plugincount = 0;
+
+    for (item = provlist->data.sequence.items.start;
+            item != provlist->data.sequence.items.top; item ++) {
+        yaml_node_t *node = yaml_document_get_node(doc, *item);
+        yaml_node_pair_t *pair;
+
+        for (pair = node->data.mapping.pairs.start;
+                pair < node->data.mapping.pairs.top; pair ++) {
+            yaml_node_t *key, *value;
+
+            ipmeta_provider_id_t provid = 0;
+
+            key = yaml_document_get_node(doc, pair->key);
+            value = yaml_document_get_node(doc, pair->value);
+
+            /* key = provider name */
+            /* value = map of provider options */
+            if (strcmp((char *)key->data.scalar.value, "maxmind") == 0) {
+                if (parse_maxmind_tag_options(logger,
+                        maxopts, doc, value) != 0) {
+                    corsaro_log(logger,
+                            "error while parsing config for Maxmind tagging");
+                    continue;
+                }
+                provid = IPMETA_PROVIDER_MAXMIND;
+            }
+            if (strcmp((char *)key->data.scalar.value, "netacq-edge") == 0) {
+                if (parse_netacq_tag_options(logger,
+                        netacqopts, doc, value) != 0) {
+                    corsaro_log(logger,
+                            "error while parsing config for Netacq-Edge tagging");
+                    continue;
+                }
+                provid = IPMETA_PROVIDER_NETACQ_EDGE;
+            }
+            if (strcmp((char *)key->data.scalar.value, "pfx2as") == 0) {
+                if (parse_pfx2as_tag_options(logger,
+                       	pfxopts, doc, value) != 0) {
+                    corsaro_log(logger,
+                            "error while parsing config for Prefix->ASN tagging");
+                    continue;
+                }
+                provid = IPMETA_PROVIDER_PFX2AS;
+            }
+
+            if (provid == 0) {
+                corsaro_log(logger,
+                        "unrecognised tag provider name in config file: %s",
+                        (char *)key->data.scalar.value);
+                continue;
+            }
+        }
+    }
+    return 0;
+}
+
+static void load_maxmind_country_labels(corsaro_logger_t *logger,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    const char **countries;
+    const char **continents;
+    int count, ret, i;
+    char build[16];
+    uint32_t index;
+    PWord_t pval;
+    char *fqdn;
+
+    count = ipmeta_provider_maxmind_get_iso2_list(&countries);
+    ret = ipmeta_provider_maxmind_get_country_continent_list(&continents);
+
+    if (count != ret) {
+        corsaro_log(logger, "libipmeta error: maxmind country array is notthe same length as the maxmind continent array?");
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        index = (countries[i][0] & 0xff) + ((countries[i][1] & 0xff) << 8);
+        snprintf(build, 16, "%s.%s", continents[i], countries[i]);
+
+        JLI(pval, ipmeta_state->country_labels, index);
+        if (*pval) {
+            continue;
+        }
+        fqdn = strdup(build);
+        *pval = (Word_t) fqdn;
+
+        JLI(pval, ipmeta_state->recently_added_country_labels, index);
+        *pval = (Word_t) fqdn;
+    }
+}
+
+static void load_netacq_polygon_labels(corsaro_logger_t *logger,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    ipmeta_polygon_table_t **tables = NULL;
+    int i, count, j;
+    PWord_t pval;
+    uint32_t index;
+    char build[96];
+    char *label;
+
+    count = ipmeta_provider_netacq_edge_get_polygon_tables(
+            ipmeta_state->netacqipmeta, &tables);
+
+    for (i = 0; i < count; i++) {
+
+        for (j = 0; j < tables[i]->polygons_cnt; j++) {
+            ipmeta_polygon_t *pol = tables[i]->polygons[j];
+
+            if (tables[i]->id > 255) {
+                corsaro_log(logger,
+                        "Warning: polygon table ID %u exceeds 8 bits, so Shane's sneaky renumbering scheme will no longer work!", tables[i]->id);
+            }
+
+            if (pol->id > 0xFFFFFF) {
+                corsaro_log(logger,
+                        "Warning: polygon ID %u exceeds 24 bits, so Shane's sneaky renumbering scheme will no longer work!", pol->id);
+            }
+
+            index = (((uint32_t)i) << 24) + (pol->id & 0x00FFFFFF);
+            JLI(pval, ipmeta_state->polygon_labels, (Word_t)index);
+            if (*pval) {
+                continue;
+            }
+            label = strdup(pol->fqid);
+            *pval = (Word_t) label;
+            JLI(pval, ipmeta_state->recently_added_polygon_labels,
+                    (Word_t)index);
+            *pval = (Word_t) label;
+        }
+    }
+}
+
+
+static void load_netacq_region_labels(corsaro_logger_t *logger,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    ipmeta_provider_netacq_edge_region_t **regions = NULL;
+    char *fqdn;
+    PWord_t pval;
+    uint32_t index;
+    char build[64];
+    int i, count;
+
+    count = ipmeta_provider_netacq_edge_get_regions(ipmeta_state->netacqipmeta,
+            &regions);
+
+    for (i = 0; i < count; i++) {
+        index = regions[i]->code;
+
+        /* TODO update libipmeta to add FQIDs to region entities */
+        snprintf(build, 64, "TODO.%u", index);
+        //snprintf(build, 64, "%s", regions[i]->fqid);
+        JLI(pval, ipmeta_state->region_labels, index);
+        if (*pval) {
+            continue;
+        }
+        fqdn = strdup(build);
+        *pval = (Word_t) fqdn;
+
+        JLI(pval, ipmeta_state->recently_added_region_labels, index);
+        *pval = (Word_t) fqdn;
+    }
+}
+
+
+static void load_netacq_country_labels(corsaro_logger_t *logger,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+    int count, i;
+    char build[16];
+    uint32_t index;
+    PWord_t pval;
+    char *fqdn;
+    ipmeta_provider_netacq_edge_country_t **countries = NULL;
+
+    count = ipmeta_provider_netacq_edge_get_countries(
+            ipmeta_state->netacqipmeta, &countries);
+
+    for (i = 0; i < count; i++) {
+        index = (countries[i]->iso2[0] & 0xff) +
+                ((countries[i]->iso2[1] & 0xff) << 8);
+
+        snprintf(build, 16, "%s.%s", countries[i]->continent,
+                countries[i]->iso2);
+
+        JLI(pval, ipmeta_state->country_labels, index);
+        if (*pval) {
+            continue;
+        }
+        fqdn = strdup(build);
+        *pval = (Word_t) fqdn;
+
+        JLI(pval, ipmeta_state->recently_added_country_labels, index);
+        *pval = (Word_t) fqdn;
+    }
+}
+
+
+void corsaro_load_ipmeta_data(corsaro_logger_t *logger, pfx2asn_opts_t *pfxopts,
+        maxmind_opts_t *maxopts, netacq_opts_t *netacqopts,
+        corsaro_ipmeta_state_t *ipmeta_state) {
+
+	ipmeta_provider_t *prov;
+    ipmeta_state->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
+    if (pfxopts->enabled) {
+        /* Prefix to ASN mapping */
+        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
+                IPMETA_PROVIDER_PFX2AS, pfxopts, logger);
+        if (prov == NULL) {
+            corsaro_log(logger, "error while enabling pfx2asn tagging.");
+        } else {
+            ipmeta_state->pfxipmeta = prov;
+        }
+    }
+
+    if (maxopts->enabled) {
+        /* Maxmind geolocation */
+        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
+                IPMETA_PROVIDER_MAXMIND, maxopts, logger);
+        if (prov == NULL) {
+            corsaro_log(logger,
+                    "error while enabling Maxmind geo-location tagging.");
+        } else {
+            ipmeta_state->maxmindipmeta = prov;
+        }
+
+        load_maxmind_country_labels(logger, ipmeta_state);
+    }
+    if (netacqopts->enabled) {
+        /* Netacq Edge geolocation */
+        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
+                IPMETA_PROVIDER_NETACQ_EDGE, netacqopts, logger);
+        if (prov == NULL) {
+            corsaro_log(logger,
+                    "error while enabling Netacq-Edge geo-location tagging.");
+        } else {
+            ipmeta_state->netacqipmeta = prov;
+        }
+        load_netacq_country_labels(logger, ipmeta_state);
+        load_netacq_region_labels(logger, ipmeta_state);
+        load_netacq_polygon_labels(logger, ipmeta_state);
+    }
+
+    ipmeta_state->ending = 0;
+    ipmeta_state->refcount = 1;
+    pthread_mutex_init(&(ipmeta_state->mutex), NULL);
+}
+
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -773,6 +773,15 @@ int main(int argc, char *argv[]) {
         goto endcorsarotrace;
     }
 
+    if (glob->pfxtagopts.enabled || glob->netacqtagopts.enabled ||
+            glob->maxtagopts.enabled) {
+
+        glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
+        corsaro_load_ipmeta_data(glob->logger, &(glob->pfxtagopts),
+                &(glob->maxtagopts), &(glob->netacqtagopts),
+                glob->ipmeta_state);
+    }
+
 
     merger.glob = glob;
     merger.stops_seen = 0;

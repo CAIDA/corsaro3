@@ -123,6 +123,11 @@ typedef struct corsaro_trace_glob {
 
     void *zmq_ctxt;
 
+    corsaro_ipmeta_state_t *ipmeta_state;
+    pfx2asn_opts_t pfxtagopts;
+    maxmind_opts_t maxtagopts;
+    netacq_opts_t netacqtagopts;
+
 } corsaro_trace_global_t;
 
 struct corsaro_trace_worker {
