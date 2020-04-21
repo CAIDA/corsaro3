@@ -645,6 +645,8 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
     }
 
     switch(req.request_type) {
+        case TAGGER_REQUEST_HALT_FAUX:
+            return 0;
         case TAGGER_REQUEST_HELLO:
             reply = (corsaro_tagger_control_reply_t *)reply_buffer;
             reply->hashbins = glob->pkt_threads;

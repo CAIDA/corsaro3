@@ -204,6 +204,7 @@ typedef struct corsaro_tagged_packet_header {
 enum {
     TAGGER_REQUEST_HELLO,
     TAGGER_REQUEST_IPMETA_UPDATE,
+    TAGGER_REQUEST_HALT_FAUX,
 };
 
 enum {

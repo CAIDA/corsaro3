@@ -279,10 +279,15 @@ static void log_configuration(corsaro_trace_global_t *glob) {
             glob->interval);
     corsaro_log(glob->logger, "rotating files every %u intervals",
             glob->rotatefreq);
-    corsaro_log(glob->logger, "subscribing to tagged packets from %s",
+
+    corsaro_log(glob->logger, "packets are being read from %s",
             glob->source_uri);
-    corsaro_log(glob->logger, "connecting to corsarotagger control socket: %s",
-            glob->control_uri);
+
+    if (glob->control_uri) {
+        corsaro_log(glob->logger,
+                "connecting to corsarotagger control socket: %s",
+                glob->control_uri);
+    }
 
     if (glob->boundstartts != 0) {
         corsaro_log(glob->logger, "ignoring all packets before timestamp %u",
@@ -480,11 +485,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         corsaro_trace_free_global(glob);
         corsaro_cleanse_plugin_list(allplugins);
         return NULL;
-    }
-
-
-    if (glob->control_uri == NULL) {
-        glob->control_uri = strdup(DEFAULT_CONTROL_SOCKET_URI);
     }
 
     log_configuration(glob);

@@ -61,6 +61,8 @@
 #include "libcorsaro_tagging.h"
 #include "libcorsaro_libtimeseries.h"
 
+#define INTERNAL_ZMQ_CONTROL_URI "inproc://corsarotrace_ipmeta"
+
 enum {
     CORSARO_TRACE_MSG_MERGE = 0,
     CORSARO_TRACE_MSG_STOP = 1,
@@ -146,6 +148,7 @@ struct corsaro_trace_worker {
     uint8_t stopped;
 
     corsaro_tagged_loss_tracker_t *tracker;
+    corsaro_packet_tagger_t *tagger;
     void *zmq_pushsock;
 };
 
@@ -164,6 +167,7 @@ struct corsaro_trace_merger {
 
 corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode);
 void corsaro_trace_free_global(corsaro_trace_global_t *glob);
+void *start_faux_control_thread(void *data);
 
 #endif
 // vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

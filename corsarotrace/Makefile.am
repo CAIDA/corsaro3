@@ -7,6 +7,7 @@ bin_PROGRAMS = corsarotrace
 corsarotrace_SOURCES = \
 	corsarotrace.c \
         configparser.c \
+        fauxcontrol.c \
         corsarotrace.h
 
 corsarotrace_LDADD = -lcorsaro

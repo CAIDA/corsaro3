@@ -104,21 +104,24 @@ corsaro_packet_tagger_t *corsaro_create_packet_tagger(corsaro_logger_t *logger,
     tagger->logger = logger;
     tagger->ipmeta_state = ipmeta;
 
-    if (ipmeta->pfxipmeta) {
-        tagger->providers ++;
-    }
-    if (ipmeta->maxmindipmeta) {
-        tagger->providers ++;
-    }
-    if (ipmeta->netacqipmeta) {
-        tagger->providers ++;
+    if (ipmeta) {
+        if (ipmeta->pfxipmeta) {
+            tagger->providers ++;
+        }
+        if (ipmeta->maxmindipmeta) {
+            tagger->providers ++;
+        }
+        if (ipmeta->netacqipmeta) {
+            tagger->providers ++;
+        }
+
+        pthread_mutex_lock(&(ipmeta->mutex));
+        assert(ipmeta->ending == 0);
+        ipmeta->refcount ++;
+        pthread_mutex_unlock(&(ipmeta->mutex));
+        tagger->records = ipmeta_record_set_init();
     }
 
-    pthread_mutex_lock(&(ipmeta->mutex));
-    assert(ipmeta->ending == 0);
-    ipmeta->refcount ++;
-    pthread_mutex_unlock(&(ipmeta->mutex));
-    tagger->records = ipmeta_record_set_init();
     return tagger;
 }
 
@@ -576,6 +579,11 @@ static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
      * have to expand our tag structure and run the providers against the
      * dest address too.
      */
+    if (tagger->records == NULL) {
+        tags->providers_used = htonl(tags->providers_used);
+        return 0;
+    }
+
     ipmeta_record_set_clear(tagger->records);
     if (ipmeta_lookup_single(tagger->ipmeta_state->ipmeta, ip->ip_src.s_addr,
             0, tagger->records) < 0) {
