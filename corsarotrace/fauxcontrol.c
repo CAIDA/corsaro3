@@ -166,7 +166,10 @@ void *start_faux_control_thread(void *data) {
                 reply->label_count = 0;
 
                 rptr = reply_buffer + sizeof(corsaro_tagger_control_reply_t);
-                if (req.data.last_version == 0) {
+
+                if (glob->ipmeta_state == NULL) {
+                    reply->label_count = 0;
+                } else if (req.data.last_version == 0) {
                     JLC(rc_word, glob->ipmeta_state->country_labels, 0, -1);
                     reply->label_count += (uint32_t)rc_word;
                     JLC(rc_word, glob->ipmeta_state->region_labels, 0, -1);

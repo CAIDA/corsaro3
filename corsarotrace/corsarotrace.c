@@ -217,8 +217,6 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
 	uint32_t ts;
 
 	/* naughty to use ->header directly, but it's ok because I'm doing it */
-	taghdr = (corsaro_tagged_packet_header_t *)(packet->header);
-    corsaro_update_tagged_loss_tracker(tls->tracker, taghdr);
 
 	if (tls->stopped) {
 		return packet;
@@ -226,15 +224,16 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
 
 	tags = trace_get_packet_meta(packet, &linktype, &remaining);
 
-    if (tags == NULL) {
-        return packet;
-    }
-
     if (linktype == TRACE_TYPE_CORSAROTAG) {
-        if (remaining < sizeof(corsaro_packet_tags_t)) {
+        if (tags == NULL) {
             return packet;
         }
 
+        if (remaining < sizeof(corsaro_packet_tags_t)) {
+            return packet;
+        }
+	    taghdr = (corsaro_tagged_packet_header_t *)(packet->header);
+        corsaro_update_tagged_loss_tracker(tls->tracker, taghdr);
 	    ts = ntohl(taghdr->ts_sec);
         fbits = ntohs(taghdr->filterbits);
     } else if (tls->tagger) {
@@ -785,11 +784,9 @@ int main(int argc, char *argv[]) {
          */
         if (glob->control_uri) {
             free(glob->control_uri);
-            glob->control_uri = strdup(INTERNAL_ZMQ_CONTROL_URI);
+            glob->control_uri = NULL;
         }
 
-        pthread_create(&fauxcontrol, NULL, start_faux_control_thread, glob);
-        corsaro_log(glob->logger, "started faux tagger control thread");
     }
 
     if (glob->control_uri) {
@@ -819,7 +816,10 @@ int main(int argc, char *argv[]) {
                 ctrlreply.hashbins);
         glob->threads = ctrlreply.hashbins;
     } else {
+        glob->control_uri = strdup(INTERNAL_ZMQ_CONTROL_URI);
         glob->threads = 4;
+        pthread_create(&fauxcontrol, NULL, start_faux_control_thread, glob);
+        corsaro_log(glob->logger, "started faux tagger control thread");
     }
 
     stdopts.template = glob->template;
