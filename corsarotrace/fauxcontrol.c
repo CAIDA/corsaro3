@@ -134,7 +134,7 @@ void *start_faux_control_thread(void *data) {
 
     if (zmq_bind(zmq_control, INTERNAL_ZMQ_CONTROL_URI) < 0) {
         corsaro_log(glob->logger, "error while binding faux control socket: %s",
-                strerror(errno));
+                zmq_strerror(errno));
         goto endthread;
     }
 
@@ -143,7 +143,7 @@ void *start_faux_control_thread(void *data) {
             if (errno == EINTR) {
                 continue;
             }
-            corsaro_log(glob->logger, "error while reading message on faux control socket: %s", strerror(errno));
+            corsaro_log(glob->logger, "error while reading message on faux control socket: %s", zmq_strerror(errno));
             break;
         }
 
@@ -200,7 +200,7 @@ void *start_faux_control_thread(void *data) {
                 if (errno == EINTR) {
                     continue;
                 }
-                corsaro_log(glob->logger, "error while sending control message: %s", strerror(errno));
+                corsaro_log(glob->logger, "error while sending control message: %s", zmq_strerror(errno));
                 /* carry on, don't die because of a bad client */
             }
             break;
