@@ -416,10 +416,12 @@ int corsaro_report_halt_processing(corsaro_plugin_t *p, void *local) {
     }
 
     /* Wait for the tracker threads to stop */
-    for (i = 0; i < conf->tracker_count; i++) {
-        if (conf->iptrackers[i].tid != 0) {
-            pthread_join(conf->iptrackers[i].tid, NULL);
-            conf->iptrackers[i].tid = 0;
+    if (state->threadid == 0) {
+        for (i = 0; i < conf->tracker_count; i++) {
+            if (conf->iptrackers[i].tid != 0) {
+                pthread_join(conf->iptrackers[i].tid, NULL);
+                conf->iptrackers[i].tid = 0;
+            }
         }
     }
 
@@ -559,9 +561,6 @@ static int process_tags(corsaro_report_tracker_state_t *track,
      */
 
     PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_COMBINED, 0, 0);
-
-    tags->providers_used = ntohl(tags->providers_used);
-    tags->filterbits = bswap_be_to_host64(tags->filterbits);
 
     if (!tags || tags->providers_used == 0) {
         return newtags;
@@ -737,6 +736,9 @@ int corsaro_report_process_packet(corsaro_plugin_t *p, void *local,
                 "corsaro_report_process_packet: report thread-local state is NULL!");
         return -1;
     }
+
+    tags->providers_used = ntohl(tags->providers_used);
+    tags->filterbits = bswap_be_to_host64(tags->filterbits);
 
     if (extract_addresses(packet, &srcaddr, &dstaddr, &iplen) != 0) {
         return 0;

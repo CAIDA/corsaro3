@@ -324,7 +324,7 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
 
         if (tls->tracker->lostpackets > 0) {
             corsaro_log(glob->logger,
-                    "warning: worker thread %d has observed %lu packets dropped by the tagger in the past interval (%u instances) -- %lu",
+                    "warning: worker thread %d has observed %lu packets dropped in the past interval (%u instances) -- %lu",
                     tls->workerid,
                     tls->tracker->lostpackets, tls->tracker->lossinstances,
                     tls->tracker->packetsreceived);
