@@ -1,3 +1,9 @@
+corsaro (3.2.2) unstable; urgency=medium
+
+  * Minor tagger and trace bug fixes
+
+ -- Alistair King <software@caida.org>  Mon, 27 Apr 2020 22:50:41 +0000
+
 corsaro (3.2.1) unstable; urgency=medium
 
   * Minor bug fixes to tagger and report plugin
