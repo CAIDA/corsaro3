@@ -60,6 +60,7 @@ void init_libts_kafka_backend(libts_kafka_backend_t *back) {
     back->brokeruri = NULL;
     back->channelname = NULL;
     back->compresscodec = NULL;
+    back->format = NULL;
     back->topicprefix = NULL;
 }
 
@@ -82,6 +83,7 @@ void clone_libts_kafka_backend(libts_kafka_backend_t *orig,
     clone->brokeruri = strdup(orig->brokeruri);
     clone->compresscodec = strdup(orig->compresscodec);
     clone->topicprefix = strdup(orig->topicprefix);
+    clone->format = strdup(orig->format);
 }
 
 void clone_libts_dbats_backend(libts_dbats_backend_t *orig,
@@ -114,9 +116,9 @@ void display_libts_kafka_options(corsaro_logger_t *logger,
 
     corsaro_log(logger, "%s: using Kafka backend to write to %s",
             prepend, kafka->brokeruri);
-    corsaro_log(logger, "%s: Kafka channel=%s, topicprefix=%s, compresscodec=%s",
+    corsaro_log(logger, "%s: Kafka channel=%s, topicprefix=%s, compresscodec=%s, format=%s",
             prepend, kafka->channelname, kafka->topicprefix,
-            kafka->compresscodec);
+            kafka->compresscodec, kafka->format);
 }
 
 void display_libts_dbats_options(corsaro_logger_t *logger,
@@ -243,6 +245,9 @@ void destroy_libts_kafka_backend(libts_kafka_backend_t *back) {
     if (back->compresscodec) {
         free(back->compresscodec);
     }
+    if (back->format) {
+        free(back->format);
+    }
     if (back->topicprefix) {
         free(back->topicprefix);
     }
@@ -338,6 +343,13 @@ int configure_libts_kafka_backend(corsaro_logger_t *logger,
             back->compresscodec = strdup(val);
         }
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "format") == 0) {
+            if (back->format) {
+                free(back->format);
+            }
+            back->format = strdup(val);
+        }
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                 && strcmp((char *)key->data.scalar.value, "topicprefix") == 0) {
             if (back->topicprefix) {
                 free(back->topicprefix);
@@ -352,6 +364,9 @@ int configure_libts_kafka_backend(corsaro_logger_t *logger,
         }
         if (back->compresscodec == NULL) {
             back->compresscodec = strdup("snappy");
+        }
+        if (back->format == NULL) {
+            back->format = strdup("tsk");
         }
         if (back->topicprefix == NULL) {
             back->topicprefix = strdup("");
@@ -504,6 +519,14 @@ char *create_libts_kafka_option_string(corsaro_logger_t *logger,
 
     if (snprintf(opt, 1024, "-C %s ", back->compresscodec) >= 1024) {
         corsaro_log(logger, "Overly large compression codec for libtimeseries Kafka backend");
+        corsaro_log(logger, " -- disabling Kafka backend");
+        return NULL;
+    }
+
+    ADD_TO_STRING(ptr, opt, limit, "Kafka");
+
+    if (snprintf(opt, 1024, "-f %s ", back->format) >= 1024) {
+        corsaro_log(logger, "Overly large format for libtimeseries Kafka backend");
         corsaro_log(logger, " -- disabling Kafka backend");
         return NULL;
     }

@@ -1,3 +1,9 @@
+corsaro (3.2.3) unstable; urgency=medium
+
+  * Add kafka output format support to libtimeseries module 
+
+ -- Alistair King <software@caida.org>  Tue, 28 Apr 2020 22:22:11 +0000
+
 corsaro (3.2.2) unstable; urgency=medium
 
   * Minor tagger and trace bug fixes

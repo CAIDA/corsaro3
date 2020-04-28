@@ -79,6 +79,7 @@ typedef struct libts_kafka_backend {
     char *brokeruri;        /* NULL if inactive */
     char *channelname;
     char *compresscodec;
+    char *format;
     char *topicprefix;
 } libts_kafka_backend_t;
 
