@@ -19,6 +19,20 @@ The full set of supported config options for corsarotagger is:
                           option. This option must be set if the log mode
                           is set to 'file'.
 
+    statfilename          If this option is included in the config, statistics
+                          about packets received and lost by each processing
+                          thread will be written to a file with a path
+                          beginning with the value specified and ending with
+                          the thread id. For example, if this option is set
+                          to "/tmp/mystats" then thread 0 will write its
+                          stats to "/tmp/mystats-t00", thread 1 will write its
+                          stats to "/tmp/mystats-t01", etc.
+
+                          Note that only the stats for the most recent interval
+                          will be present in the stats files; you must read the
+                          files frequently if you want to retain this data over
+                          the long term.
+
     inputuri              A libtrace URI describing where corsarotagger should
                           read captured packets from. Ideally, this would be
                           a live capture interface of some sort (i.e. an
