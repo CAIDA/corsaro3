@@ -434,207 +434,6 @@ static int start_ndag_beaconer(pthread_t *tid, ndag_beacon_params_t *bparams) {
     return 1;
 }
 
-static void load_maxmind_country_labels(corsaro_tagger_global_t *glob,
-        corsaro_ipmeta_state_t *ipmeta_state) {
-
-    const char **countries;
-    const char **continents;
-    int count, ret, i;
-    char build[16];
-    uint32_t index;
-    PWord_t pval;
-    char *fqdn;
-
-    count = ipmeta_provider_maxmind_get_iso2_list(&countries);
-    ret = ipmeta_provider_maxmind_get_country_continent_list(&continents);
-
-    if (count != ret) {
-        corsaro_log(glob->logger, "libipmeta error: maxmind country array is notthe same length as the maxmind continent array?");
-        return;
-    }
-
-    for (i = 0; i < count; i++) {
-        index = (countries[i][0] & 0xff) + ((countries[i][1] & 0xff) << 8);
-        snprintf(build, 16, "%s.%s", continents[i], countries[i]);
-
-        JLI(pval, ipmeta_state->country_labels, index);
-        if (*pval) {
-            continue;
-        }
-        fqdn = strdup(build);
-        *pval = (Word_t) fqdn;
-
-        JLI(pval, ipmeta_state->recently_added_country_labels, index);
-        *pval = (Word_t) fqdn;
-    }
-}
-
-static void load_netacq_country_labels(corsaro_tagger_global_t *glob,
-        corsaro_ipmeta_state_t *ipmeta_state) {
-
-    int count, i;
-    char build[16];
-    uint32_t index;
-    PWord_t pval;
-    char *fqdn;
-    ipmeta_provider_netacq_edge_country_t **countries = NULL;
-
-    count = ipmeta_provider_netacq_edge_get_countries(
-            ipmeta_state->netacqipmeta, &countries);
-
-    for (i = 0; i < count; i++) {
-        index = (countries[i]->iso2[0] & 0xff) +
-                ((countries[i]->iso2[1] & 0xff) << 8);
-
-        snprintf(build, 16, "%s.%s", countries[i]->continent,
-                countries[i]->iso2);
-
-        JLI(pval, ipmeta_state->country_labels, index);
-        if (*pval) {
-            continue;
-        }
-        fqdn = strdup(build);
-        *pval = (Word_t) fqdn;
-
-        JLI(pval, ipmeta_state->recently_added_country_labels, index);
-        *pval = (Word_t) fqdn;
-    }
-}
-
-static void load_netacq_region_labels(corsaro_tagger_global_t *glob,
-        corsaro_ipmeta_state_t *ipmeta_state) {
-
-    ipmeta_provider_netacq_edge_region_t **regions = NULL;
-    char *fqdn;
-    PWord_t pval;
-    uint32_t index;
-    char build[64];
-    int i, count;
-
-    count = ipmeta_provider_netacq_edge_get_regions(ipmeta_state->netacqipmeta,
-            &regions);
-
-    for (i = 0; i < count; i++) {
-        index = regions[i]->code;
-
-        /* TODO update libipmeta to add FQIDs to region entities */
-        snprintf(build, 64, "TODO.%u", index);
-        //snprintf(build, 64, "%s", regions[i]->fqid);
-        JLI(pval, ipmeta_state->region_labels, index);
-        if (*pval) {
-            continue;
-        }
-        fqdn = strdup(build);
-        *pval = (Word_t) fqdn;
-
-        JLI(pval, ipmeta_state->recently_added_region_labels, index);
-        *pval = (Word_t) fqdn;
-    }
-}
-
-static void load_netacq_polygon_labels(corsaro_tagger_global_t *glob,
-        corsaro_ipmeta_state_t *ipmeta_state) {
-
-    ipmeta_polygon_table_t **tables = NULL;
-    int i, count, j;
-    PWord_t pval;
-    uint32_t index;
-    char build[96];
-    char *label;
-
-    count = ipmeta_provider_netacq_edge_get_polygon_tables(
-            ipmeta_state->netacqipmeta, &tables);
-
-    for (i = 0; i < count; i++) {
-
-        for (j = 0; j < tables[i]->polygons_cnt; j++) {
-            ipmeta_polygon_t *pol = tables[i]->polygons[j];
-
-            if (tables[i]->id > 255) {
-                corsaro_log(glob->logger,
-                        "Warning: polygon table ID %u exceeds 8 bits, so Shane's sneaky renumbering scheme will no longer work!", tables[i]->id);
-            }
-
-            if (pol->id > 0xFFFFFF) {
-                corsaro_log(glob->logger,
-                        "Warning: polygon ID %u exceeds 24 bits, so Shane's sneaky renumbering scheme will no longer work!", pol->id);
-            }
-
-            index = (((uint32_t)i) << 24) + (pol->id & 0x00FFFFFF);
-            JLI(pval, ipmeta_state->polygon_labels, (Word_t)index);
-            if (*pval) {
-                continue;
-            }
-            label = strdup(pol->fqid);
-            *pval = (Word_t) label;
-
-            JLI(pval, ipmeta_state->recently_added_polygon_labels,
-                    (Word_t)index);
-            *pval = (Word_t) label;
-        }
-    }
-}
-
-/** Creates and populates an IPMeta data structure, based on the contents
- *  of the files listed in the configuration file.
- *
- *  @param glob             Global state for this corsarotagger instance
- *  @param ipmeta_state     A newly allocated IP meta state variable to be
- *                          populated by this function.
- */
-static void load_ipmeta_data(corsaro_tagger_global_t *glob,
-        corsaro_ipmeta_state_t *ipmeta_state) {
-
-    ipmeta_provider_t *prov;
-    ipmeta_state->ipmeta = ipmeta_init(IPMETA_DS_PATRICIA);
-    if (glob->pfxtagopts.enabled) {
-        /* Prefix to ASN mapping */
-        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
-                IPMETA_PROVIDER_PFX2AS, &(glob->pfxtagopts),
-                glob->logger);
-        if (prov == NULL) {
-            corsaro_log(glob->logger, "error while enabling pfx2asn tagging.");
-        } else {
-            ipmeta_state->pfxipmeta = prov;
-        }
-    }
-
-    if (glob->maxtagopts.enabled) {
-        /* Maxmind geolocation */
-        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
-                IPMETA_PROVIDER_MAXMIND, &(glob->maxtagopts),
-                glob->logger);
-        if (prov == NULL) {
-            corsaro_log(glob->logger,
-                    "error while enabling Maxmind geo-location tagging.");
-        } else {
-            ipmeta_state->maxmindipmeta = prov;
-        }
-
-        load_maxmind_country_labels(glob, ipmeta_state);
-    }
-
-    if (glob->netacqtagopts.enabled) {
-        /* Netacq Edge geolocation */
-        prov = corsaro_init_ipmeta_provider(ipmeta_state->ipmeta,
-                IPMETA_PROVIDER_NETACQ_EDGE, &(glob->netacqtagopts),
-                glob->logger);
-        if (prov == NULL) {
-            corsaro_log(glob->logger,
-                    "error while enabling Netacq-Edge geo-location tagging.");
-        } else {
-            ipmeta_state->netacqipmeta = prov;
-        }
-        load_netacq_country_labels(glob, ipmeta_state);
-        load_netacq_region_labels(glob, ipmeta_state);
-        load_netacq_polygon_labels(glob, ipmeta_state);
-    }
-
-    ipmeta_state->ending = 0;
-    ipmeta_state->refcount = 1;
-    pthread_mutex_init(&(ipmeta_state->mutex), NULL);
-}
-
 /** Main loop for the thread that reloads IPMeta data when signaled.
  *
  */
@@ -695,7 +494,8 @@ static void *ipmeta_reload_thread(void *tdata) {
         corsaro_log(glob->logger,
                 "starting reload of IPmeta data files...");
         replace = calloc(1, sizeof(corsaro_ipmeta_state_t));
-        load_ipmeta_data(glob, replace);
+        corsaro_load_ipmeta_data(glob->logger, &(glob->pfxtagopts),
+            &(glob->maxtagopts), &(glob->netacqtagopts), replace);
 
         /* Send the replacement IPmeta data to all of the tagger threads */
         for (i = 0; i < glob->pkt_threads; i++) {
@@ -845,6 +645,8 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
     }
 
     switch(req.request_type) {
+        case TAGGER_REQUEST_HALT_FAUX:
+            return 0;
         case TAGGER_REQUEST_HELLO:
             reply = (corsaro_tagger_control_reply_t *)reply_buffer;
             reply->hashbins = glob->pkt_threads;
@@ -1106,7 +908,8 @@ int main(int argc, char *argv[]) {
 
     /* Load the libipmeta provider data */
     glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
-    load_ipmeta_data(glob, glob->ipmeta_state);
+    corsaro_load_ipmeta_data(glob->logger, &(glob->pfxtagopts),
+            &(glob->maxtagopts), &(glob->netacqtagopts), glob->ipmeta_state);
     gettimeofday(&tv, NULL);
     glob->ipmeta_version = tv.tv_sec;
     glob->ipmeta_state->last_reload = tv.tv_sec;
