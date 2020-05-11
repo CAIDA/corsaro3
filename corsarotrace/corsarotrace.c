@@ -200,6 +200,30 @@ static int push_stop_merging(corsaro_logger_t *logger,
     return 0;
 }
 
+static void publish_thread_statistics(corsaro_trace_global_t *glob,
+        libtrace_thread_t *t, corsaro_trace_worker_t *tls) {
+
+    FILE *f = NULL;
+    char sfname[1024];
+
+    snprintf(sfname, 1024, "%s-t%02d", glob->statfilename,
+                trace_get_perpkt_thread_id(t));
+
+    f = fopen(sfname, "w");
+    if (!f) {
+        corsaro_log(glob->logger, "unable to open statistic file %s for writing: %s",
+                sfname, strerror(errno));
+        return;
+    }
+
+    fprintf(f, "time=%u accepted=%lu dropped=%lu dropinstances=%u previnterval=%lu\n",
+            tls->current_interval.time,
+            tls->tracker->packetsreceived, tls->tracker->lostpackets,
+            tls->tracker->lossinstances,
+            tls->pkts_from_prev_interval);
+    fclose(f);
+}
+
 static libtrace_packet_t * per_packet(libtrace_t *trace,
 		libtrace_thread_t *t, void *global, void *local,
 		libtrace_packet_t *packet) {
@@ -320,6 +344,10 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
                     tls->current_interval.number);
 			tls->stopped = 1;
             return packet;
+        }
+
+        if (glob->statfilename) {
+            publish_thread_statistics(glob, t, tls);
         }
 
         if (tls->tracker->lostpackets > 0) {

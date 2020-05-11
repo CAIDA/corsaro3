@@ -95,6 +95,7 @@ typedef struct corsaro_trace_glob {
     corsaro_logger_t *logger;
     char *template;
     char *logfilename;
+    char *statfilename;
     char *source_uri;
     char *filterstring;
     char *monitorid;
