@@ -808,9 +808,7 @@ static void update_tracker_results(Pvoid_t *results,
          * time becomes a problem?
          */
         index2 = 0;
-        if (iter->srcasns == NULL) {
-            r->uniq_src_asn_count = 0;
-        } else {
+        if (iter->srcasns != NULL) {
             J1F(x, iter->srcasns, index2);
             while (x) {
                 J1S(x, r->uniq_src_asns, (Word_t)index2);

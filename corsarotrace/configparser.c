@@ -217,6 +217,11 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "statfilename")) {
+        glob->statfilename = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "packetsource")) {
         glob->source_uri = strdup((char *)value->data.scalar.value);
     }
@@ -260,19 +265,38 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
         parse_libtimeseries_config(glob, doc, value);
     }
 
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
+            && !strcmp((char *)key->data.scalar.value, "tagproviders")) {
+        if (corsaro_parse_tagging_provider_config(&(glob->pfxtagopts),
+                    &(glob->maxtagopts), &(glob->netacqtagopts), doc, value,
+                    glob->logger) != 0) {
+            return -1;
+        }
+    }
+
+
     return 1;
 }
 
 static void log_configuration(corsaro_trace_global_t *glob) {
     corsaro_log(glob->logger, "running on monitor %s", glob->monitorid);
+    if (glob->statfilename) {
+        corsaro_log(glob->logger, "writing statistics to files beginning with '%s'",
+                glob->statfilename);
+    }
     corsaro_log(glob->logger, "interval length is set to %u seconds",
             glob->interval);
     corsaro_log(glob->logger, "rotating files every %u intervals",
             glob->rotatefreq);
-    corsaro_log(glob->logger, "subscribing to tagged packets from %s",
+
+    corsaro_log(glob->logger, "packets are being read from %s",
             glob->source_uri);
-    corsaro_log(glob->logger, "connecting to corsarotagger control socket: %s",
-            glob->control_uri);
+
+    if (glob->control_uri) {
+        corsaro_log(glob->logger,
+                "connecting to corsarotagger control socket: %s",
+                glob->control_uri);
+    }
 
     if (glob->boundstartts != 0) {
         corsaro_log(glob->logger, "ignoring all packets before timestamp %u",
@@ -390,6 +414,7 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->monitorid = NULL;
     glob->logmode = logmode;
     glob->logfilename = NULL;
+    glob->statfilename = NULL;
     glob->threads = 4;
     glob->plugincount = 0;
 
@@ -403,6 +428,11 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     glob->source_uri = NULL;
     glob->control_uri = NULL;
     glob->zmq_ctxt = zmq_ctx_new();
+
+    memset(&(glob->pfxtagopts), 0, sizeof(pfx2asn_opts_t));
+    memset(&(glob->maxtagopts), 0, sizeof(maxmind_opts_t));
+    memset(&(glob->netacqtagopts), 0, sizeof(netacq_opts_t));
+    glob->ipmeta_state = NULL;
 
     pthread_mutex_init(&(glob->mutex), NULL);
 
@@ -467,11 +497,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
         return NULL;
     }
 
-
-    if (glob->control_uri == NULL) {
-        glob->control_uri = strdup(DEFAULT_CONTROL_SOCKET_URI);
-    }
-
     log_configuration(glob);
 
     /* Ok to cleanse this now, the config parsing above should have made
@@ -522,6 +547,10 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
         free(glob->template);
     }
 
+    if (glob->statfilename) {
+        free(glob->statfilename);
+    }
+
     if (glob->logfilename) {
         free(glob->logfilename);
     }
@@ -532,6 +561,13 @@ void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
 
     if (glob->control_uri) {
         free(glob->control_uri);
+    }
+
+    corsaro_free_tagging_provider_config(&(glob->pfxtagopts),
+            &(glob->maxtagopts), &(glob->netacqtagopts));
+
+    if (glob->ipmeta_state) {
+        corsaro_free_ipmeta_state(glob->ipmeta_state);
     }
 
     if (glob->zmq_ctxt) {

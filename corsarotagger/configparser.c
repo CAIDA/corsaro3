@@ -52,82 +52,11 @@
 #include <libtrace/hash_toeplitz.h>
 #include "libcorsaro_log.h"
 #include "libcorsaro_common.h"
+#include "libcorsaro_tagging.h"
 #include "corsarotagger.h"
 
 #include <zmq.h>
 #include <yaml.h>
-
-static int parse_netacq_tag_options(corsaro_logger_t *logger,
-        netacq_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
-
-    yaml_node_t *key, *value;
-    yaml_node_pair_t *pair;
-
-    if (confmap->type != YAML_MAPPING_NODE) {
-        corsaro_log(logger, "Netacq-edge tagging config should be a map!");
-        return -1;
-    }
-
-    for (pair = confmap->data.mapping.pairs.start;
-            pair < confmap->data.mapping.pairs.top; pair ++) {
-        key = yaml_document_get_node(doc, pair->key);
-        value = yaml_document_get_node(doc, pair->value);
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "blocksfile") == 0) {
-            if (opts->blocks_file) {
-                free(opts->blocks_file);
-            }
-            opts->blocks_file = strdup((char *)value->data.scalar.value);
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "locationsfile") == 0) {
-            if (opts->locations_file) {
-                free(opts->locations_file);
-            }
-            opts->locations_file = strdup((char *)value->data.scalar.value);
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "countryfile") == 0) {
-            if (opts->country_file) {
-                free(opts->country_file);
-            }
-            opts->country_file = strdup((char *)value->data.scalar.value);
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "regionfile") == 0) {
-            if (opts->region_file) {
-                free(opts->region_file);
-            }
-            opts->region_file = strdup((char *)value->data.scalar.value);
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "polygonmapfile") == 0) {
-            if (opts->polygon_map_file) {
-                free(opts->polygon_map_file);
-            }
-            opts->polygon_map_file = strdup((char *)value->data.scalar.value);
-        }
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "polygontablefile") == 0) {
-            char *copy;
-            if (opts->polygon_table_files == NULL) {
-                opts->polygon_table_files = libtrace_list_init(sizeof(char *));
-            }
-            copy = strdup((char *)value->data.scalar.value);
-            libtrace_list_push_back(opts->polygon_table_files, &copy);
-        }
-
-    }
-
-    opts->enabled = 1;
-    return 0;
-}
 
 static int parse_multicast_config(corsaro_tagger_global_t *glob,
         yaml_document_t *doc, yaml_node_t *confmap, corsaro_logger_t *logger) {
@@ -187,161 +116,6 @@ static int parse_multicast_config(corsaro_tagger_global_t *glob,
 
     return 0;
 }
-
-static int parse_pfx2as_tag_options(corsaro_logger_t *logger,
-        pfx2asn_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
-
-    yaml_node_t *key, *value;
-    yaml_node_pair_t *pair;
-
-    if (confmap->type != YAML_MAPPING_NODE) {
-        corsaro_log(logger, "Prefix->ASN tagging config should be a map!");
-        return -1;
-    }
-
-    for (pair = confmap->data.mapping.pairs.start;
-            pair < confmap->data.mapping.pairs.top; pair ++) {
-        key = yaml_document_get_node(doc, pair->key);
-        value = yaml_document_get_node(doc, pair->value);
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "prefixfile") == 0) {
-            if (opts->pfx2as_file) {
-                free(opts->pfx2as_file);
-            }
-            opts->pfx2as_file = strdup((char *)value->data.scalar.value);
-        }
-
-    }
-
-    if (opts->pfx2as_file == NULL) {
-        corsaro_log(logger,
-                "Prefix->ASN tagging requires a 'prefixfile' config option.");
-        return -1;
-    }
-
-    opts->enabled = 1;
-    return 0;
-}
-
-static int parse_maxmind_tag_options(corsaro_logger_t *logger,
-        maxmind_opts_t *opts, yaml_document_t *doc, yaml_node_t *confmap) {
-
-    yaml_node_t *key, *value;
-    yaml_node_pair_t *pair;
-
-    if (confmap->type != YAML_MAPPING_NODE) {
-        corsaro_log(logger, "Maxmind tagging config should be a map!");
-        return -1;
-    }
-
-    for (pair = confmap->data.mapping.pairs.start;
-            pair < confmap->data.mapping.pairs.top; pair ++) {
-        key = yaml_document_get_node(doc, pair->key);
-        value = yaml_document_get_node(doc, pair->value);
-
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "directory") == 0) {
-            if (opts->directory) {
-                free(opts->directory);
-            }
-            opts->directory = strdup((char *)value->data.scalar.value);
-        }
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "blocksfile") == 0) {
-            if (opts->blocks_file) {
-                free(opts->blocks_file);
-            }
-            opts->blocks_file = strdup((char *)value->data.scalar.value);
-        }
-        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
-                && strcmp((char *)key->data.scalar.value, "locationsfile") == 0) {
-            if (opts->locations_file) {
-                free(opts->locations_file);
-            }
-            opts->locations_file = strdup((char *)value->data.scalar.value);
-        }
-    }
-
-    /* Sanity-checks */
-    if (opts->directory == NULL) {
-        if (opts->locations_file == NULL || opts->blocks_file == NULL) {
-            corsaro_log(logger,
-                    "Maxmind config: both 'locationsfile' and 'blocksfile' must be present in the config file (unless you have set 'directory' instead).");
-            return -1;
-        }
-    } else {
-        if (opts->locations_file || opts->blocks_file) {
-            corsaro_log(logger,
-                    "Maxmind config: 'directory' option is mutually exclusive with the 'blocksfiles' and 'locationsfile' options. Ignoring the latter options.");
-        }
-    }
-    opts->enabled = 1;
-    return 0;
-}
-
-static int parse_tagprov_config(corsaro_tagger_global_t *glob,
-        yaml_document_t *doc, yaml_node_t *provlist,
-        corsaro_logger_t *logger) {
-
-    yaml_node_item_t *item;
-    int plugincount = 0;
-
-    for (item = provlist->data.sequence.items.start;
-            item != provlist->data.sequence.items.top; item ++) {
-        yaml_node_t *node = yaml_document_get_node(doc, *item);
-        yaml_node_pair_t *pair;
-
-        for (pair = node->data.mapping.pairs.start;
-                pair < node->data.mapping.pairs.top; pair ++) {
-            yaml_node_t *key, *value;
-
-            ipmeta_provider_id_t provid = 0;
-
-            key = yaml_document_get_node(doc, pair->key);
-            value = yaml_document_get_node(doc, pair->value);
-
-            /* key = provider name */
-            /* value = map of provider options */
-            if (strcmp((char *)key->data.scalar.value, "maxmind") == 0) {
-                if (parse_maxmind_tag_options(logger,
-                        &(glob->maxtagopts), doc, value) != 0) {
-                    corsaro_log(logger,
-                            "error while parsing config for Maxmind tagging");
-                    continue;
-                }
-                provid = IPMETA_PROVIDER_MAXMIND;
-            }
-            if (strcmp((char *)key->data.scalar.value, "netacq-edge") == 0) {
-                if (parse_netacq_tag_options(logger,
-                        &(glob->netacqtagopts), doc, value) != 0) {
-                    corsaro_log(logger,
-                            "error while parsing config for Netacq-Edge tagging");
-                    continue;
-                }
-                provid = IPMETA_PROVIDER_NETACQ_EDGE;
-            }
-            if (strcmp((char *)key->data.scalar.value, "pfx2as") == 0) {
-                if (parse_pfx2as_tag_options(logger,
-                        &(glob->pfxtagopts), doc, value) != 0) {
-                    corsaro_log(logger,
-                            "error while parsing config for Prefix->ASN tagging");
-                    continue;
-                }
-                provid = IPMETA_PROVIDER_PFX2AS;
-            }
-
-            if (provid == 0) {
-                corsaro_log(logger,
-                        "unrecognised tag provider name in config file: %s",
-                        (char *)key->data.scalar.value);
-                continue;
-            }
-        }
-    }
-    return 0;
-}
-
 
 static int add_uri(corsaro_tagger_global_t *glob, char *uri,
         corsaro_logger_t *logger) {
@@ -443,7 +217,9 @@ static int parse_config(void *globalin,
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
             && !strcmp((char *)key->data.scalar.value, "tagproviders")) {
-        if (parse_tagprov_config(glob, doc, value, logger) != 0) {
+        if (corsaro_parse_tagging_provider_config(&(glob->pfxtagopts),
+                &(glob->maxtagopts), &(glob->netacqtagopts), doc, value,
+                logger) != 0) {
             return -1;
         }
     }
@@ -677,54 +453,8 @@ void corsaro_tagger_free_global(corsaro_tagger_global_t *glob) {
         free(glob->hasher_data);
     }
 
-    if (glob->pfxtagopts.pfx2as_file) {
-        free(glob->pfxtagopts.pfx2as_file);
-    }
-
-    if (glob->maxtagopts.directory) {
-        free(glob->maxtagopts.directory);
-    }
-
-    if (glob->maxtagopts.blocks_file) {
-        free(glob->maxtagopts.blocks_file);
-    }
-
-    if (glob->maxtagopts.locations_file) {
-        free(glob->maxtagopts.locations_file);
-    }
-
-    if (glob->netacqtagopts.blocks_file) {
-        free(glob->netacqtagopts.blocks_file);
-    }
-
-    if (glob->netacqtagopts.country_file) {
-        free(glob->netacqtagopts.country_file);
-    }
-
-    if (glob->netacqtagopts.locations_file) {
-        free(glob->netacqtagopts.locations_file);
-    }
-
-    if (glob->netacqtagopts.region_file) {
-        free(glob->netacqtagopts.region_file);
-    }
-
-    if (glob->netacqtagopts.polygon_map_file) {
-        free(glob->netacqtagopts.polygon_map_file);
-    }
-
-    if (glob->netacqtagopts.polygon_table_files) {
-        libtrace_list_node_t *n;
-        char *str;
-
-        n = glob->netacqtagopts.polygon_table_files->head;
-        while (n) {
-            str = (char *)(n->data);
-            free(str);
-            n = n->next;
-        }
-        libtrace_list_deinit(glob->netacqtagopts.polygon_table_files);
-    }
+    corsaro_free_tagging_provider_config(&(glob->pfxtagopts),
+            &(glob->maxtagopts), &(glob->netacqtagopts));
 
     if (glob->ipmeta_state) {
         corsaro_free_ipmeta_state(glob->ipmeta_state);

@@ -200,13 +200,37 @@ static int push_stop_merging(corsaro_logger_t *logger,
     return 0;
 }
 
+static void publish_thread_statistics(corsaro_trace_global_t *glob,
+        libtrace_thread_t *t, corsaro_trace_worker_t *tls) {
+
+    FILE *f = NULL;
+    char sfname[1024];
+
+    snprintf(sfname, 1024, "%s-t%02d", glob->statfilename,
+                trace_get_perpkt_thread_id(t));
+
+    f = fopen(sfname, "w");
+    if (!f) {
+        corsaro_log(glob->logger, "unable to open statistic file %s for writing: %s",
+                sfname, strerror(errno));
+        return;
+    }
+
+    fprintf(f, "time=%u accepted=%lu dropped=%lu dropinstances=%u previnterval=%lu\n",
+            tls->current_interval.time,
+            tls->tracker->packetsreceived, tls->tracker->lostpackets,
+            tls->tracker->lossinstances,
+            tls->pkts_from_prev_interval);
+    fclose(f);
+}
+
 static libtrace_packet_t * per_packet(libtrace_t *trace,
 		libtrace_thread_t *t, void *global, void *local,
 		libtrace_packet_t *packet) {
 
 	corsaro_trace_worker_t *tls = (corsaro_trace_worker_t *)local;
 	corsaro_trace_global_t *glob = (corsaro_trace_global_t *)global;
-    corsaro_packet_tags_t *tags;
+    corsaro_packet_tags_t *tags, localtags;
     corsaro_tagged_packet_header_t *taghdr;
 	void **interval_data;
     void **final_result;
@@ -217,23 +241,46 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
 	uint32_t ts;
 
 	/* naughty to use ->header directly, but it's ok because I'm doing it */
-	taghdr = (corsaro_tagged_packet_header_t *)(packet->header);
-    corsaro_update_tagged_loss_tracker(tls->tracker, taghdr);
 
 	if (tls->stopped) {
 		return packet;
 	}
 
 	tags = trace_get_packet_meta(packet, &linktype, &remaining);
-	if (tags == NULL || remaining < sizeof(corsaro_packet_tags_t)) {
-		return packet;
-	}
 
-    if (linktype != TRACE_TYPE_CORSAROTAG) {
+    if (linktype == TRACE_TYPE_CORSAROTAG) {
+        if (tags == NULL) {
+            return packet;
+        }
+
+        if (remaining < sizeof(corsaro_packet_tags_t)) {
+            return packet;
+        }
+	    taghdr = (corsaro_tagged_packet_header_t *)(packet->header);
+        corsaro_update_tagged_loss_tracker(tls->tracker, taghdr);
+	    ts = ntohl(taghdr->ts_sec);
+        fbits = ntohs(taghdr->filterbits);
+    } else if (tls->tagger) {
+        struct timeval tv;
+        uint64_t filterbits;
+        /* packet is not from corsarotagger, but we have the ability to tag
+         * packets ourselves
+         */
+        if (corsaro_tag_packet(tls->tagger, &localtags, packet) < 0) {
+            corsaro_log(glob->logger,
+                    "error while tagging untagged packet");
+            return packet;
+        }
+        tags = &(localtags);
+        tv = trace_get_timeval(packet);
+        filterbits = bswap_be_to_host64(tags->filterbits);
+
+        ts = tv.tv_sec;
+        fbits = ((uint16_t)filterbits) & 0x0f;
+    } else {
         tags = NULL;
     }
 
-	ts = ntohl(taghdr->ts_sec);
     if (glob->boundstartts && ts < glob->boundstartts) {
         return packet;
     }
@@ -322,6 +369,10 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
             return packet;
         }
 
+        if (glob->statfilename) {
+            publish_thread_statistics(glob, t, tls);
+        }
+
         if (tls->tracker->lostpackets > 0) {
             corsaro_log(glob->logger,
                     "warning: worker thread %d has observed %lu packets dropped in the past interval (%u instances) -- %lu",
@@ -359,7 +410,6 @@ static libtrace_packet_t * per_packet(libtrace_t *trace,
         }
     }
 
-    fbits = ntohs(taghdr->filterbits);
     if (glob->removenotscan && !(fbits & CORSARO_FILTERBIT_LARGE_SCALE_SCAN)) {
         goto filtered;
     }
@@ -394,6 +444,14 @@ static void *init_corsarotrace_worker(libtrace_t *trace, libtrace_thread_t *t,
 	tls = calloc(1, sizeof(corsaro_trace_worker_t));
 	tls->workerid = trace_get_perpkt_thread_id(t);
 	tls->tracker = corsaro_create_tagged_loss_tracker(glob->threads);
+    tls->tagger = corsaro_create_packet_tagger(glob->logger,
+            glob->ipmeta_state);
+
+    if (tls->tagger == NULL) {
+        corsaro_log(glob->logger,
+                "warning: unable to create local tagger instance for worker %d",
+                tls->workerid);
+    }
 
     tls->zmq_pushsock = zmq_socket(glob->zmq_ctxt, ZMQ_PUSH);
     if (zmq_connect(tls->zmq_pushsock, "inproc://pluginresults") < 0) {
@@ -443,6 +501,10 @@ static void halt_corsarotrace_worker(libtrace_t *trace, libtrace_thread_t *t,
     push_stop_merging(glob->logger, tls);
     if (tls->plugins && corsaro_stop_plugins(tls->plugins) == -1) {
         corsaro_log(glob->logger, "error while stopping plugins.");
+    }
+
+    if (tls->tagger) {
+        corsaro_destroy_packet_tagger(tls->tagger);
     }
 
     zmq_close(tls->zmq_pushsock);
@@ -727,37 +789,66 @@ int main(int argc, char *argv[]) {
 	libtrace_stat_t *stats;
 	libtrace_callback_set_t *processing = NULL;
     corsaro_plugin_proc_options_t stdopts;
+    pthread_t fauxcontrol = 0;
 
     glob = configure_corsaro(argc, argv);
     if (glob == NULL) {
         return 1;
     }
 
-    control_sock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
-    if (zmq_connect(control_sock, glob->control_uri) < 0) {
-        corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
-        goto endcorsarotrace;
+    if (glob->pfxtagopts.enabled || glob->netacqtagopts.enabled ||
+            glob->maxtagopts.enabled) {
+
+        glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
+        corsaro_load_ipmeta_data(glob->logger, &(glob->pfxtagopts),
+                &(glob->maxtagopts), &(glob->netacqtagopts),
+                glob->ipmeta_state);
+
+        /* if we are doing our own tagging, we are not talking to a
+         * tagger (and are probably doing post-processing of old
+         * pcaps), so we need to set up a local "tagger" instance for
+         * dealing with country / polygon label requests from the
+         * plugins (e.g. report).
+         */
+        if (glob->control_uri) {
+            free(glob->control_uri);
+            glob->control_uri = NULL;
+        }
+
     }
 
-    ctrlreq.request_type = TAGGER_REQUEST_HELLO;
-    ctrlreq.data.last_version = 0;
+    if (glob->control_uri) {
+        control_sock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+        if (zmq_connect(control_sock, glob->control_uri) < 0) {
+            corsaro_log(glob->logger, "unable to connect to corsarotagger control socket %s: %s", glob->control_uri, strerror(errno));
+            goto endcorsarotrace;
+        }
 
-    corsaro_log(glob->logger, "waiting for message from tagger control socket...");
-    if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
-        corsaro_log(glob->logger, "unable to send request to corsarotagger via control socket: %s", strerror(errno));
-        goto endcorsarotrace;
+        ctrlreq.request_type = TAGGER_REQUEST_HELLO;
+        ctrlreq.data.last_version = 0;
+
+        corsaro_log(glob->logger, "waiting for message from tagger control socket...");
+        if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
+            corsaro_log(glob->logger, "unable to send request to corsarotagger via control socket: %s", strerror(errno));
+            goto endcorsarotrace;
+        }
+
+        if (zmq_recv(control_sock, &ctrlreply, sizeof(ctrlreply), 0) < 0) {
+            corsaro_log(glob->logger, "unable to receive reply from corsarotagger via control socket: %s", strerror(errno));
+            goto endcorsarotrace;
+        }
+
+        //zmq_close(control_sock);
+        //control_sock = NULL;
+        corsaro_log(glob->logger, "corsarotagger is using %u tagger threads",
+                ctrlreply.hashbins);
+        glob->threads = ctrlreply.hashbins;
+    } else {
+        glob->control_uri = strdup(INTERNAL_ZMQ_CONTROL_URI);
+        glob->threads = 4;
+        pthread_create(&fauxcontrol, NULL, start_faux_control_thread, glob);
+        corsaro_log(glob->logger, "started faux tagger control thread");
     }
-
-    if (zmq_recv(control_sock, &ctrlreply, sizeof(ctrlreply), 0) < 0) {
-        corsaro_log(glob->logger, "unable to receive reply from corsarotagger via control socket: %s", strerror(errno));
-        goto endcorsarotrace;
-    }
-
-    zmq_close(control_sock);
-    control_sock = NULL;
-    corsaro_log(glob->logger, "corsarotagger is using %u tagger threads",
-            ctrlreply.hashbins);
-    glob->threads = ctrlreply.hashbins;
 
     stdopts.template = glob->template;
     stdopts.monitorid = glob->monitorid;
@@ -843,6 +934,18 @@ int main(int argc, char *argv[]) {
     pthread_join(merger.threadid, NULL);
     if (merger.zmq_pullsock) {
         zmq_close(merger.zmq_pullsock);
+    }
+
+    if (fauxcontrol && control_sock) {
+        ctrlreq.request_type = TAGGER_REQUEST_HALT_FAUX;
+        ctrlreq.data.last_version = 0;
+
+        if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
+            corsaro_log(glob->logger, "unable to send halt to corsarotagger via control socket: %s", strerror(errno));
+            goto endcorsarotrace;
+        }
+        corsaro_log(glob->logger, "waiting for faux control thread to join");
+        pthread_join(fauxcontrol, NULL);
     }
 
     corsaro_log(glob->logger, "all threads have joined, exiting.");

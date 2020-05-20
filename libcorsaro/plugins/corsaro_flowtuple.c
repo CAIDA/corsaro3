@@ -132,6 +132,7 @@ typedef struct corsaro_ft_merge_msg {
     uint8_t dest;
     uint8_t type;
     void *content;
+    uint32_t rotate_ts;
     uint32_t interval_ts;
     uint8_t input_source;
 } PACKED corsaro_ft_write_msg_t;
@@ -243,6 +244,7 @@ struct corsaro_flowtuple_merge_state_t {
     corsaro_flowtuple_merger_t *writerthreads;
     uint8_t nextworker;
     uint8_t maxworkers;
+    uint32_t last_rotate;
     void *pubqueue;
 };
 
@@ -1411,8 +1413,8 @@ static void *start_ftmerge_worker(void *tdata) {
 
             if (!corsaro_is_avro_writer_active(w)) {
                 char *outname = _flowtuple_derive_output_name(
-                        m->logger, m->baseconf, msg.interval_ts,
-                        msg.input_source);
+                        m->logger, m->baseconf, msg.rotate_ts,
+                        m->thread_num);
                 if (outname == NULL) {
                     continue;
                 }
@@ -1496,6 +1498,7 @@ void *corsaro_flowtuple_init_merging(corsaro_plugin_t *p, int sources) {
     m = (struct corsaro_flowtuple_merge_state_t *)calloc(1,
             sizeof(struct corsaro_flowtuple_merge_state_t));
 
+    m->last_rotate = 0;
     m->maxworkers = conf->maxmergeworkers;
     m->writerthreads = calloc(m->maxworkers,
             sizeof(corsaro_flowtuple_merger_t));
@@ -1572,6 +1575,7 @@ int corsaro_flowtuple_halt_merging(corsaro_plugin_t *p, void *local) {
             msg.type = CORSARO_FT_MSG_STOP;
             msg.content = NULL;
             msg.interval_ts = 0;
+            msg.rotate_ts = 0;
             msg.input_source = 0;
 
             zmq_send(m->pubqueue, &(msg), sizeof(msg), 0);
@@ -1661,6 +1665,10 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
             if (input) {
                 msg.dest = m->nextworker;
 
+                if (m->last_rotate == 0) {
+                    m->last_rotate = fin->timestamp;
+                }
+
                 m->nextworker = (m->nextworker + 1) % m->maxworkers;
 
                 if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
@@ -1670,6 +1678,7 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
                 }
 
                 msg.content = input;
+                msg.rotate_ts = m->last_rotate;
                 msg.interval_ts = fin->timestamp;
                 msg.input_source = i;
 
@@ -1700,6 +1709,7 @@ int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local) {
 
     msg.type = CORSARO_FT_MSG_ROTATE;
     msg.content = NULL;
+    msg.rotate_ts = 0;
     msg.interval_ts = 0;
     msg.input_source = 0;
 
@@ -1707,6 +1717,8 @@ int corsaro_flowtuple_rotate_output(corsaro_plugin_t *p, void *local) {
         msg.dest = i;
         zmq_send(m->pubqueue, &(msg), sizeof(msg), 0);
     }
+
+    m->last_rotate = 0;
 
     return 0;
 }
