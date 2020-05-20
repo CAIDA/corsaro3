@@ -84,7 +84,7 @@
 #define METRIC_IPPROTOS_MAX (256)
 
 /** Maximum number of IP tracker threads allowed */
-#define CORSARO_REPORT_MAX_IPTRACKERS (8)
+#define CORSARO_REPORT_MAX_IPTRACKERS (32)
 
 /* Note: these pre-defined alpha-2 codes are used to bootstrap the
  * results data so that we can reliably report 0 values for countries
