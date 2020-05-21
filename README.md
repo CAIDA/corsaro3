@@ -36,7 +36,14 @@ On macOS, using HomeBrew you'll want something like `brew install avro-c zeromq 
 Installing
 ==========
 
-Standard installation instructions apply.
+Ubuntu/Debian packages are available from CAIDA's package repository:
+```
+curl https://pkg.caida.org/os/ubuntu/bootstrap.sh | bash
+# ^ of course, you should inspect this script first
+sudo apt install corsaro
+```
+
+Otherwise, standard installation instructions apply:
 
     ./bootstrap.sh        (if cloned from GitHub)
     ./configure
