@@ -530,8 +530,8 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     return (void *)interim;
 }
 
-#define PROCESS_SINGLE_TAG(class, val, maxval) \
-    if (allowedmetricclasses == 0 || \
+#define PROCESS_SINGLE_TAG(class, val, maxval, skipcheck) \
+    if (skipcheck || allowedmetricclasses == 0 || \
             ((1UL << class) & allowedmetricclasses)) { \
         if ((ret = process_single_tag(class, val, maxval, track, logger, \
                 iplen)) < 0) { \
@@ -564,20 +564,23 @@ static int process_tags(corsaro_report_tracker_state_t *track,
      * the combined tally.
      */
 
-    PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_COMBINED, 0, 0);
+    PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_COMBINED, 0, 0, 0);
 
     if (!tags || tags->providers_used == 0) {
         return newtags;
     }
 
     PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
-            METRIC_IPPROTOS_MAX);
+            METRIC_IPPROTOS_MAX, 0);
 
-    for (i = CORSARO_FILTERID_ABNORMAL_PROTOCOL;
-            i < CORSARO_FILTERID_MAX; i++) {
-        if (tags->filterbits & ( 1 << i)) {
-            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_FILTER_CRITERIA, i,
-                    CORSARO_FILTERID_MAX);
+    if (allowedmetricclasses == 0 || (allowedmetricclasses &
+            (1UL << CORSARO_METRIC_CLASS_FILTER_CRITERIA))) {
+        for (i = CORSARO_FILTERID_ABNORMAL_PROTOCOL;
+                i < CORSARO_FILTERID_MAX; i++) {
+            if (tags->filterbits & ( 1 << i)) {
+                PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_FILTER_CRITERIA, i,
+                        CORSARO_FILTERID_MAX, 1);
+            }
         }
     }
 
@@ -602,39 +605,39 @@ static int process_tags(corsaro_report_tracker_state_t *track,
         }
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
-                ntohs(tags->src_port), METRIC_PORT_MAX);
+                ntohs(tags->src_port), METRIC_PORT_MAX, 0);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
-                ntohs(tags->dest_port), METRIC_PORT_MAX);
+                ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
-                ntohs(tags->src_port), METRIC_PORT_MAX);
+                ntohs(tags->src_port), METRIC_PORT_MAX, 0);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
-                ntohs(tags->dest_port), METRIC_PORT_MAX);
+                ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
     }
 
     if (maxmind_tagged(tags)) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
-                tags->maxmind_continent, 0);
+                tags->maxmind_continent, 0, 0);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
-                tags->maxmind_country, 0);
+                tags->maxmind_country, 0, 0);
     }
 
     if (netacq_tagged(tags)) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
-                tags->netacq_continent, 0);
+                tags->netacq_continent, 0, 0);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
-                tags->netacq_country, 0);
+                tags->netacq_country, 0, 0);
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_REGION,
-                ntohs(tags->netacq_region), 0);
+                ntohs(tags->netacq_region), 0, 0);
         for (i = 0; i < MAX_NETACQ_POLYGONS; i++) {
             PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
-                    ntohl(tags->netacq_polygon[i]), 0);
+                    ntohl(tags->netacq_polygon[i]), 0, 0);
         }
     }
 
     if (pfx2as_tagged(tags)) {
         PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_PREFIX_ASN,
-                ntohl(tags->prefixasn), 0);
+                ntohl(tags->prefixasn), 0, 0);
     }
 	return newtags;
 }
