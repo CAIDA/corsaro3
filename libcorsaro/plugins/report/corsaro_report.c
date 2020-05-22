@@ -340,7 +340,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         corsaro_plugin_proc_options_t *stdopts, void *zmq_ctxt) {
 
     corsaro_report_config_t *conf;
-    int i, j, ret = 0, rto=10, hwm=30;
+    int i, j, ret = 0, rto=10, hwm=50, inchwm;
     char sockname[40];
 
     conf = (corsaro_report_config_t *)(p->config);
@@ -427,6 +427,8 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
     }
 
     hwm = conf->internalhwm;
+    inchwm = hwm * conf->basic.procthreads;
+
     corsaro_log(p->logger, "report plugin: using internal queue HWM of %u",
             conf->internalhwm);
 
@@ -472,8 +474,8 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
             ret = -1;
         }
 
-        if (zmq_setsockopt(conf->iptrackers[i].incoming, ZMQ_RCVHWM, &hwm,
-                    sizeof(hwm)) < 0) {
+        if (zmq_setsockopt(conf->iptrackers[i].incoming, ZMQ_RCVHWM, &inchwm,
+                    sizeof(inchwm)) < 0) {
             corsaro_log(p->logger,
                     "error while configuring ip tracker %d pull socket: %s", i,
                     strerror(errno));
