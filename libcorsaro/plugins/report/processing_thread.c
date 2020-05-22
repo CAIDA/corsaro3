@@ -273,6 +273,10 @@ static inline int process_single_tag(corsaro_report_metric_class_t class,
         return 0;
     }
 
+    if (class == CORSARO_METRIC_CLASS_NETACQ_POLYGON && tagval == 0) {
+        return 0;
+    }
+
 	if (TRACKER_BUF_REM(track) < sizeof(corsaro_report_msg_tag_t)) {
 		if (extend_message_buffer(track) < 0) {
 			return -1;
