@@ -100,10 +100,13 @@
     }
 
 #define ADD_EMPTY_RESULT(metricclass, metricval) \
-    metricid = GEN_METRICID(metricclass, metricval); \
-    r = new_result(metricid, conf->outlabel, ts); \
-    JLI(pval, *results, (Word_t)metricid); \
-    *pval = (Word_t)r;
+    if (conf->allowedmetricclasses == 0 || \
+            (conf->allowedmetricclasses & (1UL << metricclass))) { \
+        metricid = GEN_METRICID(metricclass, metricval); \
+        r = new_result(metricid, conf->outlabel, ts); \
+        JLI(pval, *results, (Word_t)metricid); \
+        *pval = (Word_t)r;\
+    }
 
 /** Merge thread state for the report plugin */
 typedef struct corsaro_report_merge_state {
