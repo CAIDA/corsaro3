@@ -656,6 +656,7 @@ static void clean_result_map(Pvoid_t *resultmap) {
     JLF(pval, *resultmap, index);
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
+        J1FA(judyret, r->uniq_src_asns);
         free(r);
         JLN(pval, *resultmap, index);
     }
