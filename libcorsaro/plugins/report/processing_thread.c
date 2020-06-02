@@ -65,8 +65,6 @@ typedef struct corsaro_report_tracker_state {
 
     void *tracker_queue;
 
-    Pvoid_t msgips;
-
 } corsaro_report_tracker_state_t;
 
 /** Packet processing thread state for the report plugin */
@@ -84,12 +82,6 @@ typedef struct corsaro_report_state {
     uint32_t current_interval;
 
 } corsaro_report_state_t;
-
-typedef struct corsaro_single_ip {
-    corsaro_report_single_ip_header_t hdr;
-    Pvoid_t knownmetrics;
-    int metriccount;
-} corsaro_single_ip_t;
 
 #define TRACKER_BUF_REM(t) \
 		(t->msgbufsize - (t->nextwrite - t->msgbuffer))
@@ -269,12 +261,10 @@ static char *metclasstostr(corsaro_report_metric_class_t class) {
 static inline int process_single_tag(corsaro_report_metric_class_t class,
         uint32_t tagval, uint32_t maxtagval,
         corsaro_report_tracker_state_t *track,
-        corsaro_logger_t *logger, uint16_t pktbytes,
-        corsaro_single_ip_t *thisip) {
+        corsaro_logger_t *logger, uint16_t pktbytes) {
 
     uint64_t metricid;
     corsaro_report_msg_tag_t *tag;
-    PWord_t pval;
 
     /* Sanity checking for metrics that have clearly defined bounds */
     if (maxtagval > 0 && tagval >= maxtagval) {
@@ -294,24 +284,13 @@ static inline int process_single_tag(corsaro_report_metric_class_t class,
 	}
 
     metricid = GEN_METRICID(class, tagval);
+    tag = (corsaro_report_msg_tag_t *)track->nextwrite;
+    tag->tagid = metricid;
+    tag->bytes = pktbytes;
+    tag->packets = 1;
 
-    JLI(pval, thisip->knownmetrics, (Word_t)metricid);
-    if (*pval == 0) {
-        tag = calloc(1, sizeof(corsaro_report_msg_tag_t));
-        tag->tagid = metricid;
-        tag->bytes = pktbytes;
-        tag->packets = 1;
-
-        thisip->hdr.numtags ++;
-        thisip->metriccount ++;
-        *pval = (Word_t)tag;
-        return 1;
-    }
-
-    tag = (corsaro_report_msg_tag_t *)(*pval);
-    tag->bytes += pktbytes;
-    tag->packets ++;
-    return 0;
+    track->nextwrite += sizeof(corsaro_report_msg_tag_t);
+    return 1;
 }
 
 
@@ -354,7 +333,6 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
         state->totracker[i].seqno = 0;
         state->totracker[i].tracker_queue =
             conf->tracker_queues[i * conf->basic.procthreads + state->threadid];
-        state->totracker[i].msgips = NULL;
 
 		init_ipmsg_header(&(state->totracker[i]), threadid);
     }
@@ -365,56 +343,12 @@ void *corsaro_report_init_processing(corsaro_plugin_t *p, int threadid) {
 static int send_iptracker_message(corsaro_report_tracker_state_t *track,
 		corsaro_logger_t *logger) {
 
-    int postheader;
-    Word_t rcw, index;
-    PWord_t pval;
-
-    index = 0;
-    JLF(pval, track->msgips, index);
-    while (pval) {
-        Word_t index2;
-        PWord_t pval2;
-        corsaro_single_ip_t *thisip = (corsaro_single_ip_t *)(*pval);
-
-        while (TRACKER_BUF_REM(track) <
-                sizeof(corsaro_report_single_ip_header_t) + (
-                sizeof(corsaro_report_msg_tag_t) * thisip->metriccount)) {
-            extend_message_buffer(track);
-        }
-
-        memcpy(track->nextwrite, &(thisip->hdr),
-                sizeof(corsaro_report_single_ip_header_t));
-        track->nextwrite +=  sizeof(corsaro_report_single_ip_header_t);
-
-        index2 = 0;
-        JLF(pval2, thisip->knownmetrics, index2);
-        while (pval2) {
-            corsaro_report_msg_tag_t *tag = (corsaro_report_msg_tag_t *)(*pval2);
-            memcpy(track->nextwrite, tag, sizeof(corsaro_report_msg_tag_t));
-            track->nextwrite += sizeof(corsaro_report_msg_tag_t);
-            free(tag);
-            JLN(pval2, thisip->knownmetrics, index2);
-        }
-        JLFA(rcw, thisip->knownmetrics);
-        JLN(pval, track->msgips, index);
-        free(thisip);
-    }
+    int postheader = track->nextwrite - track->msgbuffer -
+            sizeof(corsaro_report_ipmsg_header_t);
 
 	track->header->seqno = track->seqno;
 	track->seqno ++;
 
-    JLC(rcw, track->msgips, 0, -1);
-
-    /*
-    corsaro_log(logger,
-            "Sent message to tracker -- bodycount=%u, uniq IPs=%u",
-            track->header->bodycount, rcw);
-    */
-
-    JLFA(rcw, track->msgips);
-
-    postheader = track->nextwrite - track->msgbuffer -
-            sizeof(corsaro_report_ipmsg_header_t);
     if (zmq_send(track->tracker_queue, (void *)track->header,
             sizeof(corsaro_report_ipmsg_header_t), ZMQ_SNDMORE) < 0) {
         return -1;
@@ -600,7 +534,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     if (skipcheck || allowedmetricclasses == 0 || \
             ((1UL << class) & allowedmetricclasses)) { \
         if ((ret = process_single_tag(class, val, maxval, track, logger, \
-                iplen, thisip)) < 0) { \
+                iplen)) < 0) { \
             return -1; \
         } else { \
             newtags += ret; \
@@ -620,8 +554,7 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
  */
 static int process_tags(corsaro_report_tracker_state_t *track,
 		corsaro_packet_tags_t *tags, uint16_t iplen,
-        corsaro_logger_t *logger, uint64_t allowedmetricclasses,
-        corsaro_single_ip_t *thisip) {
+        corsaro_logger_t *logger, uint64_t allowedmetricclasses) {
 
     int i, ret;
     uint16_t newtags = 0;
@@ -664,7 +597,7 @@ static int process_tags(corsaro_report_tracker_state_t *track,
                     ntohs(tags->dest_port);
 
             if ((ret = process_single_tag(CORSARO_METRIC_CLASS_ICMP_TYPECODE,
-                    typecode, 65535, track, logger, iplen, thisip)) < 0) {
+                    typecode, 65535, track, logger, iplen)) < 0) {
                 return -1;
             } else {
                 newtags += ret;
@@ -729,9 +662,10 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
         uint16_t iplen, corsaro_packet_tags_t *tags, corsaro_logger_t *logger) {
 
 	int trackerhash;
-	uint16_t newtags;
-    PWord_t pval;
+	int ipoffset;
+    uint16_t newtags;
     corsaro_report_msg_tag_t *tag;
+    corsaro_report_single_ip_header_t *singleip;
 	corsaro_report_tracker_state_t *track;
 
 	/* Hash IPs to IP tracker threads based on the suffix octet of the IP
@@ -740,27 +674,33 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
     trackerhash = (addr >> 24) % conf->tracker_count;
 	track = &(state->totracker[trackerhash]);
 
-    JLI(pval, track->msgips, addr);
-
-    if (*pval == 0) {
-        corsaro_single_ip_t *newip = calloc(1, sizeof(corsaro_single_ip_t));
-
-        newip->hdr.ipaddr = addr;
-        newip->hdr.issrc = issrc;
-        newip->hdr.numtags = 0;
-        if (issrc) {
-            newip->hdr.sourceasn = ntohl(tags->prefixasn);
-        } else {
-            newip->hdr.sourceasn = 0;
+    if (TRACKER_BUF_REM(track) < sizeof(corsaro_report_single_ip_header_t)) {
+        if (extend_message_buffer(track) < 0) {
+            corsaro_log(logger, "OOM when attempting to extend a message buffer!");
+            return -1;
         }
-        newip->knownmetrics = NULL;
-        newip->metriccount = 0;
-        *pval = (Word_t)newip;
-        track->header->bodycount ++;
     }
 
+    track->header->bodycount ++;
+    /* Reserve space for the IP address header */
+    ipoffset = track->nextwrite - track->msgbuffer;
+    track->nextwrite += sizeof(corsaro_report_single_ip_header_t);
+
 	newtags = process_tags(track, tags, iplen, logger,
-            conf->allowedmetricclasses, (corsaro_single_ip_t *)(*pval));
+            conf->allowedmetricclasses);
+
+    /* Due to potential buffer reallocation, singleip may not point anywhere
+     * valid anymore. */
+    singleip = (corsaro_report_single_ip_header_t *)
+            (track->msgbuffer + ipoffset);
+    singleip->ipaddr = addr;
+    singleip->issrc = issrc;
+    singleip->numtags = newtags;
+    if (issrc) {
+        singleip->sourceasn = ntohl(tags->prefixasn);
+    } else {
+        singleip->sourceasn = 0;
+    }
 
     track->header->tagcount += newtags;
 
