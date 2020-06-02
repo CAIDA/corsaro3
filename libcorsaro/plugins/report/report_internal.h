@@ -152,6 +152,8 @@ typedef struct corsaro_metric_ip_hash_t {
      *  are the metric value. */
     uint64_t metricid;
 
+    uint64_t associated_metricids[8];
+
     /** Unique source IPs associated with this metric */
     Pvoid_t srcips;
 
@@ -192,6 +194,16 @@ typedef struct corsaro_report_outstanding_interval {
     uint8_t reports_total;
 } corsaro_report_out_interval_t;
 
+typedef struct corsaro_report_iptracker_maps {
+    corsaro_metric_ip_hash_t combined;
+
+    corsaro_metric_ip_hash_t *ipprotocols;
+    corsaro_metric_ip_hash_t *filters;
+    corsaro_metric_ip_hash_t *tcpsrc;
+    corsaro_metric_ip_hash_t *tcpdst;
+
+    Pvoid_t general;
+} corsaro_report_iptracker_maps_t;
 
 /** Structure to store state for an IP tracker thread */
 typedef struct corsaro_report_iptracker {
@@ -218,19 +230,9 @@ typedef struct corsaro_report_iptracker {
     /** Mutex used to protect the most recent complete tally */
     pthread_mutex_t mutex;
 
-    /** Hash map of all IP addresses observed for the current interval */
-    Pvoid_t knownips;
-
-    /** Hash map of all IP addresses observed that should be counted towards
-     *  the next interval.
-     */
-    Pvoid_t knownips_next;
-
-    /** Hash map containing the most recent complete metric tallies */
-    Pvoid_t lastresult;
-
-    /** Hash map containing the ongoing tallies for the current interval */
-    Pvoid_t currentresult;
+    corsaro_report_iptracker_maps_t *prev_maps;
+    corsaro_report_iptracker_maps_t *curr_maps;
+    corsaro_report_iptracker_maps_t *next_maps;
 
     /** Hash map containing the ongoing tallies for tags that should be
      *  counted towards the next interval. */

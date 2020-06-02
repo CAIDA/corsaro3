@@ -47,6 +47,8 @@
  * MODIFICATIONS.
  */
 
+#include <libcorsaro_filtering.h>
+
 #include "corsaro_report.h"
 #include "report_internal.h"
 
@@ -60,6 +62,14 @@
         corsaro_log(track->logger, "error checking if there are more parts to a received ip tracker message: %s", strerror(errno)); \
         goto trackerover; \
     }
+
+static inline corsaro_report_iptracker_maps_t *create_new_map_set() {
+
+    corsaro_report_iptracker_maps_t *maps;
+
+    maps = calloc(1, sizeof(corsaro_report_iptracker_maps_t));
+    return maps;
+}
 
 /** Updates the tallies for a single observed IP + metric combination.
  *
@@ -75,28 +85,64 @@
 
 static void update_knownip_metric(corsaro_report_iptracker_t *track,
         corsaro_report_msg_tag_t *tagptr, uint8_t issrc,
-        Pvoid_t *metrictally, uint32_t ipaddr, uint32_t asn) {
+        corsaro_report_iptracker_maps_t *maps, uint32_t ipaddr, uint32_t asn) {
 
     corsaro_metric_ip_hash_t *m;
     uint64_t metricid = tagptr->tagid;
+    uint64_t metricclass = (metricid >> 32);
     int ret;
     PWord_t pval;
 
-    JLG(pval, *metrictally, (Word_t)metricid);
-    if (pval != NULL) {
-        m = (corsaro_metric_ip_hash_t *)(*pval);
-    } else {
-        m = (corsaro_metric_ip_hash_t *)calloc(1,
-                sizeof(corsaro_metric_ip_hash_t));
+    if (metricclass == CORSARO_METRIC_CLASS_COMBINED) {
+        m = &(maps->combined);
+    } else if (metricclass == CORSARO_METRIC_CLASS_IP_PROTOCOL) {
+        uint64_t ipproto = (metricid & 0xFFFFFFFF);
+        if (maps->ipprotocols == NULL) {
+            maps->ipprotocols = calloc(256, sizeof(corsaro_metric_ip_hash_t));
+        }
 
-        JLI(pval, *metrictally, (Word_t)metricid);
-        m->metricid = metricid;
-        m->srcips = NULL;
-        m->destips = NULL;
-        m->srcasns = NULL;
-        m->packets = 0;
-        m->bytes = 0;
-        *pval = (Word_t)(m);
+        assert(ipproto < 256);
+        m = &(maps->ipprotocols[ipproto]);
+
+    } else if (metricclass == CORSARO_METRIC_CLASS_FILTER_CRITERIA) {
+        uint64_t filterid = (metricid & 0xFFFFFFFF);
+        if (maps->filters == NULL) {
+            maps->filters = calloc(CORSARO_FILTERID_MAX, sizeof(corsaro_metric_ip_hash_t));
+        }
+        assert(filterid < CORSARO_FILTERID_MAX);
+        m = &(maps->filters[filterid]);
+    } else if (metricclass == CORSARO_METRIC_CLASS_TCP_SOURCE_PORT) {
+        uint64_t portnum = (metricid & 0xFFFFFFFF);
+        if (maps->tcpsrc == NULL) {
+            maps->tcpsrc = calloc(65536, sizeof(corsaro_metric_ip_hash_t));
+        }
+        assert(portnum < 65536);
+        m = &(maps->tcpsrc[portnum]);
+    } else if (metricclass == CORSARO_METRIC_CLASS_TCP_DEST_PORT) {
+        uint64_t portnum = (metricid & 0xFFFFFFFF);
+        if (maps->tcpdst == NULL) {
+            maps->tcpdst = calloc(65536, sizeof(corsaro_metric_ip_hash_t));
+        }
+        assert(portnum < 65536);
+        m = &(maps->tcpdst[portnum]);
+    } else {
+        JLG(pval, maps->general, (Word_t)metricid);
+
+        if (pval != NULL) {
+            m = (corsaro_metric_ip_hash_t *)(*pval);
+        } else {
+            m = (corsaro_metric_ip_hash_t *)calloc(1,
+                    sizeof(corsaro_metric_ip_hash_t));
+
+            JLI(pval, maps->general, (Word_t)metricid);
+            m->metricid = metricid;
+            m->srcips = NULL;
+            m->destips = NULL;
+            m->srcasns = NULL;
+            m->packets = 0;
+            m->bytes = 0;
+            *pval = (Word_t)(m);
+        }
     }
 
     /* Only increment byte and packet counts for the source IP half of
@@ -116,48 +162,67 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
 
 /** Frees an entire metric tally hash map.
  *
- *  @param track        The state for this IP tracker thread
  *  @param methash      The hash map to be destroyed
  */
-static void free_metrichash(corsaro_report_iptracker_t *track,
-        Pvoid_t methash) {
-    corsaro_metric_ip_hash_t *ipiter;
-    Word_t index = 0, ret;
-    PWord_t pval;
-
-    JLF(pval, methash, index);
-    while (pval) {
-        ipiter = (corsaro_metric_ip_hash_t *)(*pval);
-        J1FA(ret, ipiter->srcips);
-        J1FA(ret, ipiter->destips);
-        J1FA(ret, ipiter->srcasns);
-        free(ipiter);
-        JLN(pval, methash, index);
-    }
-    JLFA(ret, methash);
-
+static inline void free_metrichash(corsaro_metric_ip_hash_t *ipiter) {
+    int ret;
+    J1FA(ret, ipiter->srcips);
+    J1FA(ret, ipiter->destips);
+    J1FA(ret, ipiter->srcasns);
 }
 
-/** Frees an entire IP hash map.
- *
- *  @param track        The state for this IP tracker thread
- *  @param knownips     The IP hash map to be destroyed
- */
-static void free_knownips(corsaro_report_iptracker_t *track,
-        Pvoid_t knownips) {
-    corsaro_ip_hash_t *ipiter;
-    Word_t index = 0, ret;
-    PWord_t pval;
+static void free_map_set(corsaro_report_iptracker_maps_t *maps) {
+    int i;
 
-    JLF(pval, knownips, index);
-    while (pval) {
-        ipiter = (corsaro_ip_hash_t *)(*pval);
-        JLFA(ret, ipiter->metricsseen);
-        free(ipiter);
-
-        JLN(pval, knownips, index);
+    if (maps == NULL) {
+        return;
     }
-    JLFA(ret, knownips);
+
+    if (maps->general) {
+        corsaro_metric_ip_hash_t *ipiter;
+        Word_t index = 0, ret;
+        PWord_t pval;
+
+        JLF(pval, maps->general, index);
+        while (pval) {
+            ipiter = (corsaro_metric_ip_hash_t *)(*pval);
+            free_metrichash(ipiter);
+            free(ipiter);
+            JLN(pval, maps->general, index);
+        }
+        JLFA(ret, maps->general);
+    }
+
+    if (maps->ipprotocols) {
+        for (i = 0; i < 256; i++) {
+            free_metrichash(&(maps->ipprotocols[i]));
+        }
+        free(maps->ipprotocols);
+    }
+
+    if (maps->filters) {
+        for (i = 0; i < CORSARO_FILTERID_MAX; i++) {
+            free_metrichash(&(maps->filters[i]));
+        }
+        free(maps->filters);
+    }
+
+    if (maps->tcpsrc) {
+        for (i = 0; i < 65536; i++) {
+            free_metrichash(&(maps->tcpsrc[i]));
+        }
+        free(maps->tcpsrc);
+    }
+
+    if (maps->tcpdst) {
+        for (i = 0; i < 65536; i++) {
+            free_metrichash(&(maps->tcpdst[i]));
+        }
+        free(maps->tcpdst);
+    }
+
+    free_metrichash(&(maps->combined));
+    free(maps);
 }
 
 /** Checks if a packet processing thread has already sent us an interval end
@@ -319,7 +384,7 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
      */
     do {
         pthread_mutex_lock(&(track->mutex));
-        if (track->lastresult == NULL) {
+        if (track->prev_maps == NULL) {
             break;
         }
         pthread_mutex_unlock(&(track->mutex));
@@ -328,10 +393,10 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
     } while (1);
 
     if (msg->msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
-        track->lastresult = track->currentresult;
+        track->prev_maps = track->curr_maps;
         track->lastresultts = complete;
     } else {
-        free_metrichash(track, (track->currentresult));
+        free_map_set(track->curr_maps);
     }
 
     if (track->haltphase == 1) {
@@ -351,11 +416,8 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
     /* Reset IP and metric tally hash maps -- don't forget we may
      * already have some valid info in the "next" interval maps.
      */
-    free_knownips(track, track->knownips);
-    track->knownips = track->knownips_next;
-    track->currentresult = track->nextresult;
-    track->knownips_next = NULL;
-    track->nextresult = NULL;
+    track->curr_maps = track->next_maps;
+    track->next_maps = create_new_map_set();
 trackerover:
 	return;
 }
@@ -376,8 +438,8 @@ trackerover:
  *  @param msg          The message that was received.
  */
 static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
-        corsaro_report_ipmsg_header_t *msg, Pvoid_t *knownip,
-		Pvoid_t *knowniptally) {
+        corsaro_report_ipmsg_header_t *msg,
+        corsaro_report_iptracker_maps_t *maps) {
 
 
 	char *buf, *ptr;
@@ -440,7 +502,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
             METRIC_ALLOWED((metricid >> 32), allowed);
             if (allowed) {
 			    update_knownip_metric(track, tag, iphdr->issrc,
-				        knowniptally, iphdr->ipaddr, iphdr->sourceasn);
+				        maps, iphdr->ipaddr, iphdr->sourceasn);
             }
 			ptr += sizeof(corsaro_report_msg_tag_t);
             tagsdone ++;
@@ -472,10 +534,12 @@ void *start_iptracker(void *tdata) {
     corsaro_report_iptracker_t *track;
     corsaro_report_ipmsg_header_t msg;
     corsaro_report_iptracker_source_t *src;
-	Pvoid_t *knownip;
-	Pvoid_t *knowniptally;
+    corsaro_report_iptracker_maps_t *maps;
 
     track = (corsaro_report_iptracker_t *)tdata;
+
+    track->curr_maps = create_new_map_set();
+    track->next_maps = create_new_map_set();
 
     /* haltphases:
      * 0 = running
@@ -531,19 +595,15 @@ void *start_iptracker(void *tdata) {
 		 * so, we need to update the next interval not the current one.
 		 */
 		if (libtrace_list_get_size(track->outstanding) == 0) {
-			knownip = &(track->knownips);
-			knowniptally = &(track->currentresult);
+            maps = track->curr_maps;
 		} else if (sender_in_outstanding(track->outstanding, msg.sender)) {
-			knownip = &(track->knownips_next);
-			knowniptally = &(track->nextresult);
+            maps = track->next_maps;
 		} else {
-			knownip = &(track->knownips);
-			knowniptally = &(track->currentresult);
+            maps = track->curr_maps;
 		}
 
 
-        if (process_iptracker_update_message(track, &msg, knownip,
-				knowniptally) < 0) {
+        if (process_iptracker_update_message(track, &msg, maps) < 0) {
             pthread_mutex_lock(&(track->mutex));
             track->haltphase = 2;
             pthread_mutex_unlock(&(track->mutex));
@@ -553,10 +613,8 @@ void *start_iptracker(void *tdata) {
 
 trackerover:
     /* Thread is ending, tidy up everything */
-    free_metrichash(track, (track->currentresult));
-    free_metrichash(track, (track->nextresult));
-    free_knownips(track, track->knownips);
-    free_knownips(track, track->knownips_next);
+    free_map_set(track->curr_maps);
+    free_map_set(track->next_maps);
     pthread_exit(NULL);
 }
 

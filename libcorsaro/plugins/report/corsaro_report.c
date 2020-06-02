@@ -448,11 +448,9 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         pthread_mutex_init(&(conf->iptrackers[i].mutex), NULL);
         conf->iptrackers[i].lastresultts = 0;
 
-        conf->iptrackers[i].knownips = NULL;
-        conf->iptrackers[i].knownips_next = NULL;
-        conf->iptrackers[i].lastresult = NULL;
-        conf->iptrackers[i].currentresult = NULL;
-        conf->iptrackers[i].nextresult = NULL;
+        conf->iptrackers[i].prev_maps = NULL;
+        conf->iptrackers[i].curr_maps = NULL;
+        conf->iptrackers[i].next_maps = NULL;
         conf->iptrackers[i].logger = p->logger;
         conf->iptrackers[i].sourcethreads = stdopts->procthreads;
         conf->iptrackers[i].haltphase = 0;
