@@ -707,7 +707,11 @@ int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
 	 * as "unknown".
 	 */
 	if (tracker->nextseq != 0 && thisseq != tracker->nextseq) {
-		tracker->lostpackets += (thisseq - tracker->nextseq);
+        if (thisseq > tracker->nextseq) {
+    		tracker->lostpackets += (thisseq - tracker->nextseq);
+        } else {
+            tracker->lostpackets += 1;
+        }
 		tracker->lossinstances ++;
 	}
     tracker->packetsreceived ++;
