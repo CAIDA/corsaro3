@@ -86,6 +86,11 @@
 /** Maximum number of IP tracker threads allowed */
 #define CORSARO_REPORT_MAX_IPTRACKERS (32)
 
+/** Maximum depth of sub-classification for hierarchical metrics, e.g. geolocation metrics
+ *  have a hierarchy of continent, country, region, county, ... etc
+ */
+#define MAX_ASSOCIATED_METRICS (8)
+
 /* Note: these pre-defined alpha-2 codes are used to bootstrap the
  * results data so that we can reliably report 0 values for countries
  * that do not appear in a given interval, even if we've never seen that
@@ -152,7 +157,7 @@ typedef struct corsaro_metric_ip_hash_t {
      *  are the metric value. */
     uint64_t metricid;
 
-    uint64_t associated_metricids[8];
+    uint64_t associated_metricids[MAX_ASSOCIATED_METRICS];
 
     /** Unique source IPs associated with this metric */
     Pvoid_t srcips;
@@ -205,6 +210,17 @@ typedef struct corsaro_report_iptracker_maps {
     Pvoid_t general;
 } corsaro_report_iptracker_maps_t;
 
+typedef struct corsaro_report_savedtags {
+    uint64_t associated_metricids[MAX_ASSOCIATED_METRICS];
+    uint64_t next_saved;
+
+    uint32_t srcip;
+    uint32_t destip;
+    uint32_t srcasn;
+    uint32_t bytes;
+    uint32_t packets;
+} corsaro_report_savedtags_t;
+
 /** Structure to store state for an IP tracker thread */
 typedef struct corsaro_report_iptracker {
 
@@ -233,6 +249,8 @@ typedef struct corsaro_report_iptracker {
     corsaro_report_iptracker_maps_t *prev_maps;
     corsaro_report_iptracker_maps_t *curr_maps;
     corsaro_report_iptracker_maps_t *next_maps;
+
+    corsaro_report_savedtags_t netacq_saved;
 
     /** Hash map containing the ongoing tallies for tags that should be
      *  counted towards the next interval. */

@@ -125,6 +125,47 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         }
         assert(portnum < 65536);
         m = &(maps->tcpdst[portnum]);
+    } else if (metricclass == CORSARO_METRIC_CLASS_NETACQ_CONTINENT ||
+            metricclass == CORSARO_METRIC_CLASS_NETACQ_COUNTRY ||
+            metricclass == CORSARO_METRIC_CLASS_NETACQ_REGION ||
+            metricclass == CORSARO_METRIC_CLASS_NETACQ_POLYGON) {
+
+        /*
+        fprintf(stderr, "tid=%d %lu %lu %08x %u %u %u\n",
+                track->tid, metricclass, metricid & 0xFFFFFFFF, ipaddr,
+                asn, tagptr->bytes, track->netacq_saved.next_saved);
+        */
+        if (track->netacq_saved.next_saved == MAX_ASSOCIATED_METRICS) {
+            /* Ignore hierarchies that exceed our maximum array size */
+            return;
+        }
+
+        if (metricclass == CORSARO_METRIC_CLASS_NETACQ_POLYGON &&
+                (metricid & 0xFFFFFF) == 0) {
+            return;
+        }
+
+        track->netacq_saved.associated_metricids[
+                track->netacq_saved.next_saved] = metricid;
+        track->netacq_saved.next_saved ++;
+
+        if (track->netacq_saved.next_saved > 1) {
+            /* Don't count packets etc multiple times for each associated
+             * metric.
+             */
+            return;
+        }
+
+        if (issrc) {
+            track->netacq_saved.srcip = ipaddr;
+            track->netacq_saved.srcasn = asn;
+            track->netacq_saved.packets = tagptr->packets;
+            track->netacq_saved.bytes = tagptr->bytes;
+        } else {
+            track->netacq_saved.destip = ipaddr;
+        }
+
+        return;
     } else {
         JLG(pval, maps->general, (Word_t)metricid);
 
@@ -158,6 +199,59 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
     } else {
         J1S(ret, m->destips, (Word_t)ipaddr);
     }
+}
+
+static void update_knownip_metric_saved(corsaro_report_iptracker_t *track,
+        corsaro_report_savedtags_t *saved, corsaro_report_iptracker_maps_t *maps)
+{
+
+    uint64_t metricid;
+    corsaro_metric_ip_hash_t *m;
+    int ret;
+    PWord_t pval;
+
+    assert(saved->next_saved > 0);
+    metricid = saved->associated_metricids[saved->next_saved - 1];
+
+    JLG(pval, maps->general, (Word_t)metricid);
+    if (pval != NULL) {
+        m = (corsaro_metric_ip_hash_t *)(*pval);
+    } else {
+        m = (corsaro_metric_ip_hash_t *)calloc(1,
+                    sizeof(corsaro_metric_ip_hash_t));
+        JLI(pval, maps->general, (Word_t)metricid);
+        m->metricid = metricid;
+        memcpy(m->associated_metricids, saved->associated_metricids,
+                MAX_ASSOCIATED_METRICS * sizeof(uint64_t));
+
+        /*
+        fprintf(stderr, "associated metrics: ");
+        for (ret = 0; ret < saved->next_saved; ret ++) {
+            fprintf(stderr, "%lu ", saved->associated_metricids[ret]);
+        }
+        fprintf(stderr, "\n");
+        */
+
+        m->srcips = NULL;
+        m->destips = NULL;
+        m->srcasns = NULL;
+        m->packets = 0;
+        m->bytes = 0;
+        *pval = (Word_t)(m);
+    }
+
+    m->packets += saved->packets;
+    m->bytes += saved->bytes;
+
+    if (saved->destip != 0) {
+        J1S(ret, m->destips, (Word_t)saved->destip);
+    } else {
+        J1S(ret, m->srcips, (Word_t)saved->srcip);
+        if (saved->srcasn != 0) {
+            J1S(ret, m->srcasns, (Word_t)saved->srcasn);
+        }
+    }
+
 }
 
 /** Frees an entire metric tally hash map.
@@ -495,6 +589,8 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 
 		ptr += sizeof(corsaro_report_single_ip_header_t);
 
+        memset(&(track->netacq_saved), 0, sizeof(corsaro_report_savedtags_t));
+
 		for (j = 0; j < iphdr->numtags; j++) {
 			tag = (corsaro_report_msg_tag_t *)ptr;
             metricid = tag->tagid;
@@ -507,6 +603,11 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 			ptr += sizeof(corsaro_report_msg_tag_t);
             tagsdone ++;
 		}
+
+        if (track->netacq_saved.next_saved != 0) {
+            update_knownip_metric_saved(track, &(track->netacq_saved),
+                    maps);
+        }
 
 		if (ptr - buf >= toalloc && i < msg->bodycount - 1) {
 			corsaro_log(track->logger, "warning: IP tracker has walked past the end of a receive buffer!");

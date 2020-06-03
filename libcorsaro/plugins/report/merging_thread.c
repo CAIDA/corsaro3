@@ -60,7 +60,7 @@
     lookup = metricid & 0xffffffff; \
     JLF(pval, contmap, lookup); \
     if (pval == NULL) { \
-        contkey = "notfound"; \
+        break; \
     } else { \
         contkey = (const char *)*pval; \
     }
@@ -762,7 +762,8 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
 
 static void update_merged_metric(Pvoid_t *results,
         corsaro_metric_ip_hash_t *iphash, corsaro_report_config_t *conf,
-        uint64_t metricid, uint32_t ts, uint32_t *subtrees_seen) {
+        uint64_t metricid, uint32_t ts, uint32_t *subtrees_seen,
+        int freereq) {
 
     corsaro_report_result_t *r;
     PWord_t pval;
@@ -799,14 +800,18 @@ static void update_merged_metric(Pvoid_t *results,
             }
             J1N(x, iphash->srcasns, index);
         }
-        J1FA(ret, iphash->srcasns);
+        if (freereq) {
+            J1FA(ret, iphash->srcasns);
+        }
     }
 
     r->pkt_cnt += iphash->packets;
     r->bytes += iphash->bytes;
 
-    J1FA(ret, iphash->srcips);
-    J1FA(ret, iphash->destips);
+    if (freereq) {
+        J1FA(ret, iphash->srcips);
+        J1FA(ret, iphash->destips);
+    }
 }
 
 /** Update the merged result set for an interval with a set of completed
@@ -839,14 +844,14 @@ static void update_tracker_results(Pvoid_t *results,
     metid = CORSARO_METRIC_CLASS_COMBINED;
     metid = (metid << 32);
     update_merged_metric(results, &(tracker->prev_maps->combined), conf,
-            metid, ts, subtrees_seen);
+            metid, ts, subtrees_seen, 1);
 
     if (tracker->prev_maps->ipprotocols) {
         metid = CORSARO_METRIC_CLASS_IP_PROTOCOL;
         metid = (metid << 32);
         for (i = 0; i < 256; i++) {
             update_merged_metric(results, &(tracker->prev_maps->ipprotocols[i]),
-                    conf, (metid | i), ts, subtrees_seen);
+                    conf, (metid | i), ts, subtrees_seen, 1);
         }
         free(tracker->prev_maps->ipprotocols);
     }
@@ -858,7 +863,7 @@ static void update_tracker_results(Pvoid_t *results,
                 i++) {
             update_merged_metric(results,
                     &(tracker->prev_maps->filters[i]), conf, (metid | i), ts,
-                    subtrees_seen);
+                    subtrees_seen, 1);
         }
         free(tracker->prev_maps->filters);
     }
@@ -869,7 +874,7 @@ static void update_tracker_results(Pvoid_t *results,
         for (i = 0; i < 65536; i++) {
             update_merged_metric(results,
                     &(tracker->prev_maps->tcpsrc[i]), conf, (metid | i), ts,
-                    subtrees_seen);
+                    subtrees_seen, 1);
         }
         free(tracker->prev_maps->tcpsrc);
     }
@@ -880,7 +885,7 @@ static void update_tracker_results(Pvoid_t *results,
         for (i = 0; i < 65536; i++) {
             update_merged_metric(results,
                     &(tracker->prev_maps->tcpdst[i]), conf, (metid | i), ts,
-                    subtrees_seen);
+                    subtrees_seen, 1);
         }
         free(tracker->prev_maps->tcpdst);
     }
@@ -889,8 +894,18 @@ static void update_tracker_results(Pvoid_t *results,
     while (pval) {
         iter = (corsaro_metric_ip_hash_t *)(*pval);
 
+        for (i = 0; i < MAX_ASSOCIATED_METRICS; i++) {
+            if (iter->associated_metricids[i] == 0 ||
+                    iter->metricid == iter->associated_metricids[i]) {
+                break;
+            }
+
+            update_merged_metric(results, iter, conf,
+                    iter->associated_metricids[i], ts, subtrees_seen, 0);
+        }
+
         update_merged_metric(results, iter, conf, iter->metricid, ts,
-                subtrees_seen);
+                subtrees_seen, 1);
         free(iter);
 
         JLN(pval, tracker->prev_maps->general, index);
