@@ -841,10 +841,13 @@ static void update_tracker_results(Pvoid_t *results,
      */
 
     assert(tracker->prev_maps != NULL);
-    metid = CORSARO_METRIC_CLASS_COMBINED;
-    metid = (metid << 32);
-    update_merged_metric(results, &(tracker->prev_maps->combined), conf,
-            metid, ts, subtrees_seen, 1);
+    if (tracker->allowedmetricclasses == 0 ||
+            tracker->allowedmetricclasses & (1UL << CORSARO_METRIC_CLASS_COMBINED)) {
+        metid = CORSARO_METRIC_CLASS_COMBINED;
+        metid = (metid << 32);
+        update_merged_metric(results, &(tracker->prev_maps->combined), conf,
+                metid, ts, subtrees_seen, 1);
+    }
 
     if (tracker->prev_maps->ipprotocols) {
         metid = CORSARO_METRIC_CLASS_IP_PROTOCOL;

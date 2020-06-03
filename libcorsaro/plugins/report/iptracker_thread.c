@@ -130,11 +130,6 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
             metricclass == CORSARO_METRIC_CLASS_NETACQ_REGION ||
             metricclass == CORSARO_METRIC_CLASS_NETACQ_POLYGON) {
 
-        /*
-        fprintf(stderr, "tid=%d %lu %lu %08x %u %u %u\n",
-                track->tid, metricclass, metricid & 0xFFFFFFFF, ipaddr,
-                asn, tagptr->bytes, track->netacq_saved.next_saved);
-        */
         if (track->netacq_saved.next_saved == MAX_ASSOCIATED_METRICS) {
             /* Ignore hierarchies that exceed our maximum array size */
             return;
@@ -223,14 +218,6 @@ static void update_knownip_metric_saved(corsaro_report_iptracker_t *track,
         m->metricid = metricid;
         memcpy(m->associated_metricids, saved->associated_metricids,
                 MAX_ASSOCIATED_METRICS * sizeof(uint64_t));
-
-        /*
-        fprintf(stderr, "associated metrics: ");
-        for (ret = 0; ret < saved->next_saved; ret ++) {
-            fprintf(stderr, "%lu ", saved->associated_metricids[ret]);
-        }
-        fprintf(stderr, "\n");
-        */
 
         m->srcips = NULL;
         m->destips = NULL;
