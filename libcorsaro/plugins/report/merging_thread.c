@@ -60,7 +60,7 @@
     lookup = metricid & 0xffffffff; \
     JLF(pval, contmap, lookup); \
     if (pval == NULL) { \
-        contkey = "notfound"; \
+        break; \
     } else { \
         contkey = (const char *)*pval; \
     }
@@ -656,6 +656,7 @@ static void clean_result_map(Pvoid_t *resultmap) {
     JLF(pval, *resultmap, index);
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
+        J1FA(judyret, r->uniq_src_asns);
         free(r);
         JLN(pval, *resultmap, index);
     }
@@ -759,6 +760,59 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
     return 0;
 }
 
+static void update_merged_metric(Pvoid_t *results,
+        corsaro_metric_ip_hash_t *iphash, corsaro_report_config_t *conf,
+        uint64_t metricid, uint32_t ts, uint32_t *subtrees_seen,
+        int freereq) {
+
+    corsaro_report_result_t *r;
+    PWord_t pval;
+    Word_t index = 0, ret;
+    int x;
+
+    *subtrees_seen = (*subtrees_seen) | (1 << (metricid >> 32));
+
+    JLG(pval, *results, metricid);
+    if (pval == NULL) {
+        /* This is a new metric, add it to our result hash map */
+        r = new_result(metricid, conf->outlabel, ts);
+        JLI(pval, *results, metricid);
+        *pval = (Word_t)r;
+    } else {
+        r = (corsaro_report_result_t *)(*pval);
+    }
+
+    J1C(ret, iphash->srcips, 0, -1);
+    r->uniq_src_ips += (uint32_t)ret;
+    J1C(ret, iphash->destips, 0, -1);
+    r->uniq_dst_ips += (uint32_t)ret;
+
+    /* Consider limiting this to only certain metrics if processing
+     * time becomes a problem?
+     */
+    index = 0;
+    if (iphash->srcasns != NULL) {
+        J1F(x, iphash->srcasns, index);
+        while (x) {
+            J1S(x, r->uniq_src_asns, (Word_t)index);
+            if (x != 0) {
+                r->uniq_src_asn_count ++;
+            }
+            J1N(x, iphash->srcasns, index);
+        }
+        if (freereq) {
+            J1FA(ret, iphash->srcasns);
+        }
+    }
+
+    r->pkt_cnt += iphash->packets;
+    r->bytes += iphash->bytes;
+
+    if (freereq) {
+        J1FA(ret, iphash->srcips);
+        J1FA(ret, iphash->destips);
+    }
+}
 
 /** Update the merged result set for an interval with a set of completed
  *  tallies from an IP tracker thread.
@@ -776,66 +830,90 @@ static void update_tracker_results(Pvoid_t *results,
         corsaro_report_config_t *conf,  uint32_t *subtrees_seen,
         corsaro_logger_t *logger) {
 
-    corsaro_report_result_t *r;
     corsaro_metric_ip_hash_t *iter;
-    PWord_t pval, pval2;
-    Word_t index = 0, index2 = 0, ret;
-    int x;
+    PWord_t pval;
+    Word_t index = 0, ret;
+    int i;
+    uint64_t metid;
 
     /* Simple loop over all metrics in the tracker tally and update our
      * combined metric map.
      */
 
-    JLF(pval, tracker->lastresult, index);
+    assert(tracker->prev_maps != NULL);
+    metid = CORSARO_METRIC_CLASS_COMBINED;
+    metid = (metid << 32);
+    update_merged_metric(results, &(tracker->prev_maps->combined), conf,
+            metid, ts, subtrees_seen, 1);
+
+    if (tracker->prev_maps->ipprotocols) {
+        metid = CORSARO_METRIC_CLASS_IP_PROTOCOL;
+        metid = (metid << 32);
+        for (i = 0; i < 256; i++) {
+            update_merged_metric(results, &(tracker->prev_maps->ipprotocols[i]),
+                    conf, (metid | i), ts, subtrees_seen, 1);
+        }
+        free(tracker->prev_maps->ipprotocols);
+    }
+
+    if (tracker->prev_maps->filters) {
+        metid = CORSARO_METRIC_CLASS_FILTER_CRITERIA;
+        metid = (metid << 32);
+        for (i = CORSARO_FILTERID_ABNORMAL_PROTOCOL; i < CORSARO_FILTERID_MAX;
+                i++) {
+            update_merged_metric(results,
+                    &(tracker->prev_maps->filters[i]), conf, (metid | i), ts,
+                    subtrees_seen, 1);
+        }
+        free(tracker->prev_maps->filters);
+    }
+
+    if (tracker->prev_maps->tcpsrc) {
+        metid = CORSARO_METRIC_CLASS_TCP_SOURCE_PORT;
+        metid = (metid << 32);
+        for (i = 0; i < 65536; i++) {
+            update_merged_metric(results,
+                    &(tracker->prev_maps->tcpsrc[i]), conf, (metid | i), ts,
+                    subtrees_seen, 1);
+        }
+        free(tracker->prev_maps->tcpsrc);
+    }
+
+    if (tracker->prev_maps->tcpdst) {
+        metid = CORSARO_METRIC_CLASS_TCP_DEST_PORT;
+        metid = (metid << 32);
+        for (i = 0; i < 65536; i++) {
+            update_merged_metric(results,
+                    &(tracker->prev_maps->tcpdst[i]), conf, (metid | i), ts,
+                    subtrees_seen, 1);
+        }
+        free(tracker->prev_maps->tcpdst);
+    }
+
+    JLF(pval, tracker->prev_maps->general, index);
     while (pval) {
         iter = (corsaro_metric_ip_hash_t *)(*pval);
 
-        *subtrees_seen = (*subtrees_seen) | (1 << (iter->metricid >> 32));
-
-        JLG(pval2, *results, iter->metricid);
-        if (pval2 == NULL) {
-            /* This is a new metric, add it to our result hash map */
-            r = new_result(iter->metricid, conf->outlabel, ts);
-            JLI(pval2, *results, iter->metricid);
-            *pval2 = (Word_t)r;
-        } else {
-            r = (corsaro_report_result_t *)(*pval2);
-        }
-
-        J1C(ret, iter->srcips, 0, -1);
-        r->uniq_src_ips += (uint32_t)ret;
-        J1C(ret, iter->destips, 0, -1);
-        r->uniq_dst_ips += (uint32_t)ret;
-
-        /* Consider limiting this to only certain metrics if processing
-         * time becomes a problem?
-         */
-        index2 = 0;
-        if (iter->srcasns != NULL) {
-            J1F(x, iter->srcasns, index2);
-            while (x) {
-                J1S(x, r->uniq_src_asns, (Word_t)index2);
-                if (x != 0) {
-                    r->uniq_src_asn_count ++;
-                }
-                J1N(x, iter->srcasns, index2);
+        for (i = 0; i < MAX_ASSOCIATED_METRICS; i++) {
+            if (iter->associated_metricids[i] == 0 ||
+                    iter->metricid == iter->associated_metricids[i]) {
+                break;
             }
-            J1FA(ret, iter->srcasns);
+
+            update_merged_metric(results, iter, conf,
+                    iter->associated_metricids[i], ts, subtrees_seen, 0);
         }
 
-        r->pkt_cnt += iter->packets;
-        r->bytes += iter->bytes;
-
-        /* Don't forget to release the metric tally back to the IP tracker */
-        J1FA(ret, iter->srcips);
-        J1FA(ret, iter->destips);
+        update_merged_metric(results, iter, conf, iter->metricid, ts,
+                subtrees_seen, 1);
         free(iter);
 
-        JLN(pval, tracker->lastresult, index);
+        JLN(pval, tracker->prev_maps->general, index);
     }
 
-    JLFA(ret, tracker->lastresult);
-    tracker->lastresult = NULL;
+    JLFA(ret, tracker->prev_maps->general);
+    free(tracker->prev_maps);
+    tracker->prev_maps = NULL;
 }
 
 
