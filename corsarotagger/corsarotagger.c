@@ -250,15 +250,20 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
     corsaro_packet_local_t *tls = (corsaro_packet_local_t *)local;
     libtrace_stat_t *stats;
+    uint32_t now = (tick >> 32);
 
     tls->tickcounter ++;
-    if (((tick >> 32) % 60) == 0 && (tick >> 32) > tls->laststat) {
+    if ((now % 60) == 0 && now > tls->laststat) {
         stats = trace_create_statistics();
         trace_get_thread_statistics(trace, t, stats);
 
         if (glob->statfilename) {
             FILE *f = NULL;
             char sfname[1024];
+            /* NB: statistics are tracked based on the interval start
+             * timestamp, whereas the tick gives us "now".
+             */
+            uint32_t int_start = now - 60;
 
             snprintf(sfname, 1024, "%s-t%02d", glob->statfilename,
                     trace_get_perpkt_thread_id(t));
@@ -268,7 +273,7 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
                         sfname, strerror(errno));
             } else {
                 fprintf(f, "time=%lu accepted=%lu dropped=%lu\n",
-                        (tick >> 32), stats->accepted - tls->lastaccepted,
+                        int_start, stats->accepted - tls->lastaccepted,
                         stats->missing - tls->lastmisscount);
                 fclose(f);
             }
@@ -288,7 +293,7 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
 
         free(stats);
         tls->tickcounter = 0;
-        tls->laststat = (tick >> 32);
+        tls->laststat = now;
     }
 
     if (tls->buf->used > 0) {
