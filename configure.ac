@@ -125,7 +125,7 @@ AC_SEARCH_LIBS([yaml_parser_initialize], [yaml], ,[AC_MSG_ERROR(
 AC_SEARCH_LIBS([avro_generic_value_new], [avro], ,[AC_MSG_ERROR(
 		 [libavro required]
 		 )])
-AC_SEARCH_LIBS([ipmeta_init], [ipmeta], , [AC_MSG_ERROR([libipmeta required])])
+AC_SEARCH_LIBS([ipmeta_lookup_addr], [ipmeta], , [AC_MSG_ERROR([libipmeta 3.0.0 required])])
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
 AC_SEARCH_LIBS([rd_kafka_new], [rdkafka], ,[AC_MSG_ERROR([librdkafka required])])
 
