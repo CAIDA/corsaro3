@@ -559,7 +559,7 @@ static inline void update_filter_tags(corsaro_logger_t *logger,
 static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
         corsaro_packet_tags_t *tags, libtrace_ip_t *ip, uint32_t rem) {
 
-    uint32_t numips = 0;
+    uint64_t numips = 0;
     ipmeta_record_t *rec;
 
     update_filter_tags(tagger->logger, ip, rem, tags);
@@ -585,8 +585,8 @@ static inline int _corsaro_tag_ip_packet(corsaro_packet_tagger_t *tagger,
     }
 
     ipmeta_record_set_clear(tagger->records);
-    if (ipmeta_lookup_single(tagger->ipmeta_state->ipmeta, ip->ip_src.s_addr,
-            0, tagger->records) < 0) {
+    if (ipmeta_lookup_addr(tagger->ipmeta_state->ipmeta, AF_INET,
+            (void *)(&(ip->ip_src)), 0, tagger->records) < 0) {
         corsaro_log(tagger->logger, "error while performing ipmeta lookup");
         return -1;
     }
