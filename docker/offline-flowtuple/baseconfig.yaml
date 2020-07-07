@@ -1,0 +1,13 @@
+outtemplate: "/flowtuple/tmp/OUTPREFIX-%s-%N.%P"
+
+monitorid: MONITORID
+interval: 60
+rotatefreq: 60
+
+packetsource: PCAPURI
+
+plugins:
+ - flowtuple:
+     sorttuples: yes
+     mergethreads: 4
+     avrooutput: deflate
