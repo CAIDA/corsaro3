@@ -22,18 +22,19 @@ RUN apt-get -y update && apt-get -y install \
         automake \
         autotools-dev \
         build-essential \
+        cmake \
         gdb \
         git \
         grep \
         iproute2 \
         less \
-        libavro-dev \
         libgoogle-perftools-dev \
         libipmeta2-dev \
         libjansson-dev \
         libjudy-dev \
         libndagserver-dev \
         librdkafka-dev \
+        libsnappy-dev \
         libtimeseries0-dev \
         libtool \
         libtrace4-tools \
@@ -54,7 +55,11 @@ RUN apt-get -y update && apt-get -y install \
         unzip \
         uthash-dev \
         vim \
-        wandio1-tools
+        wandio1-tools \
+        zlib1g-dev
+
+COPY buildavro.sh /buildavro.sh
+RUN git clone https://github.com/apache/avro.git && /buildavro.sh
 
 RUN git clone https://github.com/CAIDA/corsaro3 && cd corsaro3 && git submodule init && git submodule update
 
