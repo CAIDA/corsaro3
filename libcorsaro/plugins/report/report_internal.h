@@ -240,6 +240,8 @@ typedef struct corsaro_report_iptracker {
     /** Tracks whether an IP tracker thread is ready to halt */
     uint8_t haltphase;
 
+    uint8_t haltsseen;
+
     /** Thread ID for this IP tracker thread */
     pthread_t tid;
 
