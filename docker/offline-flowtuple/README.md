@@ -77,7 +77,7 @@ absolute path to the file. For instance, if your swift credentials are in a
 file called `swiftcreds` in the current working directory:
 
     docker run -v <host output dir>:/flowtuple/output:rw
-        -v $(pwd)/swiftcreds:/flowtuple/swiftcreds:ro
+        -v $(pwd)/swiftcreds:/flowtuple/swiftcreds:ro offlineft
         <swift URI for pcap file> <output prefix> <monitor id>
 
 The pcap URI you specify at runtime now becomes a wandio swift URI, e.g.
