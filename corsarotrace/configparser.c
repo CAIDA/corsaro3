@@ -511,9 +511,9 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     }
 
     if (glob->template == NULL) {
-        corsaro_log(glob->logger, "no output filename template has been provided, exiting.");
-        corsaro_trace_free_global(glob);
-        return NULL;
+        corsaro_log(glob->logger, "warning, no output file naming template has been configured.");
+        corsaro_log(glob->logger, "program will be unable to write avro output files");
+        corsaro_log(glob->logger, "(ignore if using libtimeseries for output)");
     }
 
     if (glob->interval == 0) {
