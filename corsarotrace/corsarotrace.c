@@ -483,8 +483,24 @@ static void halt_corsarotrace_worker(libtrace_t *trace, libtrace_thread_t *t,
     void **final_result;
 
     if (tls->pkts_outstanding > 0) {
+        uint8_t complete = 0;
+        libtrace_info_t *tinfo = trace_get_information(trace);
+
+        /* Deal with case where we are reading from a rotated trace file and
+         * have reached the end of the file.
+         *
+         * The most recent timestamp will be just shy of the report interval,
+         * but we still want the last interval to register as complete to
+         * ensure plugins (e.g. report) will output a result for that last
+         * interval.
+         */
+        if (tinfo->live == 0 && tls->next_report - tls->last_ts <= 1) {
+            complete = 1;
+            tls->last_ts = tls->next_report;
+        }
+
         final_result = corsaro_push_end_plugins(tls->plugins,
-                tls->current_interval.number, tls->last_ts, 0);
+                tls->current_interval.number, tls->last_ts, complete);
         if (push_interval_result(glob->logger, tls, final_result) < 0) {
             corsaro_log(glob->logger,
                     "error while publishing results for final interval %u",
