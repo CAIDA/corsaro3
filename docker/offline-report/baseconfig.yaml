@@ -1,0 +1,33 @@
+interval: 60
+
+removerouted: no
+removespoofed: no
+removeerratic: no
+
+packetsource: PCAPURI
+
+libtimeseriesbackends:
+ - kafka:
+     brokeruri: 172.17.0.1:29092
+     channelname: "unfiltered"
+     compresscode: snappy
+     topicprefix: reporttest
+
+plugins:
+ - report:
+     output_row_label: "reptest"
+     output_format: "libtimeseries"
+     iptracker_threads: 8
+
+tagproviders:
+#  - pfx2as:
+#      prefixfile: swift://datasets-routing-routeviews-prefix2as/routeviews-rv2-latest.pfx2as.gz
+
+  - netacq-edge:
+     blocksfile: http://loki.caida.org:3282/netacuity-dumps/Edge-processed/netacq-4-blocks.latest.csv.gz
+     locationsfile: http://loki.caida.org:3282/netacuity-dumps/Edge-processed/netacq-4-locations.latest.csv.gz
+     countryfile:  http://loki.caida.org:3282/netacuity-dumps/country_codes.csv
+     polygonmapfile: http://loki.caida.org:3282/netacuity-dumps/Edge-processed/netacq-4-polygons.latest.csv.gz
+     polygontablefile: http://loki.caida.org:3282/natural-earth/polygons/ne_10m_admin_1.regions.v3.0.0.processed.polygons.csv.gz
+     polygontablefile: http://loki.caida.org:3282/gadm/polygons/gadm.counties.v2.0.processed.polygons.csv.gz
+
