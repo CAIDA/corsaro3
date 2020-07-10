@@ -399,6 +399,10 @@ void run_merger(corsaro_logger_t *logger, corsaro_avro_writer_t *avwrt,
     		if (corsaro_append_avro_writer(avwrt, NULL) < 0) {
 	    		corsaro_log(logger, "Error while writing merged avro record...");
 		    }
+            if (prev->ft.interval_ts != next->ft.interval_ts) {
+                corsaro_log(logger, "Merged all flowtuples from interval %u",
+                        prev->ft.interval_ts);
+            }
             free(prev);
         }
         prev = next;
