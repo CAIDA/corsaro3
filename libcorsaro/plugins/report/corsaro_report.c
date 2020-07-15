@@ -454,6 +454,7 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         conf->iptrackers[i].logger = p->logger;
         conf->iptrackers[i].sourcethreads = stdopts->procthreads;
         conf->iptrackers[i].haltphase = 0;
+        conf->iptrackers[i].haltsseen = 0;
         conf->iptrackers[i].allowedmetricclasses = conf->allowedmetricclasses;
         conf->iptrackers[i].outstanding = libtrace_list_init(
                sizeof(corsaro_report_out_interval_t));

@@ -658,9 +658,12 @@ void *start_iptracker(void *tdata) {
 
         if (msg.msgtype == CORSARO_IP_MESSAGE_HALT) {
             pthread_mutex_lock(&(track->mutex));
-            track->haltphase = 2;
+            track->haltsseen ++;
+            if (track->haltsseen >= track->sourcethreads) {
+                track->haltphase = 2;
+            }
             pthread_mutex_unlock(&(track->mutex));
-            break;
+            continue;
         }
 
         /* Check if this message has the expected sequence number. If not,
