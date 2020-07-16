@@ -133,6 +133,10 @@ void corsaro_destroy_avro_writer(corsaro_avro_writer_t *writer) {
         free(writer->encodespace);
     }
 
+    if (writer->fname) {
+        free(writer->fname);
+    }
+
     free(writer);
 
 }
@@ -212,10 +216,26 @@ int corsaro_read_next_avro_record(corsaro_avro_reader_t *reader,
 
 int corsaro_close_avro_writer(corsaro_avro_writer_t *writer) {
 
-    if (writer->out) {
-        avro_file_writer_close(writer->out);
+    if (writer->out == NULL) {
+        return 0;
     }
+
+    avro_file_writer_close(writer->out);
     writer->out = NULL;
+
+    char donebuf[1024];
+    if (snprintf(donebuf, sizeof(donebuf), "%s.done", writer->fname)
+        >= sizeof(donebuf)) {
+        corsaro_log(writer->logger, "unable to build .done file name");
+        return -1;
+    }
+    FILE *done = fopen(donebuf, "w");
+    if (done) {
+        fclose(done);
+    } else {
+        corsaro_log(writer->logger, "unable to create .done file");
+        return -1;
+    }
     return 0;
 }
 
@@ -237,6 +257,9 @@ int corsaro_start_avro_writer(corsaro_avro_writer_t *writer, char *fname,
                 "attempting to start an Avro writer when it is already open!");
         return -1;
     }
+
+    /* Save file name so we can create a .done file */
+    writer->fname = strdup(fname);
 
     if (writer->schema == NULL) {
         /* Create the schema */

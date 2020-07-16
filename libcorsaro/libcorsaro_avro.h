@@ -73,6 +73,7 @@ typedef struct corsaro_avro_reader {
 typedef struct corsaro_avro_writer {
     const char *schema_string;
     avro_schema_t schema;
+    char *fname;
     avro_file_writer_t out;
 
     char *encodespace;
