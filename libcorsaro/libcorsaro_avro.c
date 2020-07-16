@@ -229,7 +229,13 @@ int corsaro_close_avro_writer(corsaro_avro_writer_t *writer) {
         corsaro_log(writer->logger, "unable to build .done file name");
         return -1;
     }
-    fclose(fopen(donebuf, "w"));
+    FILE *done = fopen(donebuf, "w");
+    if (done) {
+        fclose(done);
+    } else {
+        corsaro_log(writer->logger, "unable to create .done file");
+        return -1;
+    }
     return 0;
 }
 
