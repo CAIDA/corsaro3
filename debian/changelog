@@ -1,3 +1,9 @@
+corsaro (3.2.6) unstable; urgency=medium
+
+  * Bug fixes, misc improvements
+
+ -- Alistair King <software@caida.org>  Fri, 17 Jul 2020 15:23:55 +0000
+
 corsaro (3.2.5-1) unstable; urgency=medium
 
   * Add package dependency on libgoogle-perftools-dev

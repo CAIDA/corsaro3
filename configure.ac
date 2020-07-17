@@ -22,12 +22,12 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-AC_INIT([corsaro], [3.2.5], [corsaro-info@caida.org])
+AC_INIT([corsaro], [3.2.6], [corsaro-info@caida.org])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 
 CORSARO_MAJOR_VERSION=3
 CORSARO_MID_VERSION=2
-CORSARO_MINOR_VERSION=5
+CORSARO_MINOR_VERSION=6
 
 AC_DEFINE_UNQUOTED([CORSARO_MAJOR_VERSION],$CORSARO_MAJOR_VERSION,
 	[corsaro major version])
