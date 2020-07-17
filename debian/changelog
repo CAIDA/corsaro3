@@ -1,3 +1,9 @@
+corsaro (3.2.6-1) unstable; urgency=medium
+
+  * Fix libipmeta version requirement
+
+ -- Alistair King <alistair@4bd3c7c503c9>  Fri, 17 Jul 2020 16:15:40 +0000
+
 corsaro (3.2.6) unstable; urgency=medium
 
   * Bug fixes, misc improvements
