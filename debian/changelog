@@ -1,8 +1,14 @@
+corsaro (3.2.7) unstable; urgency=medium
+
+  * Minor avro writer fix
+
+ -- Alistair King <software@caida.org>  Mon, 27 Jul 2020 18:51:50 +0000
+
 corsaro (3.2.6-1) unstable; urgency=medium
 
   * Fix libipmeta version requirement
 
- -- Alistair King <alistair@4bd3c7c503c9>  Fri, 17 Jul 2020 16:15:40 +0000
+ -- Alistair King <alistair@caida.org>  Fri, 17 Jul 2020 16:15:40 +0000
 
 corsaro (3.2.6) unstable; urgency=medium
 
