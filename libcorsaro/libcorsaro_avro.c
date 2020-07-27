@@ -47,6 +47,7 @@
  * MODIFICATIONS.
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <errno.h>
 #include <sys/time.h>
@@ -126,7 +127,8 @@ void corsaro_destroy_avro_writer(corsaro_avro_writer_t *writer) {
     }
 
     if (writer->out) {
-        avro_file_writer_close(writer->out);
+        corsaro_close_avro_writer(writer);
+        assert(writer->out == NULL);
     }
 
     if (writer->encodespace) {
