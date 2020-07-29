@@ -242,6 +242,11 @@ static int parse_remaining_config(corsaro_trace_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+        && !strcmp((char *)key->data.scalar.value, "threads")) {
+        glob->threads = strtoul((char *)value->data.scalar.value, NULL, 10);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "startboundaryts")) {
         glob->boundstartts = strtoul((char *)value->data.scalar.value, NULL, 10);
     }
