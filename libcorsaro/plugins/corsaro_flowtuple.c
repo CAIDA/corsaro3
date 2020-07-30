@@ -412,6 +412,14 @@ int corsaro_flowtuple_finalise_config(corsaro_plugin_t *p,
     conf->basic.monitorid = stdopts->monitorid;
     conf->zmq_ctxt = zmq_ctxt;
 
+    if (conf->maxmergeworkers < stdopts->procthreads) {
+      corsaro_log(p->logger,
+                "flowtuple plugin: mergethreads (%d) is less than procthreads "
+                  "(%d) and will be ignored.", conf->maxmergeworkers,
+                  stdopts->procthreads);
+      conf->maxmergeworkers = stdopts->procthreads;
+    }
+
     corsaro_log(p->logger, "flowtuple plugin: using %u merging threads",
             conf->maxmergeworkers);
     if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {

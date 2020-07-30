@@ -861,7 +861,6 @@ int main(int argc, char *argv[]) {
         glob->threads = ctrlreply.hashbins;
     } else {
         glob->control_uri = strdup(INTERNAL_ZMQ_CONTROL_URI);
-        glob->threads = 4;
         pthread_create(&fauxcontrol, NULL, start_faux_control_thread, glob);
         corsaro_log(glob->logger, "started faux tagger control thread");
     }

@@ -88,6 +88,13 @@ The full set of supported global config options is:
                           set to 0, no file rotation is performed (all output
                           ends up in a single file).
 
+    threads               The number of processing threads to use to receive
+                          and write packets. Only used when processing
+                          in "offline" mode (i.e., not consuming
+                          packets from a separate tagger instance). If
+                          the controlsocketname option is used, this
+                          setting will be ignored.
+
     startboundaryts       Ignore all packets that have a timestamp earlier than
                           the Unix timestamp specified for this option.
 
@@ -215,7 +222,13 @@ The flowtuple plugin can be further configured using the following options:
 
     mergethreads          Specifies the number of threads to reserve for
                           merging flowtuple results into a single coherent
-                          file. Defaults to 2.
+                          file. If this is less than the number of
+                          corsarotrace processing threads it will be
+                          ignored. If it is more than the number of
+                          processing threads, the merge threads will
+                          operate as a thread pool, but note that the
+                          output files will not have consistent
+                          thread IDs appended to their names.
 
     avrooutput            If set to 'snappy', the avro files produced as
                           interim output will be compressed using the snappy
