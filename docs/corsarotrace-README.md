@@ -89,11 +89,11 @@ The full set of supported global config options is:
                           ends up in a single file).
 
     threads               The number of processing threads to use to receive
-                          and write packets. Only used when consuming
-                          packets from a separate tagger instance. If
-                          using the tagproviders option (i.e., no
-                          controlsocketname option), this setting will
-                          be ignored.
+                          and write packets. Only used when processing
+                          in "offline" mode (i.e., not consuming
+                          packets from a separate tagger instance). If
+                          the controlsocketname option is used, this
+                          setting will be ignored.
 
     startboundaryts       Ignore all packets that have a timestamp earlier than
                           the Unix timestamp specified for this option.
