@@ -1,3 +1,9 @@
+corsaro (3.2.8) unstable; urgency=medium
+
+  * Re-add threads option for corsarotrace
+
+ -- Alistair King <software@caida.org>  Fri, 31 Jul 2020 16:09:01 +0000
+
 corsaro (3.2.7) unstable; urgency=medium
 
   * Minor avro writer fix
@@ -8,7 +14,7 @@ corsaro (3.2.6-1) unstable; urgency=medium
 
   * Fix libipmeta version requirement
 
- -- Alistair King <alistair@caida.org>  Fri, 17 Jul 2020 16:15:40 +0000
+ -- Alistair King <software@caida.org>  Fri, 17 Jul 2020 16:15:40 +0000
 
 corsaro (3.2.6) unstable; urgency=medium
 
