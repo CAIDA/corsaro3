@@ -123,6 +123,11 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "inputfilter")) {
+        glob->filterstring = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "compresslevel")) {
         uint32_t level = strtoul((char *)value->data.scalar.value, NULL, 10);
 
