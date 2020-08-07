@@ -158,6 +158,12 @@ typedef struct corsaro_wdcap_global {
      */
     int consterfframing;
 
+    /** A string describing a BPF filter to apply to all received packets */
+    char *filterstring;
+
+    /** A libtrace filter handle for the active BPF filter */
+    libtrace_filter_t *filter;
+
     /** The number of libtrace processing threads to use for reading
      *  packets from the input source.
      */

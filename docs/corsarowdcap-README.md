@@ -37,6 +37,10 @@ The full set of supported config options for corsarowdcap is:
                           not be used if provenance meta-data is enabled on
                           the capture device.
 
+    inputfilter           A BPF filter to be applied to all captured packets.
+                          Packets that do not match the filter will be
+                          discarded.
+
     monitorid             Set the monitor name that will appear in output file
                           names if the %N modifier is present in the template.
 

@@ -123,6 +123,11 @@ static int parse_remaining_config(corsaro_wdcap_global_t *glob,
     }
 
     if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+            && !strcmp((char *)key->data.scalar.value, "inputfilter")) {
+        glob->filterstring = strdup((char *)value->data.scalar.value);
+    }
+
+    if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
             && !strcmp((char *)key->data.scalar.value, "compresslevel")) {
         uint32_t level = strtoul((char *)value->data.scalar.value, NULL, 10);
 
@@ -325,6 +330,8 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
     glob->writestats = CORSARO_DEFAULT_WDCAP_WRITE_STATS;
     glob->threads_ended = 0;
     glob->pidfile = NULL;
+    glob->filterstring = NULL;
+    glob->filter = NULL;
 
     glob->compress_level = 0;
     glob->compress_method = TRACE_OPTION_COMPRESSTYPE_NONE;
@@ -427,6 +434,14 @@ void corsaro_wdcap_free_global(corsaro_wdcap_global_t *glob) {
 
     if (glob->pidfile) {
         free(glob->pidfile);
+    }
+
+    if (glob->filterstring) {
+        free(glob->filterstring);
+    }
+
+    if (glob->filter) {
+        trace_destroy_filter(glob->filter);
     }
 
     pthread_mutex_destroy(&(glob->globmutex));

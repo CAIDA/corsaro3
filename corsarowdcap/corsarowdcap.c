@@ -732,6 +732,18 @@ static int start_trace_input(corsaro_wdcap_global_t *glob) {
         }
     }
 
+    if (glob->filterstring) {
+        glob->filter = trace_create_filter(glob->filterstring);
+
+        if (trace_set_filter(glob->trace, glob->filter) == -1)
+        {
+            libtrace_err_t err = trace_get_err(glob->trace);
+            corsaro_log(glob->logger,
+                    "unable to push filter to trace object: %s", err.problem);
+            return -1;
+        }
+    }
+
     if (trace_pstart(glob->trace, glob, processing, NULL) == -1) {
         libtrace_err_t err = trace_get_err(glob->trace);
         corsaro_log(glob->logger, "unable to start reading from trace object: %s",
