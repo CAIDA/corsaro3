@@ -701,7 +701,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
          * complete even in situations where we start our capture very
          * close to an interval boundary.
          */
-		if (trace_get_first_packet(trace, t, &first, &firsttv) == -1) {
+		if (trace_get_first_packet(trace, NULL, &first, &firsttv) == -1) {
 			corsaro_log(glob->logger,
 					"unable to get first packet for input %s?",
 					glob->inputuri);
