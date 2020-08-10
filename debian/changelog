@@ -1,3 +1,9 @@
+corsaro (3.2.10) unstable; urgency=medium
+
+  * corsarowdcap improvements for low-traffic capture
+
+ -- Alistair King <software@caida.org>  Mon, 10 Aug 2020 18:51:47 +0000
+
 corsaro (3.2.9) unstable; urgency=medium
 
   * Add `inputfilter` option for corsarowdcap 
