@@ -431,6 +431,102 @@ static inline void clear_wdcap_thread_data(corsaro_wdcap_local_t *tls) {
 }
 
 
+static int check_interval_over(libtrace_t *trace, libtrace_thread_t *t,
+        corsaro_wdcap_global_t *glob, corsaro_wdcap_local_t *tls,
+        uint32_t ts) {
+
+    corsaro_wdcap_message_t mergemsg;
+    int ret;
+
+    while (corsaro_restart ||
+            (tls->next_report && ts >= tls->next_report)) {
+        /* Tell merger that we've reached the end of the interval */
+        mergemsg.threadid = trace_get_perpkt_thread_id(t);
+        mergemsg.type = CORSARO_WDCAP_MSG_INTERVAL_DONE;
+        mergemsg.timestamp = tls->current_interval.time;
+        mergemsg.target_thread =
+            (tls->current_interval.time / glob->interval) %
+            glob->merge_threads;
+
+        printf("merge message %d %u %d\n", mergemsg.threadid,
+                mergemsg.timestamp, mergemsg.target_thread);
+
+        /* VERY IMPORTANT: do not close the fd for the interim file
+         * here. close() is a blocking operation, even if the rest
+         * of the I/O is asynchronous, so we run the risk of dropping
+         * packets while we're waiting for those to complete.
+         *
+         * Instead, we're going to get the merging thread to do the
+         * close for us, since it is a lot less time-sensitive than
+         * the processing threads.
+         */
+        mergemsg.src_fd = -1;
+
+        if (glob->writestats) {
+            /* ask libtrace for stats about our processing thread and hand
+             * them off to the merger.
+             */
+            trace_clear_statistics(&mergemsg.lt_stats);
+            trace_get_thread_statistics(trace, t, &mergemsg.lt_stats);
+        }
+
+        /* Prepare to rotate our interim output file */
+        if (tls->writer) {
+            int srcfd;
+            srcfd = corsaro_reset_fast_trace_writer(glob->logger, tls->writer);
+            mergemsg.src_fd = srcfd;
+            free(tls->interimfilename);
+            tls->interimfilename = NULL;
+        }
+
+        if (zmq_send(tls->zmq_pushsock, &mergemsg, sizeof(mergemsg), 0) < 0) {
+            corsaro_log(glob->logger,
+                    "error sending interval over message to merging thread: %s",
+                    strerror(errno));
+            return -1;
+        }
+        tls->current_interval.number ++;
+        tls->current_interval.time = tls->next_report;
+        tls->next_report += glob->interval;
+
+        if (corsaro_restart) {
+            tls->ending = 1;
+
+            pthread_mutex_lock(&(tls->glob->globmutex));
+            tls->glob->threads_ended ++;
+            if (tls->glob->threads_ended >= tls->glob->threads) {
+                corsaro_halted = 1;
+            }
+            pthread_mutex_unlock(&(tls->glob->globmutex));
+
+            corsaro_log(glob->logger, "marked proc thread %d as ending",
+                    trace_get_perpkt_thread_id(t));
+            return 0;
+        }
+    }
+
+    if (tls->interimfilename == NULL) {
+        /* Need to open up a new interim file */
+        tls->interimfilename = corsaro_wdcap_derive_output_name(tls->glob,
+                tls->current_interval.time,
+                trace_get_perpkt_thread_id(t), 0, 0);
+        if (tls->interimfilename == NULL) {
+            corsaro_log(glob->logger,
+                    "unable to create suitable output file name for wdcap");
+            return -1;
+        }
+
+        ret = corsaro_start_fast_trace_writer(glob->logger, tls->writer,
+                tls->interimfilename);
+        if (ret == -1) {
+            corsaro_log(glob->logger,
+                    "unable to open output file for wdcap");
+            return -1;
+        }
+    }
+    return 1;
+}
+
 /** Thread-start callback for the processing threads. Invoked when the
  *  input trace is started but before any packets are read.
  *
@@ -518,6 +614,47 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
     tls->lastaccepted = stats->accepted;
 
     free(stats);
+
+    if (tls->current_interval.time == 0) {
+		const libtrace_packet_t *first;
+		const struct timeval *firsttv;
+
+        /* This is slightly tricky, in that we need to make sure all
+         * threads start from the same interval (even if the thread's
+         * first packet is from the next interval). This ensures that
+         * the merging thread can recognise the first interval as
+         * complete even in situations where we start our capture very
+         * close to an interval boundary.
+         *
+         * In the tick case, we also need to be aware that no packets
+         * may have been received yet, so there is no "first" packet
+         * to use but that is a legitimate situation.
+         */
+		if (trace_get_first_packet(trace, NULL, &first, &firsttv) != 1) {
+			return;
+		}
+
+		if (glob->interval <= 0) {
+			return;
+		}
+
+        tls->current_interval.time = firsttv->tv_sec;
+        tls->next_report = firsttv->tv_sec - (firsttv->tv_sec % glob->interval) + glob->interval;
+    }
+
+    /* I'm using an extra 10 second buffer here because we really only want
+     * an interval end to trigger due to a tick in cases where the thread
+     * is seeing few or no packets. The extra 10 seconds means that in most
+     * cases the "tick" trigger will only happen if once we get 10 seconds
+     * past the due interval without seeing another packet.
+     *
+     * This will help prevent any bugs when a tick is inadvertantly processed
+     * before packets that should be chronologically ahead of it -- libtrace
+     * ticks and packets aren't guaranteed to be in sync.
+     */
+    if (check_interval_over(trace, t, glob, tls, (uint32_t)(tick >> 32) - 10) < 0) {
+        corsaro_halted = 1;
+    }
 }
 
 /** Per-packet callback for a processing thread.
@@ -564,7 +701,7 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
          * complete even in situations where we start our capture very
          * close to an interval boundary.
          */
-		if (trace_get_first_packet(trace, t, &first, &firsttv) == -1) {
+		if (trace_get_first_packet(trace, NULL, &first, &firsttv) == -1) {
 			corsaro_log(glob->logger,
 					"unable to get first packet for input %s?",
 					glob->inputuri);
@@ -586,91 +723,12 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
 
     ptv = trace_get_timeval(packet);
 
-    while (corsaro_restart ||
-            (tls->next_report && ptv.tv_sec >= tls->next_report)) {
-        /* Tell merger that we've reached the end of the interval */
-        mergemsg.threadid = trace_get_perpkt_thread_id(t);
-        mergemsg.type = CORSARO_WDCAP_MSG_INTERVAL_DONE;
-        mergemsg.timestamp = tls->current_interval.time;
-        mergemsg.target_thread =
-                (tls->current_interval.time / glob->interval) %
-                glob->merge_threads;
-
-        /* VERY IMPORTANT: do not close the fd for the interim file
-         * here. close() is a blocking operation, even if the rest
-         * of the I/O is asynchronous, so we run the risk of dropping
-         * packets while we're waiting for those to complete.
-         *
-         * Instead, we're going to get the merging thread to do the
-         * close for us, since it is a lot less time-sensitive than
-         * the processing threads.
-         */
-        mergemsg.src_fd = -1;
-
-        if (glob->writestats) {
-            /* ask libtrace for stats about our processing thread and hand
-             * them off to the merger.
-             */
-            trace_clear_statistics(&mergemsg.lt_stats);
-            trace_get_thread_statistics(trace, t, &mergemsg.lt_stats);
-        }
-
-        /* Prepare to rotate our interim output file */
-        if (tls->writer) {
-            int srcfd;
-            srcfd = corsaro_reset_fast_trace_writer(glob->logger, tls->writer);
-            mergemsg.src_fd = srcfd;
-            free(tls->interimfilename);
-            tls->interimfilename = NULL;
-        }
-
-        if (zmq_send(tls->zmq_pushsock, &mergemsg, sizeof(mergemsg), 0) < 0) {
-            corsaro_log(glob->logger,
-                    "error sending interval over message to merging thread: %s",
-                    strerror(errno));
-            corsaro_halted = 1;
-            return packet;
-        }
-		tls->current_interval.number ++;
-		tls->current_interval.time = tls->next_report;
-		tls->next_report += glob->interval;
-
-        if (corsaro_restart) {
-            tls->ending = 1;
-
-            pthread_mutex_lock(&(tls->glob->globmutex));
-            tls->glob->threads_ended ++;
-            if (tls->glob->threads_ended >= tls->glob->threads) {
-                corsaro_halted = 1;
-            }
-            pthread_mutex_unlock(&(tls->glob->globmutex));
-
-            corsaro_log(glob->logger, "marked proc thread %d as ending",
-                    trace_get_perpkt_thread_id(t));
-            return packet;
-        }
+    ret = check_interval_over(trace, t, glob, tls, ptv.tv_sec);
+    if (ret < 0) {
+        corsaro_halted = 1;
     }
-
-    if (tls->interimfilename == NULL) {
-        /* Need to open up a new interim file */
-        tls->interimfilename = corsaro_wdcap_derive_output_name(tls->glob,
-                tls->current_interval.time,
-                trace_get_perpkt_thread_id(t), 0, 0);
-        if (tls->interimfilename == NULL) {
-            corsaro_log(glob->logger,
-                    "unable to create suitable output file name for wdcap");
-            corsaro_halted = 1;
-            return packet;
-        }
-
-        ret = corsaro_start_fast_trace_writer(glob->logger, tls->writer,
-                tls->interimfilename);
-        if (ret == -1) {
-            corsaro_log(glob->logger,
-                    "unable to open output file for wdcap");
-            corsaro_halted = 1;
-            return packet;
-        }
+    if (ret <= 0) {
+        return packet;
     }
 
     /* WARNING: only enable VLAN stripping if you definitely have VLAN
