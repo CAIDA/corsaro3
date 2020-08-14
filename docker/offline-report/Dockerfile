@@ -58,7 +58,7 @@ RUN apt-get -y update && apt-get -y install \
         wandio1-tools \
         zlib1g-dev
 
-TODO: switch back to using debian packages
+# TODO: switch back to using debian packages
 RUN git clone https://github.com/CAIDA/corsaro3 && cd corsaro3 && git submodule init && git submodule update
 RUN cd corsaro3 && autoreconf -vfi && ./configure && make && make install && ldconfig
 
