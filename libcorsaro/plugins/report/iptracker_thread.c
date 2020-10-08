@@ -111,20 +111,6 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         }
         assert(filterid < CORSARO_FILTERID_MAX);
         m = &(maps->filters[filterid]);
-    } else if (metricclass == CORSARO_METRIC_CLASS_TCP_SOURCE_PORT) {
-        uint64_t portnum = (metricid & 0xFFFFFFFF);
-        if (maps->tcpsrc == NULL) {
-            maps->tcpsrc = calloc(65536, sizeof(corsaro_metric_ip_hash_t));
-        }
-        assert(portnum < 65536);
-        m = &(maps->tcpsrc[portnum]);
-    } else if (metricclass == CORSARO_METRIC_CLASS_TCP_DEST_PORT) {
-        uint64_t portnum = (metricid & 0xFFFFFFFF);
-        if (maps->tcpdst == NULL) {
-            maps->tcpdst = calloc(65536, sizeof(corsaro_metric_ip_hash_t));
-        }
-        assert(portnum < 65536);
-        m = &(maps->tcpdst[portnum]);
     } else if (metricclass == CORSARO_METRIC_CLASS_NETACQ_CONTINENT ||
             metricclass == CORSARO_METRIC_CLASS_NETACQ_COUNTRY ||
             metricclass == CORSARO_METRIC_CLASS_NETACQ_REGION ||
@@ -286,20 +272,6 @@ static void free_map_set(corsaro_report_iptracker_maps_t *maps) {
             free_metrichash(&(maps->filters[i]));
         }
         free(maps->filters);
-    }
-
-    if (maps->tcpsrc) {
-        for (i = 0; i < 65536; i++) {
-            free_metrichash(&(maps->tcpsrc[i]));
-        }
-        free(maps->tcpsrc);
-    }
-
-    if (maps->tcpdst) {
-        for (i = 0; i < 65536; i++) {
-            free_metrichash(&(maps->tcpdst[i]));
-        }
-        free(maps->tcpdst);
     }
 
     free_metrichash(&(maps->combined));

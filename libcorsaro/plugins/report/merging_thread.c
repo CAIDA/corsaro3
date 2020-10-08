@@ -692,6 +692,19 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
     return r;
 }
 
+static inline bool is_port_allowed(uint8_t *portarray, uint16_t portnum) {
+    int index = portnum / 8;
+    int lsb = ((index + 1) * 8) - 1;
+
+    assert(portnum >= lsb - 7);
+
+    if (portarray[index] & (1 << (lsb - portnum))) {
+        return true;
+    }
+    return false;
+}
+
+
 /** Initialises a results array with zeroes for as many metrics as
  *  we can, so we are still able to write a valid value even if the metric
  *  is not observed within an interval.
@@ -723,10 +736,18 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
 
     /* TCP and UDP ports, ICMP type+code */
     for (i = 0; i < METRIC_PORT_MAX; i++) {
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT, i);
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_DEST_PORT, i);
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
-        ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
+        if (is_port_allowed(conf->allowedports.tcp_sources, i)) {
+            ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT, i);
+        }
+        if (is_port_allowed(conf->allowedports.tcp_dests, i)) {
+            ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_DEST_PORT, i);
+        }
+        if (is_port_allowed(conf->allowedports.udp_sources, i)) {
+            ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
+        }
+        if (is_port_allowed(conf->allowedports.udp_dests, i)) {
+            ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
+        }
         // AK: only create ICMP metrics when they are seen
         // ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_ICMP_TYPECODE, i);
     }
@@ -869,28 +890,6 @@ static void update_tracker_results(Pvoid_t *results,
                     subtrees_seen, 1);
         }
         free(tracker->prev_maps->filters);
-    }
-
-    if (tracker->prev_maps->tcpsrc) {
-        metid = CORSARO_METRIC_CLASS_TCP_SOURCE_PORT;
-        metid = (metid << 32);
-        for (i = 0; i < 65536; i++) {
-            update_merged_metric(results,
-                    &(tracker->prev_maps->tcpsrc[i]), conf, (metid | i), ts,
-                    subtrees_seen, 1);
-        }
-        free(tracker->prev_maps->tcpsrc);
-    }
-
-    if (tracker->prev_maps->tcpdst) {
-        metid = CORSARO_METRIC_CLASS_TCP_DEST_PORT;
-        metid = (metid << 32);
-        for (i = 0; i < 65536; i++) {
-            update_merged_metric(results,
-                    &(tracker->prev_maps->tcpdst[i]), conf, (metid | i), ts,
-                    subtrees_seen, 1);
-        }
-        free(tracker->prev_maps->tcpdst);
     }
 
     JLF(pval, tracker->prev_maps->general, index);

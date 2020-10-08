@@ -204,8 +204,6 @@ typedef struct corsaro_report_iptracker_maps {
 
     corsaro_metric_ip_hash_t *ipprotocols;
     corsaro_metric_ip_hash_t *filters;
-    corsaro_metric_ip_hash_t *tcpsrc;
-    corsaro_metric_ip_hash_t *tcpdst;
 
     Pvoid_t general;
 } corsaro_report_iptracker_maps_t;
@@ -279,6 +277,12 @@ typedef struct corsaro_report_iptracker {
     uint64_t allowedmetricclasses;
 } corsaro_report_iptracker_t;
 
+typedef struct allowed_ports {
+    uint8_t tcp_sources[8192];
+    uint8_t tcp_dests[8192];
+    uint8_t udp_sources[8192];
+    uint8_t udp_dests[8192];
+} allowed_ports_t;
 
 /** Structure describing configuration specific to the report plugin */
 typedef struct corsaro_report_config {
@@ -328,6 +332,10 @@ typedef struct corsaro_report_config {
      *  re-think this approach.
      */
     uint64_t allowedmetricclasses;
+
+    /** TCP and UDP ports for which we are going to track per-port statistics.
+     */
+    allowed_ports_t allowedports;
 } corsaro_report_config_t;
 
 
