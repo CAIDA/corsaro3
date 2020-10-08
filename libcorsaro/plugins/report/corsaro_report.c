@@ -207,27 +207,28 @@ static void parse_port_ranges(uint8_t *port_array, yaml_document_t *doc,
         for (index = firstindex; index < 8192; index ++) {
             int msb = index * 8;
             int lsb = msb + 7;
+            uint8_t toadd = 0xff;
 
             if (msb > last) {
                 break;
             }
 
-            port_array[index] = 0xff;
             if (first > msb) {
                 if (first - msb >= 8) {
-                    port_array[index] = 0;
+                    toadd = 0;
                 } else {
-                    port_array[index] &= ((0xff) >> (first - msb));
+                    toadd &= ((0xff) >> (first - msb));
                 }
             }
 
             if (last < lsb) {
                 if (lsb - last >= 8) {
-                    port_array[index] = 0;
+                    toadd = 0;
                 } else {
-                    port_array[index] &= ((0xff) << (lsb - last));
+                    toadd &= ((0xff) << (lsb - last));
                 }
             }
+            port_array[index] |= toadd;
         }
     }
 }
