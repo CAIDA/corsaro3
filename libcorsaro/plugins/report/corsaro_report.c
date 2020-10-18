@@ -139,6 +139,31 @@ corsaro_plugin_t *corsaro_report_alloc(void) {
     return &(corsaro_report_plugin);
 }
 
+#define INVALID_PORT 0xFFFFFFFF
+
+static inline unsigned long int strtoport(char *ptr, bool capmax,
+        corsaro_logger_t *logger) {
+
+    unsigned long int first;
+    errno = 0;
+    first = strtoul(ptr, NULL, 0);
+    if (errno != 0) {
+        corsaro_log(logger, "Error converting '%s' to port number: %s",
+                ptr, strerror(errno));
+        return INVALID_PORT;
+    }
+
+    if (first > 65535 && capmax == false) {
+        corsaro_log(logger, "Invalid port number in portrange option '%s'",
+                ptr);
+        return INVALID_PORT;
+    } else if (first > 65535) {
+        first = 65535;
+    }
+
+    return first;
+}
+
 static void parse_port_ranges(uint8_t *port_array, yaml_document_t *doc,
         yaml_node_t *rangelist, bool *seen_flag, corsaro_logger_t *logger) {
 
@@ -158,38 +183,22 @@ static void parse_port_ranges(uint8_t *port_array, yaml_document_t *doc,
 
         dash = strchr(range, '-');
         if (dash == NULL) {
-            corsaro_log(logger, "Invalid format for portrange option, must be '<first>-<last>'");
-            continue;
-        }
-
-        *dash = '\0';
-        errno = 0;
-        first = strtoul(range, NULL, 0);
-        if (errno != 0) {
-            corsaro_log(logger, "Error converting '%s' to port number: %s",
-                    range, strerror(errno));
+            first = strtoport(range, false, logger);
+            if (first == INVALID_PORT) {
+                continue;
+            }
+            last = first;
+        } else {
+            *dash = '\0';
+            first = strtoport(range, false, logger);
             *dash = '-';
-            continue;
-        }
-
-        if (first > 65535) {
-            corsaro_log(logger, "Invalid port number in portrange option '%s'",
-                    range);
-            *dash = '-';
-            continue;
-        }
-
-        *dash = '-';
-        errno = 0;
-        last = strtoul(dash + 1, NULL, 0);
-        if (errno != 0) {
-            corsaro_log(logger, "Error converting '%s' to port number: %s",
-                    dash+1, strerror(errno));
-            continue;
-        }
-
-        if (last > 65535) {
-            last = 65535;
+            if (first == INVALID_PORT) {
+                continue;
+            }
+            last = strtoport(dash + 1, true, logger);
+            if (last == INVALID_PORT) {
+                continue;
+            }
         }
         if (last < first) {
             corsaro_log(logger, "Invalid port range configuration '%s' -- first port must be <= the last port", range);
