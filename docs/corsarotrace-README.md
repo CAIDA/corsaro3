@@ -374,11 +374,13 @@ The report plugin supports the following configuration options:
     udp_dest_port_range   as a sequence (to allow for multiple non-overlapping
                           ranges), where each sequence item must be a
                           start port, followed by a '-', followed by an end
-                          port. The ranges are considered as inclusive, so a
-                          range of "0-1024" will include both port 0 and port
-                          1024. If a range option is absent for a particular
-                          port metric, then results are produced for all
-                          65536 possible port numbers for that metric.
+                          port. Ranges consisting of a single port may be
+                          expressed using just the port number, without a '-'
+                          or an end port. The ranges are considered as
+                          inclusive, so a range of "0-1024" will include both
+                          port 0 and port 1024. If a range option is absent fo
+                          a particular port metric, then results are produced
+                          for all 65536 possible port numbers for that metric.
 
 
 corsarotrace Tag Providers
