@@ -139,6 +139,109 @@ corsaro_plugin_t *corsaro_report_alloc(void) {
     return &(corsaro_report_plugin);
 }
 
+#define INVALID_PORT 0xFFFFFFFF
+
+static inline unsigned long int strtoport(char *ptr, bool capmax,
+        corsaro_logger_t *logger) {
+
+    unsigned long int first;
+    errno = 0;
+    first = strtoul(ptr, NULL, 0);
+    if (errno != 0) {
+        corsaro_log(logger, "Error converting '%s' to port number: %s",
+                ptr, strerror(errno));
+        return INVALID_PORT;
+    }
+
+    if (first > 65535 && capmax == false) {
+        corsaro_log(logger, "Invalid port number in portrange option '%s'",
+                ptr);
+        return INVALID_PORT;
+    } else if (first > 65535) {
+        first = 65535;
+    }
+
+    return first;
+}
+
+static void parse_port_ranges(uint8_t *port_array, yaml_document_t *doc,
+        yaml_node_t *rangelist, bool *seen_flag, corsaro_logger_t *logger) {
+
+    yaml_node_item_t *item;
+    for (item = rangelist->data.sequence.items.start;
+            item != rangelist->data.sequence.items.top; item++) {
+        yaml_node_t *node = yaml_document_get_node(doc, *item);
+        char *range, *dash = NULL;
+        unsigned long int first, last;
+        int index = 0, firstindex = 0;
+
+        if (node->type != YAML_SCALAR_NODE) {
+            corsaro_log(logger, "Invalid YAML configuration for a portrange option -- ignoring");
+            return;
+        }
+        range = (char *)node->data.scalar.value;
+
+        dash = strchr(range, '-');
+        if (dash == NULL) {
+            first = strtoport(range, false, logger);
+            if (first == INVALID_PORT) {
+                continue;
+            }
+            last = first;
+        } else {
+            *dash = '\0';
+            first = strtoport(range, false, logger);
+            *dash = '-';
+            if (first == INVALID_PORT) {
+                continue;
+            }
+            last = strtoport(dash + 1, true, logger);
+            if (last == INVALID_PORT) {
+                continue;
+            }
+        }
+        if (last < first) {
+            corsaro_log(logger, "Invalid port range configuration '%s' -- first port must be <= the last port", range);
+            continue;
+        }
+
+        if (*seen_flag == false) {
+            memset(port_array, 0, 8192 * sizeof(uint8_t));
+            *seen_flag = true;
+        }
+
+        corsaro_log(logger, "Setting port range to %u : %u", first, last);
+
+        firstindex = (first / 8);
+        for (index = firstindex; index < 8192; index ++) {
+            int msb = index * 8;
+            int lsb = msb + 7;
+            uint8_t toadd = 0xff;
+
+            if (msb > last) {
+                break;
+            }
+
+            if (first > msb) {
+                if (first - msb >= 8) {
+                    toadd = 0;
+                } else {
+                    toadd &= ((0xff) >> (first - msb));
+                }
+            }
+
+            if (last < lsb) {
+                if (lsb - last >= 8) {
+                    toadd = 0;
+                } else {
+                    toadd &= ((0xff) << (lsb - last));
+                }
+            }
+            port_array[index] |= toadd;
+        }
+    }
+}
+
 static void parse_metric_limits(corsaro_report_config_t *conf,
         yaml_document_t *doc, yaml_node_t *metlist, corsaro_logger_t *logger) {
 
@@ -213,6 +316,10 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     corsaro_report_config_t *conf;
     yaml_node_t *key, *value;
     yaml_node_pair_t *pair;
+    bool set_tcp_src_ports = false;
+    bool set_udp_src_ports = false;
+    bool set_tcp_dest_ports = false;
+    bool set_udp_dest_ports = false;
 
     conf = (corsaro_report_config_t *)malloc(sizeof(corsaro_report_config_t));
     if (conf == NULL) {
@@ -254,6 +361,38 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 free(conf->outlabel);
             }
             conf->outlabel = strdup(val);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                            "tcp_source_port_range") == 0) {
+            parse_port_ranges(conf->allowedports.tcp_sources, doc, value,
+                    &set_tcp_src_ports, p->logger);
+
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                            "tcp_dest_port_range") == 0) {
+            parse_port_ranges(conf->allowedports.tcp_dests, doc, value,
+                    &set_tcp_dest_ports, p->logger);
+
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                            "udp_source_port_range") == 0) {
+            parse_port_ranges(conf->allowedports.udp_sources, doc, value,
+                    &set_udp_src_ports, p->logger);
+
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                            "udp_dest_port_range") == 0) {
+            parse_port_ranges(conf->allowedports.udp_dests, doc, value,
+                    &set_udp_dest_ports, p->logger);
+
         }
 
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
@@ -316,6 +455,22 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                 conf->outformat = CORSARO_OUTPUT_AVRO;
            }
         }
+    }
+
+    /* If no specific port ranges are given, then default to reporting
+     * time series for ALL ports
+     */
+    if (set_tcp_src_ports == false) {
+        memset(conf->allowedports.tcp_sources, 0xff, sizeof(uint8_t) * 8192);
+    }
+    if (set_tcp_dest_ports == false) {
+        memset(conf->allowedports.tcp_dests, 0xff, sizeof(uint8_t) * 8192);
+    }
+    if (set_udp_src_ports == false) {
+        memset(conf->allowedports.udp_sources, 0xff, sizeof(uint8_t) * 8192);
+    }
+    if (set_udp_dest_ports == false) {
+        memset(conf->allowedports.udp_dests, 0xff, sizeof(uint8_t) * 8192);
     }
 
     p->config = conf;

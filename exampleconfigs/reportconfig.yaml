@@ -100,6 +100,20 @@ plugins:
       # IPs for each metric.
       iptracker_threads: 4
 
+      # This option limits the collection of time series data to specific
+      # subsets of TCP source ports (in this case, 0-1024 inclusive,
+      # 10000-12000 inclusive and port 22444 alone). If not present, series data
+      # will be produced for all TCP source ports (assuming 'tcpports' is not
+      # disabled using the limitmetrics option).
+      #
+      # Config options also exist for 'tcp_dest_port_range',
+      # 'udp_source_port_range' and 'udp_dest_port_range', which work in the
+      # same way as this option.
+      tcp_source_port_range:
+        - 0-1024
+        - 10000-12000
+        - 22444
+
       # This option will limit our processing to a specific set of metrics.
       # If not specified, all metrics will be produced. See README for a
       # list of suitable terms that can be used here and what metrics they

@@ -530,6 +530,18 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
     return (void *)interim;
 }
 
+static inline bool is_allowed_port(uint8_t *portarray, uint16_t portnum) {
+    int index = portnum / 8;
+    int lsb = ((index + 1) * 8) - 1;
+
+    assert(portnum >= lsb - 7);
+
+    if (portarray[index] & (1 << (lsb - portnum))) {
+        return true;
+    }
+    return false;
+}
+
 #define PROCESS_SINGLE_TAG(class, val, maxval, skipcheck) \
     if (skipcheck || allowedmetricclasses == 0 || \
             ((1UL << class) & allowedmetricclasses)) { \
@@ -554,7 +566,8 @@ void *corsaro_report_end_interval(corsaro_plugin_t *p, void *local,
  */
 static int process_tags(corsaro_report_tracker_state_t *track,
 		corsaro_packet_tags_t *tags, uint16_t iplen,
-        corsaro_logger_t *logger, uint64_t allowedmetricclasses) {
+        corsaro_logger_t *logger, uint64_t allowedmetricclasses,
+        allowed_ports_t *allowedports) {
 
     int i, ret;
     uint16_t newtags = 0;
@@ -604,15 +617,24 @@ static int process_tags(corsaro_report_tracker_state_t *track,
             }
         }
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
-                ntohs(tags->src_port), METRIC_PORT_MAX, 0);
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
-                ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
+        if (is_allowed_port(allowedports->tcp_sources, ntohs(tags->src_port))) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
+                    ntohs(tags->src_port), METRIC_PORT_MAX, 0);
+        }
+
+        if (is_allowed_port(allowedports->tcp_dests, ntohs(tags->dest_port))) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
+                    ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
+        }
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
-                ntohs(tags->src_port), METRIC_PORT_MAX, 0);
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
-                ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
+        if (is_allowed_port(allowedports->udp_sources, ntohs(tags->src_port))) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
+                    ntohs(tags->src_port), METRIC_PORT_MAX, 0);
+        }
+        if (is_allowed_port(allowedports->udp_dests, ntohs(tags->dest_port))) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
+                    ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
+        }
     }
 
     if (maxmind_tagged(tags)) {
@@ -687,7 +709,7 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
     track->nextwrite += sizeof(corsaro_report_single_ip_header_t);
 
 	newtags = process_tags(track, tags, iplen, logger,
-            conf->allowedmetricclasses);
+            conf->allowedmetricclasses, &(conf->allowedports));
 
     /* Due to potential buffer reallocation, singleip may not point anywhere
      * valid anymore. */
