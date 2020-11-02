@@ -1093,8 +1093,9 @@ static void load_netacq_region_labels(corsaro_logger_t *logger,
     for (i = 0; i < count; i++) {
         index = regions[i]->code;
 
-        /* TODO update libipmeta to add FQIDs to region entities */
-        snprintf(build, 64, "TODO.%u", index);
+        /* TODO update libipmeta to add continent to region entities */
+        snprintf(build, 64, "%s.%s", regions[i]->country_iso,
+                regions[i]->region_iso);
         //snprintf(build, 64, "%s", regions[i]->fqid);
         JLI(pval, ipmeta_state->region_labels, index);
         if (*pval) {

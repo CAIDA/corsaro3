@@ -55,12 +55,13 @@
 
 #define AVRO_CONVERSION_FAILURE -1
 #define AVRO_WRITE_FAILURE -2
+#define AVRO_MISSING_LABEL -3
 
 #define LOOKUP_GEOTAG_LABEL(contmap, metricid) \
     lookup = metricid & 0xffffffff; \
     JLF(pval, contmap, lookup); \
     if (pval == NULL) { \
-        break; \
+        return -1; \
     } else { \
         contkey = (const char *)*pval; \
     }
@@ -100,8 +101,7 @@
     }
 
 #define ADD_EMPTY_RESULT(metricclass, metricval) \
-    if (conf->allowedmetricclasses == 0 || \
-            (conf->allowedmetricclasses & (1UL << metricclass))) { \
+    if (IS_METRIC_ALLOWED(conf->allowedmetricclasses, metricclass)) { \
         metricid = GEN_METRICID(metricclass, metricval); \
         r = new_result(metricid, conf->outlabel, ts); \
         JLI(pval, *results, (Word_t)metricid); \
@@ -256,7 +256,7 @@ static inline const char * get_filter_stringname(int fbit) {
  *  metric value for a given result.
  *
  */
-static inline void metric_to_strings(corsaro_report_merge_state_t *m,
+static inline int metric_to_strings(corsaro_report_merge_state_t *m,
         corsaro_report_result_t *res) {
 
     Word_t *pval;
@@ -351,6 +351,7 @@ static inline void metric_to_strings(corsaro_report_merge_state_t *m,
             }
             break;
     }
+    return 0;
 }
 
 
@@ -396,7 +397,7 @@ static inline int report_result_to_avro(corsaro_logger_t *logger,
  *  @param res          A single report plugin result which we need the key
  *                      name for.
  *
- *  @return the length of the resulting key string.
+ *  @return the length of the resulting key string, or -1 if an error occurs.
  */
 static inline int derive_libts_keyname(corsaro_plugin_t *p,
         corsaro_report_merge_state_t *m,
@@ -405,7 +406,10 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
     int ret;
     corsaro_report_config_t *config = (corsaro_report_config_t *)p->config;
 
-    metric_to_strings(m, res);
+    if (metric_to_strings(m, res) < 0) {
+        return -1;
+    }
+
     /* 'overall' metrics have no suitable metric value, so we need to
      * account for this case.
      */
@@ -435,7 +439,7 @@ static inline int derive_libts_keyname(corsaro_plugin_t *p,
  *  @param logger       A reference to a corsaro logger for error reporting
  *  @param writer       The corsaro Avro writer that will be writing the output
  *  @param res          The report plugin result to be written.
- *  @return 0 if the write is successful, -1 if an error occurs.
+ *  @return 0 if the write is successful, < 0 if an error occurs.
  */
 static int write_single_metric_avro(corsaro_report_merge_state_t *m,
         corsaro_logger_t *logger,
@@ -443,7 +447,9 @@ static int write_single_metric_avro(corsaro_report_merge_state_t *m,
 
     avro_value_t *avro;
 
-    metric_to_strings(m, res);
+    if (metric_to_strings(m, res) < 0) {
+        return AVRO_MISSING_LABEL;
+    }
     avro = corsaro_populate_avro_item(writer, res, report_result_to_avro);
     if (avro == NULL) {
         corsaro_log(logger,
@@ -567,10 +573,10 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
             int keyid = -1;
 
             if (derive_libts_keyname(p, m, keyname, 4096, r) <= 0) {
-                corsaro_log(p->logger,
-                        "error deriving suitable keyname from metricid %lu",
-                        r->metricid);
-                return -1;
+                J1FA(judyret, r->uniq_src_asns);
+                free(r);
+                JLN(pval, *results, index);
+                continue;
             }
 
             /* We'll need a separate key for each of our tallies */
@@ -739,12 +745,15 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
         if (is_port_allowed(conf->allowedports.tcp_sources, i)) {
             ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT, i);
         }
+
         if (is_port_allowed(conf->allowedports.tcp_dests, i)) {
             ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_TCP_DEST_PORT, i);
         }
+
         if (is_port_allowed(conf->allowedports.udp_sources, i)) {
             ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT, i);
         }
+
         if (is_port_allowed(conf->allowedports.udp_dests, i)) {
             ADD_EMPTY_RESULT(CORSARO_METRIC_CLASS_UDP_DEST_PORT, i);
         }
@@ -862,8 +871,8 @@ static void update_tracker_results(Pvoid_t *results,
      */
 
     assert(tracker->prev_maps != NULL);
-    if (tracker->allowedmetricclasses == 0 ||
-            tracker->allowedmetricclasses & (1UL << CORSARO_METRIC_CLASS_COMBINED)) {
+    if (IS_METRIC_ALLOWED(tracker->allowedmetricclasses,
+            CORSARO_METRIC_CLASS_COMBINED)) {
         metid = CORSARO_METRIC_CLASS_COMBINED;
         metid = (metid << 32);
         update_merged_metric(results, &(tracker->prev_maps->combined), conf,
@@ -1162,7 +1171,6 @@ static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
                 goto drainmessage;
             }
 			labellen = process_single_label_update(state, buffer);
-
 
             buffer += (sizeof(corsaro_tagger_label_hdr_t) + labellen);
             buflen -= (sizeof(corsaro_tagger_label_hdr_t) + labellen);

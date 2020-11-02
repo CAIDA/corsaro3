@@ -336,6 +336,7 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     conf->internalhwm = 30;
     /* zero is a special value to represent 'all' metrics */
     conf->allowedmetricclasses = 0;
+    conf->geomode = REPORT_GEOMODE_FULL;
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -437,6 +438,21 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
                     &(conf->query_tagger_labels), "query_tagger_labels") < 0) {
                 corsaro_log(p->logger, "setting query_tagger_labels to disabled");
                 conf->query_tagger_labels = 0;
+            }
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value,
+                    "geo_mode") == 0) {
+
+            if (strcasecmp((char *)value->data.scalar.value, "lite") == 0) {
+                conf->geomode = REPORT_GEOMODE_LITE;
+            } else if (strcasecmp((char *)value->data.scalar.value,
+                    "full") == 0) {
+                conf->geomode = REPORT_GEOMODE_FULL;
+            } else {
+                corsaro_log(p->logger, "unexpected geo_mode value: '%s', valid values are 'lite' or 'full'",
+                        (char *)value->data.scalar.value);
             }
         }
 
@@ -571,6 +587,26 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         {
             corsaro_log(p->logger, "report plugin: tracking filtering metrics");
         }
+    }
+
+    if (    (conf->allowedmetricclasses &
+                        (1 << CORSARO_METRIC_CLASS_NETACQ_CONTINENT)) ||
+            (conf->allowedmetricclasses &
+                        (1 << CORSARO_METRIC_CLASS_MAXMIND_CONTINENT))) {
+
+        uint64_t todisable = 0;
+        if (conf->geomode == REPORT_GEOMODE_LITE) {
+            corsaro_log(p->logger,
+                    "report plugin: geo-tagging limited to continents and countries");
+            todisable |= (1 << CORSARO_METRIC_CLASS_NETACQ_REGION);
+            todisable |= (1 << CORSARO_METRIC_CLASS_NETACQ_POLYGON);
+
+            conf->allowedmetricclasses &= (~(todisable));
+        } else {
+            corsaro_log(p->logger,
+                    "report plugin: full geo-tagging enabled");
+        }
+
     }
 
     corsaro_log(p->logger,
