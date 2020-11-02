@@ -543,8 +543,7 @@ static inline bool is_allowed_port(uint8_t *portarray, uint16_t portnum) {
 }
 
 #define PROCESS_SINGLE_TAG(class, val, maxval, skipcheck) \
-    if (skipcheck || allowedmetricclasses == 0 || \
-            ((1UL << class) & allowedmetricclasses)) { \
+    if (skipcheck || IS_METRIC_ALLOWED(allowedmetricclasses, class)) { \
         if ((ret = process_single_tag(class, val, maxval, track, logger, \
                 iplen)) < 0) { \
             return -1; \

@@ -76,6 +76,9 @@
       ((((uint64_t) class) << 32) + ((uint64_t)val))
 
 
+#define IS_METRIC_ALLOWED(allowedmetrics, metric) \
+      (allowedmetrics == 0 || (allowedmetrics & (1UL << metric)))
+
 /** An upper bound on the number of possible ports */
 #define METRIC_PORT_MAX (65536)
 /** An upper bound on the number of ICMP message types and codes */
