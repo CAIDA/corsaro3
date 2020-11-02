@@ -284,6 +284,15 @@ typedef struct allowed_ports {
     uint8_t udp_dests[8192];
 } allowed_ports_t;
 
+/** Level of detail for reporting geo-tagged series
+ *  LITE = just continents and countries
+ *  FULL = continents, countries, regions and counties
+ */
+typedef enum {
+    REPORT_GEOMODE_FULL,
+    REPORT_GEOMODE_LITE
+} corsaro_report_geomode_t;
+
 /** Structure describing configuration specific to the report plugin */
 typedef struct corsaro_report_config {
 
@@ -299,6 +308,9 @@ typedef struct corsaro_report_config {
 
     /** Output format */
     corsaro_output_format_t outformat;
+
+    /** Level of detail for reporting geo-tagged series */
+    corsaro_report_geomode_t geomode;
 
     /** Array of operational IP tracker threads -- included in here because
      *  the merge thread needs to be able to access the thread structures and
