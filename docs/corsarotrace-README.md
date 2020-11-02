@@ -360,6 +360,11 @@ The report plugin supports the following configuration options:
                           - "filter": include the individual filter matching
                                       metrics
 
+    geo_mode              If set to 'lite', geo-tagging metrics will be limited
+                          to continent and country-level tagging only. Regions,
+                          polygons and counties will be disabled. If set to
+                          'full', all geo-tagging metrics will be reported.
+
     querytaggerlabels     If set to 'no', the plugin will NOT attempt to ask
                           the tagger for FQ labels for each country, region,
                           etc. that appears in the geo-location tags. This is
