@@ -588,7 +588,9 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
             *pval = (Word_t)keyid;
 
             ADD_TIMESERIES_KEY("uniq_dst_ip");
-            ADD_TIMESERIES_KEY("uniq_src_asn");
+            if ((r->metricid >> 32) != CORSARO_METRIC_CLASS_PREFIX_ASN) {
+                ADD_TIMESERIES_KEY("uniq_src_asn");
+            }
             ADD_TIMESERIES_KEY("pkt_cnt");
             ADD_TIMESERIES_KEY("ip_len");
         }
@@ -596,11 +598,21 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
         /* *pval contains the key ID for uniq_src_ip, but keys are
          * assigned sequentially so we can use that to derive the key IDs
          * for the other tallies. */
+
+        /* Don't bother reporting uniq_src_asns per ASN -- that's dumb,
+         * as the number is only ever going to be 1
+         */
         timeseries_kp_set(m->kp, *pval, r->uniq_src_ips);
         timeseries_kp_set(m->kp, (*pval) + 1, r->uniq_dst_ips);
-        timeseries_kp_set(m->kp, (*pval) + 2, r->uniq_src_asn_count);
-        timeseries_kp_set(m->kp, (*pval) + 3, r->pkt_cnt);
-        timeseries_kp_set(m->kp, (*pval) + 4, r->bytes);
+        if ((r->metricid >> 32) != CORSARO_METRIC_CLASS_PREFIX_ASN) {
+            timeseries_kp_set(m->kp, (*pval) + 2, r->uniq_src_asn_count);
+            timeseries_kp_set(m->kp, (*pval) + 3, r->pkt_cnt);
+            timeseries_kp_set(m->kp, (*pval) + 4, r->bytes);
+        } else {
+            timeseries_kp_set(m->kp, (*pval) + 2, r->pkt_cnt);
+            timeseries_kp_set(m->kp, (*pval) + 3, r->bytes);
+        }
+
 
         J1FA(judyret, r->uniq_src_asns);
         free(r);
