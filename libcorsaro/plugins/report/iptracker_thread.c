@@ -174,7 +174,7 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         m->bytes += tagptr->bytes;
 
         J1S(ret, m->srcips, (Word_t)ipaddr);
-        if (asn != 0) {
+        if (asn != 0 && ret == 1) {
             J1S(ret, m->srcasns, (Word_t)asn);
         }
     } else {
