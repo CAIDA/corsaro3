@@ -476,12 +476,10 @@ trackerover:
 }
 
 #define METRIC_ALLOWED(met, allowflag) \
-    if (track->allowedmetricclasses == 0 && (met != CORSARO_METRIC_CLASS_FILTER_CRITERIA)) { \
-        allowflag = 1; \
-    } else if (track->allowedmetricclasses & (1UL << met)) { \
-        allowflag = 1; \
-    } else { \
+    if (track->allowedmetricclasses == 0 && (met == CORSARO_METRIC_CLASS_FILTER_CRITERIA)) { \
         allowflag = 0; \
+    } else { \
+        allowflag = 1; \
     }
 
 /** Processes and acts upon an update message that has been received
@@ -495,15 +493,13 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
         corsaro_report_iptracker_maps_t *maps) {
 
 
-	char *buf, *ptr;
+	uint8_t *ptr;
 	int more, i, j;
     size_t moresize;
 	uint32_t toalloc = 0;
     uint32_t tagsdone = 0;
     uint64_t metricid;
     uint8_t allowed;
-
-	buf = NULL;
 
 	ZEROMQ_CHECK_MORE
 	if (more == 0) {
@@ -514,14 +510,18 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 	toalloc = (msg->tagcount * sizeof(corsaro_report_msg_tag_t)) +
 			(msg->bodycount * sizeof(corsaro_report_single_ip_header_t));
 
-	buf = calloc(toalloc, 1);
-	if (!buf) {
-		corsaro_log(track->logger, "Unable to allocate %u bytes for reading an IP tracker update message", toalloc);
+    if (track->inbuf == NULL || track->inbuflen < toalloc) {
+        track->inbuf = realloc(track->inbuf, toalloc + 256);
+        track->inbuflen = toalloc + 256;
+    }
+
+	if (!track->inbuf) {
+		corsaro_log(track->logger, "Unable to allocate %u bytes for reading an IP tracker update message", toalloc + 256);
 		goto trackerover;
 	}
 
 	while (track->haltphase != 2) {
-		if (zmq_recv(track->incoming, buf, toalloc, 0) < 0) {
+		if (zmq_recv(track->incoming, track->inbuf, toalloc, 0) < 0) {
 			if (errno == EINTR || errno == EAGAIN) {
 				continue;
 			}
@@ -539,7 +539,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 		goto trackerover;
 	}
 
-	ptr = buf;
+	ptr = track->inbuf;
 	for (i = 0; i < msg->bodycount; i++) {
 		corsaro_report_single_ip_header_t *iphdr;
 		corsaro_report_msg_tag_t *tag;
@@ -568,7 +568,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
                     maps);
         }
 
-		if (ptr - buf >= toalloc && i < msg->bodycount - 1) {
+		if (ptr - track->inbuf >= toalloc && i < msg->bodycount - 1) {
 			corsaro_log(track->logger, "warning: IP tracker has walked past the end of a receive buffer!");
             corsaro_log(track->logger, "up to IP %d, total tags done: %u",
                     i, tagsdone);
@@ -576,11 +576,9 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 		}
 	}
 
-	if (buf) free(buf);
 	return 0;
 
 trackerover:
-	if (buf) free(buf);
 	return -1;
 }
 

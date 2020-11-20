@@ -639,6 +639,8 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
         pthread_mutex_init(&(conf->iptrackers[i].mutex), NULL);
         conf->iptrackers[i].lastresultts = 0;
 
+        conf->iptrackers[i].inbuf = NULL;
+        conf->iptrackers[i].inbuflen = 0;
         conf->iptrackers[i].prev_maps = NULL;
         conf->iptrackers[i].curr_maps = NULL;
         conf->iptrackers[i].next_maps = NULL;
@@ -735,6 +737,9 @@ void corsaro_report_destroy_self(corsaro_plugin_t *p) {
                 for (j = 0; j < conf->basic.procthreads; j++) {
                     zmq_close(conf->tracker_queues[
                             i * conf->basic.procthreads + j]);
+                }
+                if (conf->iptrackers[i].inbuf) {
+                    free(conf->iptrackers[i].inbuf);
                 }
                 free(conf->iptrackers[i].sourcetrack);
                 libtrace_list_deinit(conf->iptrackers[i].outstanding);

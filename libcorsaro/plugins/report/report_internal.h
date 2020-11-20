@@ -228,6 +228,9 @@ typedef struct corsaro_report_iptracker {
     /** The queue for reading incoming messages from the processing threads */
     void *incoming;
 
+    uint8_t *inbuf;
+    uint32_t inbuflen;
+
     /** The timestamp of the interval that our most recent complete tally
      *  belongs to.
      */

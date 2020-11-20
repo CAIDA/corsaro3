@@ -570,6 +570,7 @@ static int process_tags(corsaro_report_tracker_state_t *track,
 
     int i, ret;
     uint16_t newtags = 0;
+    uint16_t swapport = 0;
 
     /* "Combined" is simply a total across all metrics, i.e. the total
      * number of packets, source IPs etc. Every IP packet should add to
@@ -585,14 +586,18 @@ static int process_tags(corsaro_report_tracker_state_t *track,
     PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_IP_PROTOCOL, tags->protocol,
             METRIC_IPPROTOS_MAX, 0);
 
-    if (allowedmetricclasses == 0 || (allowedmetricclasses &
-            (1UL << CORSARO_METRIC_CLASS_FILTER_CRITERIA))) {
+    if (IS_METRIC_ALLOWED(allowedmetricclasses,
+            CORSARO_METRIC_CLASS_FILTER_CRITERIA)) {
+        uint64_t mask = (1UL << CORSARO_FILTERID_ABNORMAL_PROTOCOL);
+        const uint64_t fbits = tags->filterbits;
+
         for (i = CORSARO_FILTERID_ABNORMAL_PROTOCOL;
                 i < CORSARO_FILTERID_MAX; i++) {
-            if (tags->filterbits & ( 1 << i)) {
+            if (fbits & mask) {
                 PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_FILTER_CRITERIA, i,
                         CORSARO_FILTERID_MAX, 1);
             }
+            mask *= 2;
         }
     }
 
@@ -602,9 +607,8 @@ static int process_tags(corsaro_report_tracker_state_t *track,
          * reduce the number of fields we need to have in our database.
          * Code is meaningless without the context of type anyway.
          */
-        if (allowedmetricclasses == 0 ||
-                ((1UL << CORSARO_METRIC_CLASS_ICMP_TYPECODE) &
-                    allowedmetricclasses)) {
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_ICMP_TYPECODE)) {
             uint16_t typecode = (ntohs(tags->src_port) << 8) +
                     ntohs(tags->dest_port);
 
@@ -616,49 +620,92 @@ static int process_tags(corsaro_report_tracker_state_t *track,
             }
         }
     } else if (tags->protocol == TRACE_IPPROTO_TCP) {
-        if (is_allowed_port(allowedports->tcp_sources, ntohs(tags->src_port))) {
-            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
-                    ntohs(tags->src_port), METRIC_PORT_MAX, 0);
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_TCP_SOURCE_PORT)) {
+            swapport = ntohs(tags->src_port);
+
+            if (is_allowed_port(allowedports->tcp_sources, swapport)) {
+                PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_SOURCE_PORT,
+                        swapport, METRIC_PORT_MAX, 1);
+            }
         }
 
-        if (is_allowed_port(allowedports->tcp_dests, ntohs(tags->dest_port))) {
-            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
-                    ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_TCP_DEST_PORT)) {
+            swapport = ntohs(tags->dest_port);
+
+            if (is_allowed_port(allowedports->tcp_dests, swapport)) {
+                PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_TCP_DEST_PORT,
+                        swapport, METRIC_PORT_MAX, 1);
+            }
         }
     } else if (tags->protocol == TRACE_IPPROTO_UDP) {
-        if (is_allowed_port(allowedports->udp_sources, ntohs(tags->src_port))) {
-            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
-                    ntohs(tags->src_port), METRIC_PORT_MAX, 0);
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_UDP_SOURCE_PORT)) {
+            swapport = ntohs(tags->src_port);
+
+            if (is_allowed_port(allowedports->udp_sources, swapport)) {
+                PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_SOURCE_PORT,
+                        swapport, METRIC_PORT_MAX, 1);
+            }
         }
-        if (is_allowed_port(allowedports->udp_dests, ntohs(tags->dest_port))) {
-            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
-                    ntohs(tags->dest_port), METRIC_PORT_MAX, 0);
+
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_UDP_DEST_PORT)) {
+            swapport = ntohs(tags->dest_port);
+
+            if (is_allowed_port(allowedports->udp_dests, swapport)) {
+                PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_UDP_DEST_PORT,
+                        swapport, METRIC_PORT_MAX, 1);
+            }
         }
     }
 
     if (maxmind_tagged(tags)) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
-                tags->maxmind_continent, 0, 0);
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
-                tags->maxmind_country, 0, 0);
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_MAXMIND_CONTINENT)) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_CONTINENT,
+                    tags->maxmind_continent, 0, 0);
+        }
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_MAXMIND_COUNTRY)) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_MAXMIND_COUNTRY,
+                    tags->maxmind_country, 0, 0);
+        }
     }
 
     if (netacq_tagged(tags)) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
-                tags->netacq_continent, 0, 0);
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
-                tags->netacq_country, 0, 0);
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_REGION,
-                ntohs(tags->netacq_region), 0, 0);
-        for (i = 0; i < MAX_NETACQ_POLYGONS; i++) {
-            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
-                    ntohl(tags->netacq_polygon[i]), 0, 0);
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_NETACQ_CONTINENT)) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_CONTINENT,
+                    tags->netacq_continent, 0, 1);
+        }
+
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_NETACQ_COUNTRY)) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_COUNTRY,
+                    tags->netacq_country, 0, 1);
+        }
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_NETACQ_REGION)) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_REGION,
+                    ntohs(tags->netacq_region), 0, 1);
+        }
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_NETACQ_POLYGON)) {
+            for (i = 0; i < MAX_NETACQ_POLYGONS; i++) {
+                PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_NETACQ_POLYGON,
+                        ntohl(tags->netacq_polygon[i]), 0, 1);
+            }
         }
     }
 
     if (pfx2as_tagged(tags)) {
-        PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_PREFIX_ASN,
-                ntohl(tags->prefixasn), 0, 0);
+        if (IS_METRIC_ALLOWED(allowedmetricclasses,
+                CORSARO_METRIC_CLASS_PREFIX_ASN)) {
+            PROCESS_SINGLE_TAG(CORSARO_METRIC_CLASS_PREFIX_ASN,
+                    ntohl(tags->prefixasn), 0, 0);
+        }
     }
 	return newtags;
 }
