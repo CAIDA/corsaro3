@@ -91,7 +91,7 @@ static inline bool should_count_address(uint32_t ipaddr, uint32_t *tocount,
     if (ipconf->method == REPORT_IPCOUNT_METHOD_SAMPLE) {
         mask = (0xFFFFFFFF << (32 - ipconf->pfxbits));
 
-        if (swapped - mask == sample_index) {
+        if (swapped - (swapped & mask) == sample_index) {
             *tocount = swapped;
             return true;
         }
