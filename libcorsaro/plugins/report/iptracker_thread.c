@@ -48,6 +48,7 @@
  */
 
 #include <libcorsaro_filtering.h>
+#include <math.h>
 
 #include "corsaro_report.h"
 #include "report_internal.h"
@@ -71,6 +72,36 @@ static inline corsaro_report_iptracker_maps_t *create_new_map_set() {
     return maps;
 }
 
+static inline bool should_count_address(uint32_t ipaddr, uint32_t *tocount,
+        corsaro_report_ipcount_conf_t *ipconf, uint32_t sample_index) {
+
+    uint32_t swapped, mask;
+    if (ipconf->method == REPORT_IPCOUNT_METHOD_ALL) {
+        *tocount = ipaddr;
+        return true;
+    }
+
+    swapped = ntohl(ipaddr);
+    if (ipconf->method == REPORT_IPCOUNT_METHOD_PREFIXAGG) {
+        mask = (0xFFFFFFFF << (32 - ipconf->pfxbits));
+        *tocount = (swapped & mask);
+        return true;
+    }
+
+    if (ipconf->method == REPORT_IPCOUNT_METHOD_SAMPLE) {
+        mask = (0xFFFFFFFF << (32 - ipconf->pfxbits));
+
+        if (swapped - mask == sample_index) {
+            *tocount = swapped;
+            return true;
+        }
+    }
+
+    *tocount = 0;
+    return false;
+
+}
+
 /** Updates the tallies for a single observed IP + metric combination.
  *
  *  @param track        The state for this IP tracker thread
@@ -90,6 +121,7 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
     corsaro_metric_ip_hash_t *m;
     uint64_t metricid = tagptr->tagid;
     uint64_t metricclass = (metricid >> 32);
+    uint32_t tocount = 0;
     int ret;
     PWord_t pval;
 
@@ -173,12 +205,19 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         m->packets += tagptr->packets;
         m->bytes += tagptr->bytes;
 
-        J1S(ret, m->srcips, (Word_t)ipaddr);
-        if (asn != 0 && ret == 1) {
-            J1S(ret, m->srcasns, (Word_t)asn);
+        if (should_count_address(ipaddr, &tocount,
+                &(track->conf->src_ipcount_conf), track->srcip_sample_index)) {
+
+            J1S(ret, m->srcips, (Word_t)tocount);
+            if (asn != 0 && ret == 1) {
+                J1S(ret, m->srcasns, (Word_t)asn);
+            }
         }
     } else {
-        J1S(ret, m->destips, (Word_t)ipaddr);
+        if (should_count_address(ipaddr, &tocount,
+                &(track->conf->dst_ipcount_conf), track->dstip_sample_index)) {
+            J1S(ret, m->destips, (Word_t)ipaddr);
+        }
     }
 }
 
@@ -448,6 +487,18 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
     if (msg->msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
         track->prev_maps = track->curr_maps;
         track->lastresultts = complete;
+        track->srcip_sample_index ++;
+
+        if (track->srcip_sample_index >=
+                    pow(2, track->conf->src_ipcount_conf.pfxbits)) {
+            track->srcip_sample_index = 0;
+        }
+
+        track->dstip_sample_index ++;
+        if (track->dstip_sample_index >=
+                    pow(2, track->conf->dst_ipcount_conf.pfxbits)) {
+            track->dstip_sample_index = 0;
+        }
     } else {
         free_map_set(track->curr_maps);
     }

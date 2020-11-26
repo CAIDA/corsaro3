@@ -94,6 +94,7 @@
  */
 #define MAX_ASSOCIATED_METRICS (8)
 
+typedef struct corsaro_report_config corsaro_report_config_t;
 /* Note: these pre-defined alpha-2 codes are used to bootstrap the
  * results data so that we can reliably report 0 values for countries
  * that do not appear in a given interval, even if we've never seen that
@@ -123,6 +124,7 @@ typedef enum {
     CORSARO_METRIC_CLASS_NETACQ_REGION,
     CORSARO_METRIC_CLASS_NETACQ_POLYGON,
     CORSARO_METRIC_CLASS_FILTER_CRITERIA,
+    CORSARO_METRIC_CLASS_LAST,      // always have at end of enum
 } corsaro_report_metric_class_t;
 
 /** Types of messages that can be sent to the IP tracker threads */
@@ -225,11 +227,16 @@ typedef struct corsaro_report_savedtags {
 /** Structure to store state for an IP tracker thread */
 typedef struct corsaro_report_iptracker {
 
+    corsaro_report_config_t *conf;
+
     /** The queue for reading incoming messages from the processing threads */
     void *incoming;
 
     uint8_t *inbuf;
     uint32_t inbuflen;
+
+    uint32_t srcip_sample_index;
+    uint32_t dstip_sample_index;
 
     /** The timestamp of the interval that our most recent complete tally
      *  belongs to.
@@ -299,8 +306,21 @@ typedef enum {
     REPORT_GEOMODE_LITE
 } corsaro_report_geomode_t;
 
+typedef enum {
+    REPORT_IPCOUNT_METHOD_ALL,
+    REPORT_IPCOUNT_METHOD_SAMPLE,
+    REPORT_IPCOUNT_METHOD_PREFIXAGG
+} corsaro_report_ipcount_method_t;
+
+typedef struct corsaro_report_ipcount_conf {
+    corsaro_report_ipcount_method_t method;
+    uint8_t pfxbits;
+} corsaro_report_ipcount_conf_t;
+
+typedef struct corsaro_report_config corsaro_report_config_t;
+
 /** Structure describing configuration specific to the report plugin */
-typedef struct corsaro_report_config {
+struct corsaro_report_config {
 
     /** Standard options, e.g. template */
     corsaro_plugin_proc_options_t basic;
@@ -354,7 +374,15 @@ typedef struct corsaro_report_config {
     /** TCP and UDP ports for which we are going to track per-port statistics.
      */
     allowed_ports_t allowedports;
-} corsaro_report_config_t;
+
+    /** Configuration for how unique "IP"s are counted by this plugin
+     *
+     *  XXX consider whether we want to allow different config for each
+     *  metric (if yes, we may want to redo our whole config process...)
+     */
+    corsaro_report_ipcount_conf_t src_ipcount_conf;
+    corsaro_report_ipcount_conf_t dst_ipcount_conf;
+};
 
 
 

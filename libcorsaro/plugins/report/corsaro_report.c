@@ -164,6 +164,53 @@ static inline unsigned long int strtoport(char *ptr, bool capmax,
     return first;
 }
 
+static void parse_ip_counting(corsaro_report_ipcount_conf_t *ipconf,
+        yaml_document_t *doc, yaml_node_t *yamlconf, corsaro_logger_t *logger) {
+
+    yaml_node_t *key, *value;
+    yaml_node_pair_t *pair;
+
+    for (pair = yamlconf->data.mapping.pairs.start;
+            pair < yamlconf->data.mapping.pairs.top; pair ++) {
+
+        char *val;
+        key = yaml_document_get_node(doc, pair->key);
+        value = yaml_document_get_node(doc, pair->value);
+        val = (char *)value->data.scalar.value;
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "method") == 0) {
+
+            if (strcasecmp(val, "sample") == 0) {
+                ipconf->method = REPORT_IPCOUNT_METHOD_SAMPLE;
+            } else if (strcasecmp(val, "prefixagg") == 0) {
+                ipconf->method = REPORT_IPCOUNT_METHOD_PREFIXAGG;
+            } else if (strcasecmp(val, "none") == 0) {
+                ipconf->method = REPORT_IPCOUNT_METHOD_ALL;
+            } else {
+                corsaro_log(logger,
+                        "Invalid method for counting unique IPs: '%s'",
+                        val);
+                corsaro_log(logger, "Ignoring...");
+            }
+        }
+            uint64_t optval;
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
+                && strcmp((char *)key->data.scalar.value, "subnetmask") == 0) {
+            uint32_t optval = strtoul((char *)val, NULL, 0);
+            if (optval > 32) {
+                ipconf->pfxbits = 32;
+            } else if (optval == 0) {
+                ipconf->pfxbits = 32;
+            } else {
+                ipconf->pfxbits = optval;
+            }
+        }
+    }
+
+}
+
 static void parse_port_ranges(uint8_t *port_array, yaml_document_t *doc,
         yaml_node_t *rangelist, bool *seen_flag, corsaro_logger_t *logger) {
 
@@ -337,6 +384,11 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
     /* zero is a special value to represent 'all' metrics */
     conf->allowedmetricclasses = 0;
     conf->geomode = REPORT_GEOMODE_FULL;
+    conf->src_ipcount_conf.method = REPORT_IPCOUNT_METHOD_ALL;
+    conf->src_ipcount_conf.pfxbits = 32;
+    conf->dst_ipcount_conf.method = REPORT_IPCOUNT_METHOD_ALL;
+    conf->dst_ipcount_conf.pfxbits = 32;
+
 
     if (options->type != YAML_MAPPING_NODE) {
         corsaro_log(p->logger,
@@ -394,6 +446,20 @@ int corsaro_report_parse_config(corsaro_plugin_t *p, yaml_document_t *doc,
             parse_port_ranges(conf->allowedports.udp_dests, doc, value,
                     &set_udp_dest_ports, p->logger);
 
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_MAPPING_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                            "source_ip_counting") == 0) {
+
+            parse_ip_counting(&(conf->src_ipcount_conf), doc, value, p->logger);
+        }
+
+        if (key->type == YAML_SCALAR_NODE && value->type == YAML_MAPPING_NODE
+                    && strcmp((char *)key->data.scalar.value,
+                            "dest_ip_counting") == 0) {
+
+            parse_ip_counting(&(conf->dst_ipcount_conf), doc, value, p->logger);
         }
 
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SEQUENCE_NODE
@@ -609,6 +675,32 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
 
     }
 
+    if (conf->src_ipcount_conf.method == REPORT_IPCOUNT_METHOD_ALL) {
+        corsaro_log(p->logger,
+                "report plugin: counting all unique source IPs");
+    } else if (conf->src_ipcount_conf.method == REPORT_IPCOUNT_METHOD_PREFIXAGG) {
+        corsaro_log(p->logger,
+                "report plugin: aggregating source IPs into /%us",
+                conf->src_ipcount_conf.pfxbits);
+    } else if (conf->src_ipcount_conf.method == REPORT_IPCOUNT_METHOD_SAMPLE) {
+        corsaro_log(p->logger,
+                "report plugin: counting sampled source IPs (1 per /%u)",
+                conf->src_ipcount_conf.pfxbits);
+    }
+
+    if (conf->dst_ipcount_conf.method == REPORT_IPCOUNT_METHOD_ALL) {
+        corsaro_log(p->logger,
+                "report plugin: counting all unique dest IPs");
+    } else if (conf->dst_ipcount_conf.method == REPORT_IPCOUNT_METHOD_PREFIXAGG) {
+        corsaro_log(p->logger,
+                "report plugin: aggregating dest IPs into /%us",
+                conf->dst_ipcount_conf.pfxbits);
+    } else if (conf->dst_ipcount_conf.method == REPORT_IPCOUNT_METHOD_SAMPLE) {
+        corsaro_log(p->logger,
+                "report plugin: counting sampled dest IPs (1 per /%u)",
+                conf->dst_ipcount_conf.pfxbits);
+    }
+
     corsaro_log(p->logger,
             "report plugin: starting %d IP tracker threads",
             conf->tracker_count);
@@ -638,7 +730,9 @@ int corsaro_report_finalise_config(corsaro_plugin_t *p,
 
         pthread_mutex_init(&(conf->iptrackers[i].mutex), NULL);
         conf->iptrackers[i].lastresultts = 0;
-
+        conf->iptrackers[i].conf = conf;
+        conf->iptrackers[i].srcip_sample_index = 0;
+        conf->iptrackers[i].dstip_sample_index = 0;
         conf->iptrackers[i].inbuf = NULL;
         conf->iptrackers[i].inbuflen = 0;
         conf->iptrackers[i].prev_maps = NULL;
