@@ -487,19 +487,17 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
     if (msg->msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
         track->prev_maps = track->curr_maps;
         track->lastresultts = complete;
-        if (msg->sender == 0) {
-            track->srcip_sample_index ++;
+        track->srcip_sample_index ++;
 
-            if (track->srcip_sample_index >=
-                        pow(2, track->conf->src_ipcount_conf.pfxbits)) {
-                track->srcip_sample_index = 0;
-            }
+        if (track->srcip_sample_index >=
+                    pow(2, track->conf->src_ipcount_conf.pfxbits)) {
+            track->srcip_sample_index = 0;
+        }
 
-            track->dstip_sample_index ++;
-            if (track->dstip_sample_index >=
-                        pow(2, track->conf->dst_ipcount_conf.pfxbits)) {
-                track->dstip_sample_index = 0;
-            }
+        track->dstip_sample_index ++;
+        if (track->dstip_sample_index >=
+                    pow(2, track->conf->dst_ipcount_conf.pfxbits)) {
+            track->dstip_sample_index = 0;
         }
     } else {
         free_map_set(track->curr_maps);
