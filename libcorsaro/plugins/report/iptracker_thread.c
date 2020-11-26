@@ -490,13 +490,13 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
         track->srcip_sample_index ++;
 
         if (track->srcip_sample_index >=
-                    pow(2, track->conf->src_ipcount_conf.pfxbits)) {
+                    pow(2, (32 - track->conf->src_ipcount_conf.pfxbits))) {
             track->srcip_sample_index = 0;
         }
 
         track->dstip_sample_index ++;
         if (track->dstip_sample_index >=
-                    pow(2, track->conf->dst_ipcount_conf.pfxbits)) {
+                    pow(2, (32 - track->conf->dst_ipcount_conf.pfxbits))) {
             track->dstip_sample_index = 0;
         }
     } else {
