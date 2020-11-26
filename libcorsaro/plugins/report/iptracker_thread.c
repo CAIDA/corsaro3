@@ -216,7 +216,7 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
     } else {
         if (should_count_address(ipaddr, &tocount,
                 &(track->conf->dst_ipcount_conf), track->dstip_sample_index)) {
-            J1S(ret, m->destips, (Word_t)ipaddr);
+            J1S(ret, m->destips, (Word_t)tocount);
         }
     }
 }
