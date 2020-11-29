@@ -729,7 +729,7 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
         corsaro_report_state_t *state, uint32_t addr, uint8_t issrc,
         uint16_t iplen, corsaro_packet_tags_t *tags, corsaro_logger_t *logger) {
 
-	int trackerhash;
+	uint32_t trackerhash;
 	int ipoffset;
     uint16_t newtags;
     corsaro_report_msg_tag_t *tag;
@@ -738,8 +738,21 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
 
 	/* Hash IPs to IP tracker threads based on the suffix octet of the IP
      * address -- should be reasonably balanced + easy to calculate.
+     *
+     * Note: if we're doing prefix aggregation, we'll need to shuffle
+     * the address a bit to make sure all addresses for a given aggregated
+     * prefix end up at the same tracker thread.
      */
+
+    if (conf->src_ipcount_conf.method == REPORT_IPCOUNT_METHOD_PREFIXAGG &&
+            issrc) {
+        addr = (addr << (32 - conf->src_ipcount_conf.pfxbits));
+    } else if (conf->dst_ipcount_conf.method == REPORT_IPCOUNT_METHOD_PREFIXAGG
+             && !issrc) {
+        addr = (addr << (32 - conf->dst_ipcount_conf.pfxbits));
+    }
     trackerhash = (addr >> 24) % conf->tracker_count;
+
 	track = &(state->totracker[trackerhash]);
 
     if (TRACKER_BUF_REM(track) < sizeof(corsaro_report_single_ip_header_t)) {

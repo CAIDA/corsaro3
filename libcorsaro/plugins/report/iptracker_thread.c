@@ -81,14 +81,14 @@ static inline bool should_count_address(uint32_t ipaddr, uint32_t *tocount,
         return true;
     }
 
-    swapped = ntohl(ipaddr);
+    /* The processing thread has already given us an aggregated address */
     if (ipconf->method == REPORT_IPCOUNT_METHOD_PREFIXAGG) {
-        mask = (0xFFFFFFFF << (32 - ipconf->pfxbits));
-        *tocount = (swapped & mask);
+        *tocount = ipaddr;
         return true;
     }
 
     if (ipconf->method == REPORT_IPCOUNT_METHOD_SAMPLE) {
+        swapped = ntohl(ipaddr);
         mask = (0xFFFFFFFF << (32 - ipconf->pfxbits));
 
         if (swapped - (swapped & mask) == sample_index) {
@@ -229,6 +229,7 @@ static void update_knownip_metric_saved(corsaro_report_iptracker_t *track,
     corsaro_metric_ip_hash_t *m;
     int ret;
     PWord_t pval;
+    uint32_t tocount = 0;
 
     assert(saved->next_saved > 0);
     metricid = saved->associated_metricids[saved->next_saved - 1];
@@ -256,11 +257,17 @@ static void update_knownip_metric_saved(corsaro_report_iptracker_t *track,
     m->bytes += saved->bytes;
 
     if (saved->destip != 0) {
-        J1S(ret, m->destips, (Word_t)saved->destip);
+        if (should_count_address(saved->destip, &tocount,
+                &(track->conf->dst_ipcount_conf), track->dstip_sample_index)) {
+            J1S(ret, m->destips, (Word_t)tocount);
+        }
     } else {
-        J1S(ret, m->srcips, (Word_t)saved->srcip);
-        if (saved->srcasn != 0) {
-            J1S(ret, m->srcasns, (Word_t)saved->srcasn);
+        if (should_count_address(saved->srcip, &tocount,
+                &(track->conf->src_ipcount_conf), track->srcip_sample_index)) {
+            J1S(ret, m->srcips, (Word_t)saved->srcip);
+            if (saved->srcasn != 0) {
+                J1S(ret, m->srcasns, (Word_t)saved->srcasn);
+            }
         }
     }
 
