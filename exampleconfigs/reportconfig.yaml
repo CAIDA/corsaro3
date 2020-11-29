@@ -130,3 +130,16 @@ plugins:
          - netacq
          - pfx2asn
          - maxmind
+
+      # When counting destination IP addresses, only count unique /28s to
+      # reduce the workload for the plugin.
+      dest_ip_counting:
+        method: "prefixagg"
+        subnetmask: 28
+
+      # You can also modify the counting behaviour for source IP addresses.
+      # This config uses the sampling method to only increment the counter
+      # for one of the addresses in each observed /30 prefix.
+      # src_ip_counting:
+      #   method: "sample"
+      #   subnetmask: 30

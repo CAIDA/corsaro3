@@ -48,6 +48,7 @@
  */
 
 #include <libcorsaro_filtering.h>
+#include <math.h>
 
 #include "corsaro_report.h"
 #include "report_internal.h"
@@ -71,6 +72,36 @@ static inline corsaro_report_iptracker_maps_t *create_new_map_set() {
     return maps;
 }
 
+static inline bool should_count_address(uint32_t ipaddr, uint32_t *tocount,
+        corsaro_report_ipcount_conf_t *ipconf, uint32_t sample_index) {
+
+    uint32_t swapped, mask;
+    if (ipconf->method == REPORT_IPCOUNT_METHOD_ALL) {
+        *tocount = ipaddr;
+        return true;
+    }
+
+    /* The processing thread has already given us an aggregated address */
+    if (ipconf->method == REPORT_IPCOUNT_METHOD_PREFIXAGG) {
+        *tocount = ipaddr;
+        return true;
+    }
+
+    if (ipconf->method == REPORT_IPCOUNT_METHOD_SAMPLE) {
+        swapped = ntohl(ipaddr);
+        mask = (0xFFFFFFFF << (32 - ipconf->pfxbits));
+
+        if (swapped - (swapped & mask) == sample_index) {
+            *tocount = swapped;
+            return true;
+        }
+    }
+
+    *tocount = 0;
+    return false;
+
+}
+
 /** Updates the tallies for a single observed IP + metric combination.
  *
  *  @param track        The state for this IP tracker thread
@@ -90,6 +121,7 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
     corsaro_metric_ip_hash_t *m;
     uint64_t metricid = tagptr->tagid;
     uint64_t metricclass = (metricid >> 32);
+    uint32_t tocount = 0;
     int ret;
     PWord_t pval;
 
@@ -173,12 +205,19 @@ static void update_knownip_metric(corsaro_report_iptracker_t *track,
         m->packets += tagptr->packets;
         m->bytes += tagptr->bytes;
 
-        J1S(ret, m->srcips, (Word_t)ipaddr);
-        if (asn != 0 && ret == 1) {
-            J1S(ret, m->srcasns, (Word_t)asn);
+        if (should_count_address(ipaddr, &tocount,
+                &(track->conf->src_ipcount_conf), track->srcip_sample_index)) {
+
+            J1S(ret, m->srcips, (Word_t)tocount);
+            if (asn != 0 && ret == 1) {
+                J1S(ret, m->srcasns, (Word_t)asn);
+            }
         }
     } else {
-        J1S(ret, m->destips, (Word_t)ipaddr);
+        if (should_count_address(ipaddr, &tocount,
+                &(track->conf->dst_ipcount_conf), track->dstip_sample_index)) {
+            J1S(ret, m->destips, (Word_t)tocount);
+        }
     }
 }
 
@@ -190,6 +229,7 @@ static void update_knownip_metric_saved(corsaro_report_iptracker_t *track,
     corsaro_metric_ip_hash_t *m;
     int ret;
     PWord_t pval;
+    uint32_t tocount = 0;
 
     assert(saved->next_saved > 0);
     metricid = saved->associated_metricids[saved->next_saved - 1];
@@ -217,11 +257,17 @@ static void update_knownip_metric_saved(corsaro_report_iptracker_t *track,
     m->bytes += saved->bytes;
 
     if (saved->destip != 0) {
-        J1S(ret, m->destips, (Word_t)saved->destip);
+        if (should_count_address(saved->destip, &tocount,
+                &(track->conf->dst_ipcount_conf), track->dstip_sample_index)) {
+            J1S(ret, m->destips, (Word_t)tocount);
+        }
     } else {
-        J1S(ret, m->srcips, (Word_t)saved->srcip);
-        if (saved->srcasn != 0) {
-            J1S(ret, m->srcasns, (Word_t)saved->srcasn);
+        if (should_count_address(saved->srcip, &tocount,
+                &(track->conf->src_ipcount_conf), track->srcip_sample_index)) {
+            J1S(ret, m->srcips, (Word_t)saved->srcip);
+            if (saved->srcasn != 0) {
+                J1S(ret, m->srcasns, (Word_t)saved->srcasn);
+            }
         }
     }
 
@@ -448,6 +494,18 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
     if (msg->msgtype == CORSARO_IP_MESSAGE_INTERVAL) {
         track->prev_maps = track->curr_maps;
         track->lastresultts = complete;
+        track->srcip_sample_index ++;
+
+        if (track->srcip_sample_index >=
+                    pow(2, (32 - track->conf->src_ipcount_conf.pfxbits))) {
+            track->srcip_sample_index = 0;
+        }
+
+        track->dstip_sample_index ++;
+        if (track->dstip_sample_index >=
+                    pow(2, (32 - track->conf->dst_ipcount_conf.pfxbits))) {
+            track->dstip_sample_index = 0;
+        }
     } else {
         free_map_set(track->curr_maps);
     }
@@ -476,12 +534,10 @@ trackerover:
 }
 
 #define METRIC_ALLOWED(met, allowflag) \
-    if (track->allowedmetricclasses == 0 && (met != CORSARO_METRIC_CLASS_FILTER_CRITERIA)) { \
-        allowflag = 1; \
-    } else if (track->allowedmetricclasses & (1UL << met)) { \
-        allowflag = 1; \
-    } else { \
+    if (track->allowedmetricclasses == 0 && (met == CORSARO_METRIC_CLASS_FILTER_CRITERIA)) { \
         allowflag = 0; \
+    } else { \
+        allowflag = 1; \
     }
 
 /** Processes and acts upon an update message that has been received
@@ -495,15 +551,13 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
         corsaro_report_iptracker_maps_t *maps) {
 
 
-	char *buf, *ptr;
+	uint8_t *ptr;
 	int more, i, j;
     size_t moresize;
 	uint32_t toalloc = 0;
     uint32_t tagsdone = 0;
     uint64_t metricid;
     uint8_t allowed;
-
-	buf = NULL;
 
 	ZEROMQ_CHECK_MORE
 	if (more == 0) {
@@ -514,14 +568,18 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 	toalloc = (msg->tagcount * sizeof(corsaro_report_msg_tag_t)) +
 			(msg->bodycount * sizeof(corsaro_report_single_ip_header_t));
 
-	buf = calloc(toalloc, 1);
-	if (!buf) {
-		corsaro_log(track->logger, "Unable to allocate %u bytes for reading an IP tracker update message", toalloc);
+    if (track->inbuf == NULL || track->inbuflen < toalloc) {
+        track->inbuf = realloc(track->inbuf, toalloc + 256);
+        track->inbuflen = toalloc + 256;
+    }
+
+	if (!track->inbuf) {
+		corsaro_log(track->logger, "Unable to allocate %u bytes for reading an IP tracker update message", toalloc + 256);
 		goto trackerover;
 	}
 
 	while (track->haltphase != 2) {
-		if (zmq_recv(track->incoming, buf, toalloc, 0) < 0) {
+		if (zmq_recv(track->incoming, track->inbuf, toalloc, 0) < 0) {
 			if (errno == EINTR || errno == EAGAIN) {
 				continue;
 			}
@@ -539,7 +597,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 		goto trackerover;
 	}
 
-	ptr = buf;
+	ptr = track->inbuf;
 	for (i = 0; i < msg->bodycount; i++) {
 		corsaro_report_single_ip_header_t *iphdr;
 		corsaro_report_msg_tag_t *tag;
@@ -568,7 +626,7 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
                     maps);
         }
 
-		if (ptr - buf >= toalloc && i < msg->bodycount - 1) {
+		if (ptr - track->inbuf >= toalloc && i < msg->bodycount - 1) {
 			corsaro_log(track->logger, "warning: IP tracker has walked past the end of a receive buffer!");
             corsaro_log(track->logger, "up to IP %d, total tags done: %u",
                     i, tagsdone);
@@ -576,11 +634,9 @@ static int process_iptracker_update_message(corsaro_report_iptracker_t *track,
 		}
 	}
 
-	if (buf) free(buf);
 	return 0;
 
 trackerover:
-	if (buf) free(buf);
 	return -1;
 }
 

@@ -387,6 +387,33 @@ The report plugin supports the following configuration options:
                           a particular port metric, then results are produced
                           for all 65536 possible port numbers for that metric.
 
+    src_ip_counting       These options can be used to replace the unique IP
+    dest_ip_counting      address counts with an approximation that is more
+                          efficient to calculate and still reasonably
+                          representative of the overall range of IPs being
+                          observed.
+
+                          These options are expressed as a YAML map with
+                          two sub-parameters: "method" and "subnetmask".
+
+                          The method can be one of the following values:
+                            * prefixagg -- aggregates addresses into prefixes
+                                           and counts the unique prefixes
+                            * sample -- selectively counts only specific
+                                        addresses within a given prefix. The
+                                        sampled address rotates every interval
+                                        within the prefix, so the whole prefix
+                                        is eventually covered over a time
+                                        period.
+                            * none -- counts all unique addresses.
+                          Default method is "none".
+
+                          The "subnetmask" option defines the size of the
+                          prefix to use when aggregating. For example, if set
+                          to 28, the "prefixagg" method will count unique
+                          /28s and the "sample" method will sample one address
+                          per /28 per interval. This option has no effect if
+                          the "none" method is used.
 
 corsarotrace Tag Providers
 ==========================
