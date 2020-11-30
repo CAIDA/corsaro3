@@ -120,19 +120,20 @@ static inline int _apply_no_tcp_options_filter(corsaro_logger_t *logger,
 static inline int _apply_ttl200_nonspoofed_filter(corsaro_logger_t *logger,
         libtrace_ip_t *ip, libtrace_tcp_t *tcp) {
 
+    int ret;
 
     /* Must be TTL >= 200 and NOT a masscan probe (i.e. can't have a
      * TCP window of 1024 and no TCP options)
      */
-    if (!_apply_ttl200_filter(logger, ip)) {
-        return 0;
+    if ((ret = _apply_ttl200_filter(logger, ip)) <= 0) {
+        return ret;
     }
 
-    if (!_apply_tcpwin_1024_filter(logger, tcp)) {
+    if (_apply_tcpwin_1024_filter(logger, tcp) <= 0) {
         return 1;
     }
 
-    if (!_apply_no_tcp_options_filter(logger, tcp)) {
+    if (_apply_no_tcp_options_filter(logger, tcp) <= 0) {
         return 1;
     }
 
