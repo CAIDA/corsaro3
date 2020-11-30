@@ -192,6 +192,9 @@ typedef enum {
 
     CORSARO_FILTERID_NOTIP,
 
+    /** Matches if the packet has a TTL >= 200 and it is NOT a masscan TCP
+     *  packet (so is more likely to be spoofed?) */
+    CORSARO_FILTERID_TTL_200_NONSPOOFED,
 
     /* XXX PLEASE ADD ALL FUTURE FILTERS HERE */
 
