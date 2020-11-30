@@ -3,6 +3,7 @@ corsaro (3.2.11) unstable; urgency=medium
   * Improve performance of report plugin
   * Add option to limit TCP and UDP port time series to specific ranges
   * Add option to skip generating geo-location time series for regions
+  * Add option to aggregate source and destination IPs when counting
   * Do not report useless uniq_src_asn counter for each ASN
 
  -- Shane Alcock <software@caida.org>  Thu, 19 Nov 2020 14:26:12 -0800
