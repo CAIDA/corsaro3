@@ -117,6 +117,29 @@ static inline int _apply_no_tcp_options_filter(corsaro_logger_t *logger,
     return 0;
 }
 
+static inline int _apply_ttl200_nonspoofed_filter(corsaro_logger_t *logger,
+        libtrace_ip_t *ip, libtrace_tcp_t *tcp) {
+
+    int ret;
+
+    /* Must be TTL >= 200 and NOT a masscan probe (i.e. can't have a
+     * TCP window of 1024 and no TCP options)
+     */
+    if ((ret = _apply_ttl200_filter(logger, ip)) <= 0) {
+        return ret;
+    }
+
+    if (_apply_tcpwin_1024_filter(logger, tcp) <= 0) {
+        return 1;
+    }
+
+    if (_apply_no_tcp_options_filter(logger, tcp) <= 0) {
+        return 1;
+    }
+
+    return 0;
+}
+
 static inline int _apply_fragment_filter(corsaro_logger_t *logger,
         libtrace_ip_t *ip) {
 
@@ -796,7 +819,8 @@ static int _apply_spoofing_filter(corsaro_logger_t *logger,
         return 1;
     }
 
-    if (_apply_ttl200_filter(logger, fparams->ip) > 0) {
+    if (_apply_ttl200_nonspoofed_filter(logger, fparams->ip,
+            fparams->tcp) > 0) {
         return 1;
     }
 
@@ -835,6 +859,10 @@ static int _apply_erratic_filter(corsaro_logger_t *logger,
 
     /* All spoofed packets are automatically erratic */
     if (spoofedstateunknown && _apply_spoofing_filter(logger, fparams) > 0) {
+        return 1;
+    }
+
+    if (_apply_ttl200_filter(logger, fparams->ip) > 0) {
         return 1;
     }
 
@@ -948,6 +976,13 @@ int corsaro_apply_ttl200_filter(corsaro_logger_t *logger,
 
     PREPROCESS_PACKET
     return _apply_ttl200_filter(logger, fparams.ip);
+}
+
+int corsaro_apply_ttl200_nonspoofed_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet) {
+
+    PREPROCESS_PACKET
+    return _apply_ttl200_nonspoofed_filter(logger, fparams.ip, fparams.tcp);
 }
 
 int corsaro_apply_no_tcp_options_filter(corsaro_logger_t *logger,
@@ -1121,6 +1156,8 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
             return "abnormal-protocol";
         case CORSARO_FILTERID_TTL_200:
             return "ttl-200";
+        case CORSARO_FILTERID_TTL_200_NONSPOOFED:
+            return "ttl-200-nonspoofed";
         case CORSARO_FILTERID_FRAGMENT:
             return "fragmented";
         case CORSARO_FILTERID_LAST_SRC_IP_0:
@@ -1234,6 +1271,8 @@ int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
      * This will make the code uglier, but also hopefully a bit faster */
     torun[CORSARO_FILTERID_TTL_200].result =
             _apply_ttl200_filter(logger, fparams.ip);
+    torun[CORSARO_FILTERID_TTL_200_NONSPOOFED].result =
+            _apply_ttl200_nonspoofed_filter(logger, fparams.ip, fparams.tcp);
     torun[CORSARO_FILTERID_NO_TCP_OPTIONS].result =
              _apply_no_tcp_options_filter(logger, fparams.tcp);
     torun[CORSARO_FILTERID_TCPWIN_1024].result =
@@ -1269,7 +1308,7 @@ int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
             torun[CORSARO_FILTERID_LAST_SRC_IP_0].result == 1 ||
             torun[CORSARO_FILTERID_LAST_SRC_IP_255].result == 1 ||
             torun[CORSARO_FILTERID_SAME_SRC_DEST_IP].result == 1 ||
-            torun[CORSARO_FILTERID_TTL_200].result == 1 ||
+            torun[CORSARO_FILTERID_TTL_200_NONSPOOFED].result == 1 ||
             torun[CORSARO_FILTERID_UDP_PORT_0].result == 1 ||
             torun[CORSARO_FILTERID_TCP_PORT_0].result == 1) {
 
@@ -1324,6 +1363,7 @@ int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
             torun[CORSARO_FILTERID_TCP_PORT_23].result == 1 ||
             torun[CORSARO_FILTERID_TCP_PORT_80].result == 1 ||
             torun[CORSARO_FILTERID_TCP_PORT_5000].result == 1 ||
+            torun[CORSARO_FILTERID_TTL_200].result == 1 ||
             torun[CORSARO_FILTERID_DNS_RESP_NONSTANDARD].result == 1 ||
             torun[CORSARO_FILTERID_NETBIOS_QUERY_NAME].result == 1)) {
 
@@ -1370,6 +1410,10 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
                 break;
             case CORSARO_FILTERID_TTL_200:
                 torun[i].result =_apply_ttl200_filter(logger, fparams.ip);
+                break;
+            case CORSARO_FILTERID_TTL_200_NONSPOOFED:
+                torun[i].result =_apply_ttl200_nonspoofed_filter(logger,
+                        fparams.ip, fparams.tcp);
                 break;
             case CORSARO_FILTERID_NO_TCP_OPTIONS:
                 torun[i].result = _apply_no_tcp_options_filter(logger,
@@ -1472,6 +1516,9 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
             return _apply_abnormal_protocol_filter(logger, &fparams);
         case CORSARO_FILTERID_TTL_200:
             return _apply_ttl200_filter(logger, fparams.ip);
+        case CORSARO_FILTERID_TTL_200_NONSPOOFED:
+            return _apply_ttl200_nonspoofed_filter(logger, fparams.ip,
+                    fparams.tcp);
         case CORSARO_FILTERID_FRAGMENT:
             return _apply_fragment_filter(logger, fparams.ip);
         case CORSARO_FILTERID_LAST_SRC_IP_0:
