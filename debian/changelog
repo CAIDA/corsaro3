@@ -5,8 +5,10 @@ corsaro (3.2.11) unstable; urgency=medium
   * Add option to skip generating geo-location time series for regions
   * Add option to aggregate source and destination IPs when counting
   * Do not report useless uniq_src_asn counter for each ASN
+  * Masscan traffic is no longer classified as spoofed, but remains
+    as erratic
 
- -- Shane Alcock <software@caida.org>  Thu, 19 Nov 2020 14:26:12 -0800
+ -- Shane Alcock <software@caida.org>  Wed, 02 Dec 2020 14:26:12 -0800
 
 corsaro (3.2.10) unstable; urgency=medium
 
