@@ -732,7 +732,6 @@ static inline int update_metrics_for_address(corsaro_report_config_t *conf,
 	uint32_t trackerhash;
 	int ipoffset;
     uint16_t newtags;
-    corsaro_report_msg_tag_t *tag;
     corsaro_report_single_ip_header_t *singleip;
 	corsaro_report_tracker_state_t *track;
 

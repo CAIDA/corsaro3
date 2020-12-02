@@ -480,7 +480,7 @@ static int write_all_metrics_avro(corsaro_logger_t *logger,
         corsaro_avro_writer_t *writer, Pvoid_t *resultmap,
         corsaro_report_merge_state_t *m, uint32_t subtreemask) {
 
-    corsaro_report_result_t *r, *tmpres;
+    corsaro_report_result_t *r;
     int writeret = 0;
     int stopwriting = 0;
     int haderror = 0;
@@ -740,8 +740,6 @@ static int initialise_results(corsaro_plugin_t *p, Pvoid_t *results,
     Word_t *pval;
     corsaro_report_result_t *r;
     corsaro_report_config_t *conf;
-    int mm_country_count;
-    const char **mm_country_list;
 
     conf = (corsaro_report_config_t *)(p->config);
 
@@ -1136,8 +1134,6 @@ static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
     char *buffer;
     int buflen;
     int firstpass = 1;
-    int iserr = 0;
-    uint32_t tocome = 0;
     int more;
     size_t more_size;
 
@@ -1167,7 +1163,6 @@ static int update_ipmeta_labels(corsaro_report_merge_state_t *state,
             reply = (corsaro_tagger_control_reply_t *)buffer;
 
             state->last_label_update = ntohl(reply->ipmeta_version);
-            tocome = ntohl(reply->label_count);
             firstpass = 0;
 
             buffer += sizeof(corsaro_tagger_control_reply_t);

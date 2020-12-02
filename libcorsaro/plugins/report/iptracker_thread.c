@@ -730,7 +730,6 @@ void *start_iptracker(void *tdata) {
         }
     }
 
-trackerover:
     /* Thread is ending, tidy up everything */
     free_map_set(track->curr_maps);
     free_map_set(track->next_maps);

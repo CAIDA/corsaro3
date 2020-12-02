@@ -58,6 +58,7 @@ int corsaro_null_halt_processing(corsaro_plugin_t *p, void *local) {
         free(state);
     }
 
+    return 0;
 }
 
 char *corsaro_null_derive_output_name(corsaro_plugin_t *p, void *local,
@@ -72,6 +73,8 @@ int corsaro_null_start_interval(corsaro_plugin_t *p, void *local,
 
     uint64_t *state = (uint64_t *)local;
     *state = 0;
+
+    return 0;
 }
 
 void *corsaro_null_end_interval(corsaro_plugin_t *p, void *local,
