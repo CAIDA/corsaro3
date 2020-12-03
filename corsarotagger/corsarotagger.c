@@ -186,7 +186,6 @@ static void *init_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
 static void halt_trace_processing(libtrace_t *trace, libtrace_thread_t *t,
         void *global, void *local) {
 
-    corsaro_tagger_global_t *glob = (corsaro_tagger_global_t *)global;
     corsaro_packet_local_t *tls = (corsaro_packet_local_t *)local;
 
     if (tls->buf->used > 0) {
@@ -272,7 +271,7 @@ static void process_tick(libtrace_t *trace, libtrace_thread_t *t,
                 corsaro_log(glob->logger, "unable to open statistic file %s for writing: %s",
                         sfname, strerror(errno));
             } else {
-                fprintf(f, "time=%lu accepted=%lu dropped=%lu\n",
+                fprintf(f, "time=%u accepted=%lu dropped=%lu\n",
                         int_start, stats->accepted - tls->lastaccepted,
                         stats->missing - tls->lastmisscount);
                 fclose(f);
@@ -336,6 +335,7 @@ static int start_trace_input(corsaro_tagger_global_t *glob) {
     if (!processing) {
         processing = trace_create_callback_set();
         trace_set_starting_cb(processing, init_trace_processing);
+        trace_set_stopping_cb(processing, halt_trace_processing);
         /* No stopping callback -- we free our thread-local data after
          * the processing threads have joined instead. */
         trace_set_packet_cb(processing, per_packet);
@@ -448,7 +448,6 @@ static void *ipmeta_reload_thread(void *tdata) {
     void **taggercontrolsocks;
     void *incoming;
     char msgin[8];
-    char sockname[56];
     int i;
 
     /* These sockets allow us to tell the tagger threads to use the
@@ -720,7 +719,6 @@ static int process_control_request(corsaro_tagger_global_t *glob) {
  *  @return -1 if an error occurs, 0 otherwise.
  */
 static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
-    uint8_t reply;
     zmq_pollitem_t items[2];
     int rc;
     struct timeval tv;

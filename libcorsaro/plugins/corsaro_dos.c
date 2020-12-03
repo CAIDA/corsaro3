@@ -431,8 +431,6 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
 
     attack_vector_t *vec = (attack_vector_t *)vector;
     avro_value_t field;
-    avro_value_t arrayf;
-    uint32_t maxppm = 0;
 
     assert(vec->protocol);
 
@@ -878,7 +876,7 @@ static void copy_flowtuples(kh_ft_t *orig, kh_ft_t *copy) {
 
     khiter_t i;
     int khret;
-    attack_flow_t *flow, *newflow;
+    attack_flow_t *flow;
 
     for (i = kh_begin(orig); i != kh_end(orig); ++i) {
         if (!kh_exist(orig, i)) {
@@ -995,10 +993,8 @@ static struct corsaro_dos_state_t *copy_attack_state(corsaro_plugin_t *p,
 void *corsaro_dos_end_interval(corsaro_plugin_t *p, void *local,
         corsaro_interval_t *int_end, uint8_t complete) {
 
-    corsaro_dos_config_t *conf;
     struct corsaro_dos_state_t *state, *deepcopy;
 
-    conf = (corsaro_dos_config_t *)(p->config);
     state = (struct corsaro_dos_state_t *)local;
 
     if (state == NULL) {
@@ -1382,6 +1378,8 @@ static int write_iat_bins(corsaro_logger_t *logger, libtrace_list_t *tslist,
     while (n) {
         thists = *((double *)(n->data));
         lastts = thists;
+
+        /* This code appears to do nothing useful? */
         n = n->next;
     }
 

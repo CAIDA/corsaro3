@@ -680,7 +680,6 @@ static libtrace_packet_t *per_packet(libtrace_t *trace, libtrace_thread_t *t,
     corsaro_wdcap_global_t *glob = (corsaro_wdcap_global_t *)global;
     corsaro_wdcap_local_t *tls = (corsaro_wdcap_local_t *)local;
     struct timeval ptv;
-    corsaro_wdcap_message_t mergemsg;
     int ret;
 
     if (tls->ending) {
@@ -987,8 +986,6 @@ endproxy:
 static int run_wdcap(corsaro_wdcap_global_t *glob, int argc, char *argv[]) {
     sigset_t sig_before, sig_block_all;
 	int i, zero=0, mergestarted = 0;
-    int forked = 0;
-	pthread_t mergetid;
     corsaro_wdcap_message_t haltmsg;
     FILE *pidf = NULL;
 
@@ -1160,7 +1157,6 @@ static inline int get_running_pid(corsaro_wdcap_global_t *glob) {
 }
 
 int main(int argc, char *argv[]) {
-    struct sigaction sigact;
     corsaro_wdcap_global_t *glob = NULL;
     int runpid = 0;
     int runerr = 0;
