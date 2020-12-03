@@ -70,7 +70,6 @@
 void init_tagger_thread_data(corsaro_tagger_local_t *tls,
         int threadid, corsaro_tagger_global_t *glob, uint16_t mcast_port) {
     int hwm = 250;
-    int one = 1;
     char sockname[1024];
     char subqueuename[1024];
 
@@ -386,9 +385,6 @@ void *start_tagger_thread(void *data) {
      */
 
     while (!corsaro_halted) {
-        corsaro_tagger_internal_msg_t *recvd = NULL;
-        corsaro_tagger_buffer_t *buf = NULL;
-
         items[0].socket = tls->pullsock;
         items[0].events = ZMQ_POLLIN;
         items[1].socket = tls->controlsock;

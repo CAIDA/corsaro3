@@ -397,7 +397,6 @@ yamlfail:
 
 corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
     corsaro_trace_global_t *glob = NULL;
-    corsaro_plugin_proc_options_t stdopts;
 
     /* Allocate memory for global variables */
     glob = (corsaro_trace_global_t *)malloc(sizeof(corsaro_trace_global_t));
@@ -533,7 +532,6 @@ corsaro_trace_global_t *corsaro_trace_init_global(char *filename, int logmode) {
 
 void corsaro_trace_free_global(corsaro_trace_global_t *glob) {
 
-    int i;
     if (glob == NULL) {
         return;
     }

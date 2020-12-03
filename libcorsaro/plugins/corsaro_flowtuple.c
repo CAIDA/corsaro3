@@ -478,7 +478,6 @@ void corsaro_flowtuple_destroy_self(corsaro_plugin_t *p) {
 void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
 
     struct corsaro_flowtuple_state_t *state;
-    int i;
 
     state = (struct corsaro_flowtuple_state_t *)calloc(1,
             sizeof(struct corsaro_flowtuple_state_t));
@@ -509,9 +508,6 @@ void *corsaro_flowtuple_init_processing(corsaro_plugin_t *p, int threadid) {
 int corsaro_flowtuple_halt_processing(corsaro_plugin_t *p, void *local) {
 
     struct corsaro_flowtuple_state_t *state;
-    int i;
-    PWord_t pval;
-    Word_t index = 0;
 
     state = (struct corsaro_flowtuple_state_t *)local;
     if (state == NULL) {
@@ -646,7 +642,6 @@ static int corsaro_flowtuple_add_inc(corsaro_logger_t *logger,
         struct corsaro_flowtuple_state_t *state, struct corsaro_flowtuple *t,
         uint32_t increment, corsaro_flowtuple_config_t *conf) {
   struct corsaro_flowtuple *new_6t = NULL;
-  corsaro_memsource_t *memsrc = NULL;
   PWord_t pval;
 
   if (conf->sort_enabled == CORSARO_FLOWTUPLE_SORT_ENABLED) {
@@ -1357,7 +1352,6 @@ static void *start_ftmerge_worker(void *tdata) {
     corsaro_ft_write_msg_t msg;
     corsaro_flowtuple_iterator_t *input;
     corsaro_avro_writer_t *w = NULL;
-    int i;
     PWord_t pval;
     Word_t rc, index;
 
@@ -1607,8 +1601,7 @@ int corsaro_flowtuple_merge_interval_results(corsaro_plugin_t *p, void *local,
     struct corsaro_flowtuple_merge_state_t *m;
     corsaro_flowtuple_config_t *conf;
     corsaro_ft_write_msg_t msg;
-    int i, candind;
-    int inputsready;
+    int i, inputsready;
     uint8_t *donethreads;
 
     conf = (corsaro_flowtuple_config_t *)(p->config);

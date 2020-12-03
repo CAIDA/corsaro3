@@ -305,9 +305,6 @@ int corsaro_start_fast_trace_writer(corsaro_logger_t *logger,
 static inline int schedule_aiowrite(corsaro_fast_trace_writer_t *writer,
         corsaro_logger_t *logger) {
 
-    struct iocb *iocbs[1];
-    size_t towrite, rem;
-
     /* Prepare our aiocb which will tell the async I/O API what exactly
      * we want to write to disk.
      */
@@ -465,7 +462,6 @@ int corsaro_fast_write_erf_packet(corsaro_logger_t *logger,
     pcap_header_t *pcaphdr;
     uint16_t pcapcaplen;
     uint64_t erfts;
-    int ret;
     char tmpbuf[200];
 
     erfptr = (dag_record_t *)packet->header;

@@ -797,7 +797,6 @@ int main(int argc, char *argv[]) {
 
     corsaro_trace_global_t *glob = NULL;
     sigset_t sig_before, sig_block_all;
-    int i;
     corsaro_trace_merger_t merger;
     void *control_sock = NULL;
     corsaro_tagger_control_request_t ctrlreq;

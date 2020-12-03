@@ -1250,8 +1250,6 @@ int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
         uint32_t iprem, corsaro_filter_torun_t *torun) {
 
     int i;
-    uint8_t spoofedstate = -1;
-    uint8_t erraticstate = -1;
     filter_params_t fparams;
 
     _set_filter_params(ip, iprem, &fparams);
@@ -1369,6 +1367,7 @@ int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
 
         torun[CORSARO_FILTERID_ERRATIC].result = 1;
     }
+    return 0;
 }
 
 int corsaro_apply_multiple_filters(corsaro_logger_t *logger,

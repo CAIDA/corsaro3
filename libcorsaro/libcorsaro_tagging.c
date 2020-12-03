@@ -148,7 +148,6 @@ static inline char *create_maxmind_option_string(corsaro_logger_t *logger,
     char fragment[FRAGSPACE];
     char *nxt = space;
     int used = 0;
-    int towrite = 0;
 
     if (maxopts->directory) {
         snprintf(fragment, FRAGSPACE, "-d %s ", maxopts->directory);
@@ -183,7 +182,6 @@ static inline char *create_prefix2asn_option_string(corsaro_logger_t *logger,
     char fragment[FRAGSPACE];
     char *nxt = space;
     int used = 0;
-    int towrite = 0;
 
     if (pfxopts->pfx2as_file) {
         snprintf(fragment, FRAGSPACE, "-f %s ", pfxopts->pfx2as_file);
@@ -208,7 +206,6 @@ static inline char *create_netacq_option_string(corsaro_logger_t *logger,
     char fragment[FRAGSPACE];
     char *nxt = space;
     int used = 0;
-    int towrite = 0;
     libtrace_list_node_t *n;
 
     if (acqopts->blocks_file) {
@@ -429,8 +426,7 @@ static int update_netacq_tags(corsaro_logger_t *logger,
         ipmeta_record_t *rec, corsaro_packet_tags_t *tags,
         corsaro_ipmeta_state_t *ipmeta_state) {
 
-    int polygondetail = 0, i;
-    char *polygonfqid;
+    int i;
 
     if (rec == NULL) {
         return 0;
@@ -479,7 +475,6 @@ static void update_basic_tags(corsaro_logger_t *logger,
     void *transport;
     uint8_t proto;
     libtrace_icmp_t *icmp;
-    libtrace_tcp_t *tcp;
     hash_fields_t hashdata;
 
     /* Basic tags refer to those that do not require any libipmeta providers
@@ -684,7 +679,6 @@ void corsaro_reset_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker)
 int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
         corsaro_tagged_packet_header_t *taghdr) {
 
-    int seqindex;
     uint64_t thisseq;
     uint32_t tagid;
 
@@ -694,7 +688,6 @@ int corsaro_update_tagged_loss_tracker(corsaro_tagged_loss_tracker_t *tracker,
 
 	tagid = ntohl(taghdr->tagger_id);
 	thisseq = bswap_be_to_host64(taghdr->seqno);
-    seqindex = 0;
 
 	if (tagid != tracker->taggerid) {
 		/* tagger has restarted -- reset our sequence numbers */
@@ -942,7 +935,6 @@ int corsaro_parse_tagging_provider_config(pfx2asn_opts_t *pfxopts,
         corsaro_logger_t *logger) {
 
     yaml_node_item_t *item;
-    int plugincount = 0;
 
     for (item = provlist->data.sequence.items.start;
             item != provlist->data.sequence.items.top; item ++) {
@@ -1041,7 +1033,6 @@ static void load_netacq_polygon_labels(corsaro_logger_t *logger,
     int i, count, j;
     PWord_t pval;
     uint32_t index;
-    char build[96];
     char *label;
 
     count = ipmeta_provider_netacq_edge_get_polygon_tables(

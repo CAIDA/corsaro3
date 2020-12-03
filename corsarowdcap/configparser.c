@@ -407,7 +407,6 @@ corsaro_wdcap_global_t *corsaro_wdcap_init_global(char *filename, int logmode) {
 
 void corsaro_wdcap_free_global(corsaro_wdcap_global_t *glob) {
 
-    int i;
     if (glob == NULL) {
         return;
     }

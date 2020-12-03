@@ -194,7 +194,6 @@ static void parse_ip_counting(corsaro_report_ipcount_conf_t *ipconf,
                 corsaro_log(logger, "Ignoring...");
             }
         }
-            uint64_t optval;
 
         if (key->type == YAML_SCALAR_NODE && value->type == YAML_SCALAR_NODE
                 && strcmp((char *)key->data.scalar.value, "subnetmask") == 0) {
