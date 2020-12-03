@@ -484,6 +484,9 @@ typedef struct corsaro_report_result {
     /** Set of unique ASNs that sent packets tagged with this metric. */
     Pvoid_t uniq_src_asns;
 
+    Pvoid_t uniq_src_ipset;
+    Pvoid_t uniq_dst_ipset;
+
     uint32_t uniq_src_asn_count;
 
     /** The timestamp of the interval that this tally applies to */

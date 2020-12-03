@@ -574,6 +574,8 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
 
             if (derive_libts_keyname(p, m, keyname, 4096, r) <= 0) {
                 J1FA(judyret, r->uniq_src_asns);
+                J1FA(judyret, r->uniq_src_ipset);
+                J1FA(judyret, r->uniq_dst_ipset);
                 free(r);
                 JLN(pval, *results, index);
                 continue;
@@ -615,6 +617,8 @@ static int report_write_libtimeseries(corsaro_plugin_t *p,
 
 
         J1FA(judyret, r->uniq_src_asns);
+        J1FA(judyret, r->uniq_src_ipset);
+        J1FA(judyret, r->uniq_dst_ipset);
         free(r);
         JLN(pval, *results, index);
     }
@@ -675,6 +679,8 @@ static void clean_result_map(Pvoid_t *resultmap) {
     while (pval) {
         r = (corsaro_report_result_t *)(*pval);
         J1FA(judyret, r->uniq_src_asns);
+        J1FA(judyret, r->uniq_src_ipset);
+        J1FA(judyret, r->uniq_dst_ipset);
         free(r);
         JLN(pval, *resultmap, index);
     }
@@ -703,6 +709,8 @@ static inline corsaro_report_result_t *new_result(uint64_t metricid,
     r->uniq_dst_ips = 0;
     r->uniq_src_asn_count = 0;
     r->uniq_src_asns = NULL;
+    r->uniq_src_ipset = NULL;
+    r->uniq_dst_ipset = NULL;
     r->attimestamp = ts;
     r->label = outlabel;
     r->metrictype[0] = '\0';
@@ -822,10 +830,25 @@ static void update_merged_metric(Pvoid_t *results,
         r = (corsaro_report_result_t *)(*pval);
     }
 
-    J1C(ret, iphash->srcips, 0, -1);
-    r->uniq_src_ips += (uint32_t)ret;
-    J1C(ret, iphash->destips, 0, -1);
-    r->uniq_dst_ips += (uint32_t)ret;
+    index = 0;
+    J1F(x, iphash->srcips, index);
+    while (x) {
+        J1S(x, r->uniq_src_ipset, (Word_t)index);
+        if (x != 0) {
+            r->uniq_src_ips ++;
+        }
+        J1N(x, iphash->srcips, index);
+    }
+
+    index = 0;
+    J1F(x, iphash->destips, index);
+    while (x) {
+        J1S(x, r->uniq_dst_ipset, (Word_t)index);
+        if (x != 0) {
+            r->uniq_dst_ips ++;
+        }
+        J1N(x, iphash->destips, index);
+    }
 
     /* Consider limiting this to only certain metrics if processing
      * time becomes a problem?
