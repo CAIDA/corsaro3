@@ -1,3 +1,10 @@
+corsaro (3.2.12) unstable; urgency=medium
+
+  * Fix time series bug where IP counters were too high for Netacq
+    series, especially when aggregating into prefixes.
+
+ -- Shane Alcock <software@caida.org>  Thu, 03 Dec 2020 17:14:28 -0800
+
 corsaro (3.2.11) unstable; urgency=medium
 
   * Improve performance of report plugin
