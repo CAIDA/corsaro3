@@ -369,7 +369,6 @@ void corsaro_replace_tagger_ipmeta(corsaro_packet_tagger_t *tagger,
     if (tagger->ipmeta_state->refcount == 0) {
         tagger->ipmeta_state->ending = 1;
         pthread_mutex_unlock(&(tagger->ipmeta_state->mutex));
-        corsaro_free_ipmeta_state(tagger->ipmeta_state);
     } else {
         pthread_mutex_unlock(&(tagger->ipmeta_state->mutex));
     }
