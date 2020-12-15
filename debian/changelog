@@ -1,3 +1,10 @@
+corsaro (3.2.13) unstable; urgency=medium
+
+  * Prevent libipmeta updates from interfering with corsarotagger
+    tagging threads.
+
+ -- Shane Alcock <software@caida.org>  Mon, 14 Dec 2020 18:09:21 -0800
+
 corsaro (3.2.12) unstable; urgency=medium
 
   * Fix time series bug where IP counters were too high for Netacq

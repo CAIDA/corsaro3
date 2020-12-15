@@ -744,7 +744,7 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
     items[1].socket = glob->zmq_ipmeta;
     items[1].events = ZMQ_POLLIN;
 
-    rc = zmq_poll(items, 2, 10);
+    rc = zmq_poll(items, 2, 100);
     if (rc < 0) {
         if (errno == EINTR) {
             return 0;
@@ -782,12 +782,13 @@ static inline int tagger_main_loop(corsaro_tagger_global_t *glob) {
         if (glob->ipmeta_state->refcount == 0) {
             glob->ipmeta_state->ending = 1;
             pthread_mutex_unlock(&(glob->ipmeta_state->mutex));
-            corsaro_free_ipmeta_state(glob->ipmeta_state);
+            //corsaro_free_ipmeta_state(glob->ipmeta_state);
         } else {
             pthread_mutex_unlock(&(glob->ipmeta_state->mutex));
         }
 
         gettimeofday(&tv, NULL);
+        glob->prev_ipmeta_state = glob->ipmeta_state;
         glob->ipmeta_state = replace;
         glob->ipmeta_version = tv.tv_sec;
         glob->ipmeta_state->last_reload = tv.tv_sec;
@@ -911,6 +912,7 @@ int main(int argc, char *argv[]) {
 
     /* Load the libipmeta provider data */
     glob->ipmeta_state = calloc(1, sizeof(corsaro_ipmeta_state_t));
+    glob->prev_ipmeta_state = NULL;
     corsaro_load_ipmeta_data(glob->logger, &(glob->pfxtagopts),
             &(glob->maxtagopts), &(glob->netacqtagopts), glob->ipmeta_state);
     gettimeofday(&tv, NULL);
@@ -1000,7 +1002,12 @@ int main(int argc, char *argv[]) {
             if (tagger_main_loop(glob) < 0) {
                 break;
             }
-
+            if (glob->prev_ipmeta_state && glob->prev_ipmeta_state->ending) {
+                corsaro_log(glob->logger, "clearing old IPmeta state");
+                corsaro_free_ipmeta_state(glob->prev_ipmeta_state);
+                corsaro_log(glob->logger, "old IPmeta state has been cleared");
+                glob->prev_ipmeta_state = NULL;
+            }
         }
 
         if (!trace_has_finished(glob->trace)) {
