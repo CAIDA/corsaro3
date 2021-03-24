@@ -382,6 +382,41 @@ int corsaro_encode_avro_field(corsaro_avro_writer_t *writer,
     return 0;
 }
 
+int corsaro_encode_avro_integer_array(corsaro_avro_writer_t *writer,
+        void *arrayptr, uint8_t fieldlen, uint32_t fieldcount) {
+
+    uint8_t *array_start = (uint8_t *)arrayptr;
+    int i;
+    uint8_t zero = 0;
+
+    if (fieldcount > 0) {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG, &fieldcount,
+                sizeof(fieldcount)) < 0) {
+            corsaro_log(writer->logger,
+                    "unable to encode length of avro array.");
+            return -1;
+        }
+    }
+
+    for (i = 0; i < fieldcount; i++) {
+        if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG,
+                array_start + (i * fieldlen), fieldlen) < 0) {
+            corsaro_log(writer->logger,
+                    "Unable to encode integer as an array element.");
+            return -1;
+        }
+    }
+
+    if (corsaro_encode_avro_field(writer, CORSARO_AVRO_LONG, &zero,
+            sizeof(zero)) < 0) {
+        corsaro_log(writer->logger,
+                "unable to encode end marker for avro array.");
+        return -1;
+    }
+
+    return 0;
+}
+
 avro_value_t *corsaro_populate_avro_item(corsaro_avro_writer_t *writer,
         void *plugindata,
         int (*callback)(corsaro_logger_t *logger, avro_value_t *av,

@@ -129,6 +129,8 @@ int corsaro_is_avro_writer_active(corsaro_avro_writer_t *writer);
 int corsaro_start_avro_encoding(corsaro_avro_writer_t *writer);
 int corsaro_encode_avro_field(corsaro_avro_writer_t *writer,
         uint8_t fieldtype, void *fieldptr, uint32_t fieldlen);
+int corsaro_encode_avro_integer_array(corsaro_avro_writer_t *writer,
+        void *arrayptr, uint8_t fieldlen, uint32_t fieldcount);
 
 corsaro_avro_reader_t *corsaro_create_avro_reader(corsaro_logger_t *logger,
         char *filename);
