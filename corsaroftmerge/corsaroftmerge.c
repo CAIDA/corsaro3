@@ -72,7 +72,7 @@
 /** Describes a flowtuple record that is ready to be merged */
 struct merger_ft {
     /** The flowtuple record itself, decoded from avro into a native struct */
-    struct corsaro_flowtuple ft;
+    struct corsaro_flowtuple_data ft;
     /** The identifier of the reader thread that sent us this record */
     int source;
     /** The flowtuple's position in the priority queue */

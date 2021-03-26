@@ -11,23 +11,19 @@ PLUGIN_SRC=
 PLUGIN_LIBS=
 
 PLUGIN_SRC+=corsaro_null.c corsaro_null.h
-include_HEADERS+=corsaro_null.h
 
 if WITH_PLUGIN_SIXT
 PLUGIN_SRC+=corsaro_flowtuple.c corsaro_flowtuple.h
-include_HEADERS+=corsaro_flowtuple.h
 endif
 
 if WITH_PLUGIN_DOS
 PLUGIN_SRC+=corsaro_dos.c corsaro_dos.h
-include_HEADERS+=corsaro_dos.h
 endif
 
 if WITH_PLUGIN_REPORT
 PLUGIN_SRC+=report/corsaro_report.c report/corsaro_report.h
 PLUGIN_SRC+=report/iptracker_thread.c report/merging_thread.c
 PLUGIN_SRC+=report/processing_thread.c report/report_internal.h
-include_HEADERS+=report/corsaro_report.h
 endif
 
 libcorsaroplugins_la_SOURCES = \
