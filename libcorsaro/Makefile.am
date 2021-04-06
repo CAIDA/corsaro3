@@ -6,7 +6,8 @@ AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common \
 
 lib_LTLIBRARIES = libcorsaro.la
 
-include_HEADERS = libcorsaro_log.h libcorsaro.h
+include_HEADERS = libcorsaro_log.h libcorsaro.h libcorsaro_avro.h \
+    libcorsaro_flowtuple.h
 
 libcorsaro_la_SOURCES = 	\
 	libcorsaro_log.c 		\
@@ -27,6 +28,8 @@ libcorsaro_la_SOURCES = 	\
         libcorsaro_memhandler.h        \
         libcorsaro_libtimeseries.c     \
         libcorsaro_libtimeseries.h     \
+        libcorsaro_flowtuple.c         \
+        libcorsaro_flowtuple.h         \
         pqueue.c pqueue.h              \
         libcorsaro.h
 

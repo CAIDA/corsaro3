@@ -55,34 +55,7 @@
 #include "libcorsaro_plugin.h"
 #include "libcorsaro_memhandler.h"
 #include "libcorsaro_avro.h"
-
-static const char FLOWTUPLE_RESULT_SCHEMA[] =
-"{\"type\": \"record\",\
-  \"namespace\":\"org.caida.corsaro\",\
-  \"name\":\"flowtuple\",\
-  \"doc\":\"A Corsaro FlowTuple record. All byte fields are in network byte order.\",\
-  \"fields\":[\
-      {\"name\": \"time\", \"type\": \"long\"}, \
-      {\"name\": \"src_ip\", \"type\": \"long\"}, \
-      {\"name\": \"dst_ip\", \"type\": \"long\"}, \
-      {\"name\": \"src_port\", \"type\": \"int\"}, \
-      {\"name\": \"dst_port\", \"type\": \"int\"}, \
-      {\"name\": \"protocol\", \"type\": \"int\"}, \
-      {\"name\": \"ttl\", \"type\": \"int\"}, \
-      {\"name\": \"tcp_flags\", \"type\": \"int\"}, \
-      {\"name\": \"ip_len\", \"type\": \"int\"}, \
-      {\"name\": \"tcp_synlen\", \"type\": \"int\"}, \
-      {\"name\": \"tcp_synwinlen\", \"type\": \"int\"}, \
-      {\"name\": \"packet_cnt\", \"type\": \"long\"}, \
-      {\"name\": \"is_spoofed\", \"type\": \"int\"}, \
-      {\"name\": \"is_masscan\", \"type\": \"int\"}, \
-      {\"name\": \"maxmind_continent\", \"type\": \"string\"}, \
-      {\"name\": \"maxmind_country\", \"type\": \"string\"}, \
-      {\"name\": \"netacq_continent\", \"type\": \"string\"}, \
-      {\"name\": \"netacq_country\", \"type\": \"string\"}, \
-      {\"name\": \"prefix2asn\", \"type\": \"long\"} \
-      ]}";
-
+#include "libcorsaro_flowtuple.h"
 
 typedef struct corsaro_flowtuple_kafka_record {
   /** The start time for the interval that this flow appeared in */ 
@@ -150,79 +123,12 @@ corsaro_plugin_t *corsaro_flowtuple_alloc(void);
  */
 
 /**
- * Represents the eight important fields in the ip header that we will use to
- * 'uniquely' identify a packet
- *
- * Alberto and i think that most other analysis can be derived from this
- * distribution
- *
- * This struct will be used as the key for the hash.
- *
- * Values are stored in *network* byte order to allow easy (de)serialization.
- *
- * The 'PACKED' attribute instructs GCC to not do any byte alignment. This
- * allows us to directly write the structure to disk
- *
+ * Internal representation of a flowtuple object, including various
+ * record-keeping fields that are not part of the flowtuple itself but
+ * are used for internal management and storage.
  */
 struct corsaro_flowtuple {
-  /** The start time for the interval that this flow appeared in */ 
-  uint32_t interval_ts;
-
-  /** The source IP */
-  uint32_t src_ip;
-
-  /** The destination IP */
-  uint32_t dst_ip;
-
-  /** The source port (or ICMP type) */
-  uint16_t src_port;
-
-  /** The destination port (or ICMP code) */
-  uint16_t dst_port;
-
-  /** The protocol */
-  uint8_t protocol;
-
-  /** The TTL */
-  uint8_t ttl;
-
-  /** TCP Flags (excluding NS) */
-  uint8_t tcp_flags;
-
-  /** Length of the IP packet (from the IP header) */
-  uint16_t ip_len;
-
-  /** Size of the TCP SYN (including options) */
-  uint16_t tcp_synlen;
-
-  /** Announced receive window size in the TCP SYN (including options) */
-  uint16_t tcp_synwinlen;
-
-  /** The number of packets that comprise this flowtuple
-      This is populated immediately before the tuple is written out */
-  uint32_t packet_cnt;
-
-  /** The result of applying the hash function to this flowtuple */
-  uint32_t hash_val;
-
-  /** Flag indicating whether the source address was probably spoofed */
-  uint8_t is_spoofed;
-
-  /** Flag indicating whether the flow appeared to be a TCP Masscan attempt */
-  uint8_t is_masscan;
-
-  /** Country that the source IP corresponds to, according to maxmind */
-  uint16_t maxmind_country;
-  /** Continent that the source IP corresponds to, according to maxmind */
-  uint16_t maxmind_continent;
-  /** Country that the source IP corresponds to, according to netacq-edge */
-  uint16_t netacq_country;
-  /** Continent that the source IP corresponds to, according to netacq-edge */
-  uint16_t netacq_continent;
-  /** ASN that the source IP corresponds to, according to pf2asn data */
-  uint32_t prefixasn;
-  /** Bitmap indicating which libipmeta tags are valid for this flow */
-  uint16_t tagproviders;
+  struct corsaro_flowtuple_data ftdata;
 
   /** Pointer to local memory manager that allocated this flowtuple (only
    *  used if tcmalloc is not available.
@@ -238,15 +144,6 @@ struct corsaro_flowtuple {
   void *from;
   int fromind;
 } PACKED;
-
-/* Utility functions for other programs that want to handle flowtuple
- * objects, e.g. corsaroftmerge
- */
-void encode_flowtuple_as_avro(struct corsaro_flowtuple *ft,
-		corsaro_avro_writer_t *writer, corsaro_logger_t *logger);
-
-int decode_flowtuple_from_avro(avro_value_t *record,
-		struct corsaro_flowtuple *ft);
 
 CORSARO_PLUGIN_GENERATE_PROTOTYPES(corsaro_flowtuple)
 
@@ -288,13 +185,15 @@ uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
 
 /** Tests two flowtuples for equality */
 #define corsaro_flowtuple_hash_equal(alpha, bravo)                             \
-  ((alpha)->src_ip == (bravo)->src_ip && (alpha)->dst_ip == (bravo)->dst_ip && \
-   (alpha)->src_port == (bravo)->src_port &&                                   \
-   (alpha)->dst_port == (bravo)->dst_port &&                                   \
-   (alpha)->protocol == (bravo)->protocol && (alpha)->ttl == (bravo)->ttl &&   \
-   (alpha)->tcp_flags == (bravo)->tcp_flags &&                                 \
-   (alpha)->ip_len == (bravo)->ip_len &&                                       \
-   (alpha)->interval_ts == (bravo)->interval_ts)
+  ((alpha)->ftdata.src_ip == (bravo)->ftdata.src_ip &&                         \
+   (alpha)->ftdata.dst_ip == (bravo)->ftdata.dst_ip &&                         \
+   (alpha)->ftdata.src_port == (bravo)->ftdata.src_port &&                     \
+   (alpha)->ftdata.dst_port == (bravo)->ftdata.dst_port &&                     \
+   (alpha)->ftdata.protocol == (bravo)->ftdata.protocol &&                     \
+   (alpha)->ftdata.ttl == (bravo)->ftdata.ttl &&                               \
+   (alpha)->ftdata.tcp_flags == (bravo)->ftdata.tcp_flags &&                   \
+   (alpha)->ftdata.ip_len == (bravo)->ftdata.ip_len &&                         \
+   (alpha)->ftdata.interval_ts == (bravo)->ftdata.interval_ts)
 
 /** Tests if one flowtuple is less than another
  *
@@ -302,23 +201,23 @@ uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
  * when dumping the flowtuple to binary and using GZIP compression
  */
 #define corsaro_flowtuple_lt(alpha, bravo)                                   \
-  (((alpha)->interval_ts < (bravo)->interval_ts) ||                          \
-   (((alpha)->interval_ts == (bravo)->interval_ts) &&                        \
-    (((alpha)->protocol < (bravo)->protocol) ||                              \
-     (((alpha)->protocol == (bravo)->protocol) &&                            \
-      (((alpha)->ttl < (bravo)->ttl) ||                                      \
-       (((alpha)->ttl == (bravo)->ttl) &&                                    \
-        (((alpha)->tcp_flags < (bravo)->tcp_flags) ||                        \
-         (((alpha)->tcp_flags == (bravo)->tcp_flags) &&                      \
-          (((alpha)->src_ip < (bravo)->src_ip) ||                            \
-           (((alpha)->src_ip == (bravo)->src_ip) &&                          \
-            (((alpha)->dst_ip < (bravo)->dst_ip) ||                          \
-             (((alpha)->dst_ip == (bravo)->dst_ip) &&                        \
-              (((alpha)->src_port < (bravo)->src_port) ||                    \
-               (((alpha)->src_port == (bravo)->src_port) &&                  \
-                (((alpha)->dst_port < (bravo)->dst_port) ||                  \
-                 (((alpha)->dst_port == (bravo)->dst_port) &&                \
-                  (((alpha)->ip_len < (bravo)->ip_len))))))))))))))))))
+  (((alpha)->ftdata.interval_ts < (bravo)->ftdata.interval_ts) ||            \
+   (((alpha)->ftdata.interval_ts == (bravo)->ftdata.interval_ts) &&          \
+    (((alpha)->ftdata.protocol < (bravo)->ftdata.protocol) ||                \
+     (((alpha)->ftdata.protocol == (bravo)->ftdata.protocol) &&              \
+      (((alpha)->ftdata.ttl < (bravo)->ftdata.ttl) ||                        \
+       (((alpha)->ftdata.ttl == (bravo)->ftdata.ttl) &&                      \
+        (((alpha)->ftdata.tcp_flags < (bravo)->ftdata.tcp_flags) ||          \
+         (((alpha)->ftdata.tcp_flags == (bravo)->ftdata.tcp_flags) &&        \
+          (((alpha)->ftdata.src_ip < (bravo)->ftdata.src_ip) ||              \
+           (((alpha)->ftdata.src_ip == (bravo)->ftdata.src_ip) &&            \
+            (((alpha)->ftdata.dst_ip < (bravo)->ftdata.dst_ip) ||            \
+             (((alpha)->ftdata.dst_ip == (bravo)->ftdata.dst_ip) &&          \
+              (((alpha)->ftdata.src_port < (bravo)->ftdata.src_port) ||      \
+               (((alpha)->ftdata.src_port == (bravo)->ftdata.src_port) &&    \
+                (((alpha)->ftdata.dst_port < (bravo)->ftdata.dst_port) ||    \
+                 (((alpha)->ftdata.dst_port == (bravo)->ftdata.dst_port) &&  \
+                  (((alpha)->ftdata.ip_len < (bravo)->ftdata.ip_len))))))))))))))))))
 
 
 /* Top key looks like (IP DST1 is assumed constant) :
@@ -331,11 +230,11 @@ uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
  */
 #define FT_CALC_SORT_KEY_TOP(ft) \
     ( \
-        (((uint64_t)(ft->protocol)) << 56) | \
-        (((uint64_t)(ft->ttl)) << 48) | \
-        (((uint64_t)(ft->tcp_flags)) << 40) | \
-        (((uint64_t)(ft->src_ip)) << 8) | \
-        (((uint64_t)(ft->dst_ip & 0x00FFFFFF)) >> 16) \
+        (((uint64_t)(ft->ftdata.protocol)) << 56) | \
+        (((uint64_t)(ft->ftdata.ttl)) << 48) | \
+        (((uint64_t)(ft->ftdata.tcp_flags)) << 40) | \
+        (((uint64_t)(ft->ftdata.src_ip)) << 8) | \
+        (((uint64_t)(ft->ftdata.dst_ip & 0x00FFFFFF)) >> 16) \
     )
 
 /* Bottom key looks like :
@@ -348,10 +247,10 @@ uint32_t corsaro_flowtuple_hash_func(struct corsaro_flowtuple *ft);
  */
 #define FT_CALC_SORT_KEY_BOTTOM(ft) \
     ( \
-        (((uint64_t)(ft->dst_ip)) << 48) | \
-        (((uint64_t)(ft->src_port)) << 32) | \
-        (((uint64_t)(ft->dst_port)) << 16) | \
-        (((uint64_t)(ft->ip_len))) \
+        (((uint64_t)(ft->ftdata.dst_ip)) << 48) | \
+        (((uint64_t)(ft->ftdata.src_port)) << 32) | \
+        (((uint64_t)(ft->ftdata.dst_port)) << 16) | \
+        (((uint64_t)(ft->ftdata.ip_len))) \
     )
 
 
