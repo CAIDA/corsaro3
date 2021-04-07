@@ -35,7 +35,7 @@ libcorsaro_la_SOURCES = 	\
 
 libcorsaro_la_LIBADD = $(top_builddir)/common/libcccommon.la \
 	$(top_builddir)/libcorsaro/plugins/libcorsaroplugins.la
-libcorsaro_la_LDFLAGS = -version-info @CORSARO_MAJOR_VERSION@:@CORSARO_MINOR_VERSION@:@CORSARO_MID_VERSION@
+libcorsaro_la_LDFLAGS = -version-info @CORSARO_LIBTOOL_CURRENT@:@CORSARO_LIBTOOL_REVISION@:@CORSARO_LIBTOOL_AGE@
 
 ACLOCAL_AMFLAGS = -I m4
 
