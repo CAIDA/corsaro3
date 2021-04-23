@@ -212,6 +212,12 @@ typedef struct attack_vector {
     /** Maximum PPM rate seen during this interval */
     uint32_t maxppminterval;
 
+    /** First attack port seen for this vector */
+    uint16_t first_attack_port;
+
+    /** First target port seen for this vector */
+    uint16_t first_target_port;
+
     /** The sliding window packet rate state */
     ppm_window_t ppm_window;
 
@@ -229,9 +235,6 @@ typedef struct attack_vector {
 
     /** Map of all ports that alleged attack packets were directed to */
     kh_32xx_t *target_port_hash;
-
-    /** All flows seen as part of this attack since the last interval */
-    kh_ft_t *interval_flows;
 
     /** List containing all expired PPM buckets */
     libtrace_list_t *ppm_bucket_list;
@@ -285,28 +288,7 @@ struct corsaro_dos_state_t {
 
 typedef struct corsaro_dos_merge_state {
     corsaro_avro_writer_t *mainwriter;
-    corsaro_avro_writer_t *ftwriter;
 } corsaro_dos_merge_state_t;
-
-/** Avro schema for the output from this plugin */
-static const char DOS_FT_SCHEMA[] =
-"{\"type\": \"record\",\
-  \"namespace\": \"org.caida.corsaro\",\
-  \"name\": \"dosflowtuple\",\
-  \"doc\": \"A Corsaro Dos Flowtuple record. All byte fields are in host \
-             byte order.\",\
-  \"fields\": [\
-        {\"name\": \"bin_timestamp\", \"type\": \"long\"}, \
-        {\"name\": \"target_ip\", \"type\": \"long\"}, \
-        {\"name\": \"attacker_ip\", \"type\": \"long\"}, \
-        {\"name\": \"attacker_port\", \"type\": \"int\"}, \
-        {\"name\": \"target_port\", \"type\": \"int\"}, \
-        {\"name\": \"protocol\", \"type\": \"int\"}, \
-        {\"name\": \"packet_size\", \"type\": \"int\"}, \
-        {\"name\": \"total_packets\", \"type\": \"long\"}, \
-        {\"name\": \"start_sec\", \"type\": \"long\"}, \
-        {\"name\": \"start_usec\", \"type\": \"int\"} \
-        ]}";
 
 static const char DOS_RESULT_SCHEMA[] =
 "{\"type\": \"record\",\
@@ -331,46 +313,14 @@ static const char DOS_RESULT_SCHEMA[] =
         {\"name\":\"start_time_usec\", \"type\": \"int\"}, \
         {\"name\":\"latest_time_sec\", \"type\": \"long\"}, \
         {\"name\":\"latest_time_usec\", \"type\": \"int\"}, \
+        {\"name\":\"first_attack_port\", \"type\": \"int\"}, \
+        {\"name\":\"first_target_port\", \"type\": \"int\"}, \
         {\"name\":\"initial_packet\", \"type\": \"bytes\"} \
         ]}";
 
 
 corsaro_plugin_t *corsaro_dos_alloc(void) {
     return &(corsaro_dos_plugin);
-}
-
-/** Convert the set of flowtuples associated with an attack vector into an
- *  AVRO array that is suitable for writing to an interim (i.e. pre-merge)
- *  output file.
- */
-static inline int flow_list_to_avro(corsaro_logger_t *logger,
-        avro_value_t *av, void *flowrec) {
-
-    avro_value_t field;
-    attack_flow_t *flow = (attack_flow_t *)flowrec;
-
-
-    CORSARO_AVRO_SET_FIELD(long, av, field, 0, "bin_timestamp", "dos",
-            flow->attimestamp);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 1, "target_ip", "dos",
-            flow->target_ip);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 2, "attacker_ip", "dos",
-            flow->attacker_ip);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 3, "attacker_port", "dos",
-            flow->attacker_port);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 4, "target_port", "dos",
-            flow->target_port);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 5, "protocol", "dos",
-            flow->protocol);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 6, "packet_size", "dos",
-            flow->pkt_len);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 7, "total_packets", "dos",
-            flow->total_packet_count);
-    CORSARO_AVRO_SET_FIELD(long, av, field, 8, "start_sec", "dos",
-            flow->ts_sec);
-    CORSARO_AVRO_SET_FIELD(int, av, field, 9, "start_usec", "dos",
-            flow->ts_usec);
-    return 0;
 }
 
 static uint32_t calculate_maximum_ppm(corsaro_dos_config_t *conf,
@@ -464,11 +414,15 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
             vec->latest_time.tv_sec);
     CORSARO_AVRO_SET_FIELD(int, av, field, 14, "latest_time_usec", "dos",
             vec->latest_time.tv_usec);
+    CORSARO_AVRO_SET_FIELD(int, av, field, 15, "first_attack_port", "dos",
+            vec->first_attack_port);
+    CORSARO_AVRO_SET_FIELD(int, av, field, 16, "first_target_port", "dos",
+            vec->first_target_port);
 
     /* Write the saved bytes from the initial packet. */
-    if (avro_value_get_by_index(av, 15, &field, NULL)) {
+    if (avro_value_get_by_index(av, 17, &field, NULL)) {
         corsaro_log(logger,
-                "unable to find 'initial_packet' (id 15) in dos schema: %s",
+                "unable to find 'initial_packet' (id 17) in dos schema: %s",
                 avro_strerror());
         return -1;
     }
@@ -476,7 +430,7 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
     if (avro_value_set_bytes(&field, vec->initial_packet,
             vec->initial_packet_len)) {
         corsaro_log(logger,
-                "unable to set 'initial_packet' (id 15) in dos schema: %s",
+                "unable to set 'initial_packet' (id 17) in dos schema: %s",
                 avro_strerror());
         return -1;
     }
@@ -500,7 +454,6 @@ static attack_vector_t *attack_vector_init(int ppmbuckets) {
     av->attack_ip_hash = kh_init(32xx);
     av->attack_port_hash = kh_init(32xx);
     av->target_port_hash = kh_init(32xx);
-    av->interval_flows = kh_init(ft);
     av->ppm_bucket_list = libtrace_list_init(sizeof(expired_ppm_bucket_t));
     av->ppm_window.buckets = (uint64_t *)calloc(ppmbuckets, sizeof(uint64_t));
     av->config = NULL;
@@ -537,17 +490,6 @@ static void attack_vector_free(attack_vector_t *av) {
         free(av->initial_packet);
     }
 
-    if (av->interval_flows) {
-        for (i = kh_begin(av->interval_flows);
-                i != kh_end(av->interval_flows); ++i) {
-            if (!kh_exist(av->interval_flows, i)) {
-                continue;
-            }
-            f = kh_key(av->interval_flows, i);
-            free(f);
-        }
-        kh_destroy(ft, av->interval_flows);
-    }
     if (av->attack_ip_hash) {
         kh_destroy(32xx, av->attack_ip_hash);
     }
@@ -931,6 +873,8 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         newav->start_time = origav->start_time;
         newav->latest_time = origav->latest_time;
         newav->packet_timestamps = origav->packet_timestamps;
+        newav->first_attack_port = origav->first_attack_port;
+        newav->first_target_port = origav->first_target_port;
 
         newav->initial_packet = (uint8_t *)malloc(origav->initial_packet_len);
         memcpy(newav->initial_packet, origav->initial_packet,
@@ -941,13 +885,6 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         copy_32hash(origav->attack_ip_hash, newav->attack_ip_hash);
         copy_32hash(origav->attack_port_hash, newav->attack_port_hash);
         copy_32hash(origav->target_port_hash, newav->target_port_hash);
-
-        copy_flowtuples(origav->interval_flows, newav->interval_flows);
-
-        /* Reset the flow table, as this should only contain flows from the
-         * current interval.
-         */
-        kh_clear(ft, origav->interval_flows);
 
         /* Clear the ppm bucket list */
         libtrace_list_deinit(origav->ppm_bucket_list);
@@ -1081,50 +1018,6 @@ boringicmp:
     *targetip = 0;
 }
 
-/** Updates the attack vector's flow table based on an observed packet.
- *
- * @param logger    pointer to the logger instance
- * @param vec       the attack vector which this packet has been matched to
- * @param lookup    the relevant details from the observed packet
- * @param tv        the timestamp from the packet
- */
-static void update_flow_table(corsaro_logger_t *logger,
-        attack_vector_t *vec, attack_flow_t *lookup, struct timeval *tv) {
-
-    attack_flow_t *flow;
-    int khret;
-    khiter_t khiter;
-
-    if ((khiter = kh_get(ft, vec->interval_flows, lookup)) !=
-            kh_end(vec->interval_flows)) {
-        /* There already exists a flow that matches this packet, just
-         * need to increment packet count.
-         */
-        flow = kh_key(vec->interval_flows, khiter);
-        flow->total_packet_count ++;
-        flow->latest_sec = tv->tv_sec;
-        flow->latest_usec = tv->tv_usec;
-        return;
-    }
-
-    /* Not seen this flow before, create a new entry in the flow table */
-    flow = (attack_flow_t *)calloc(1, sizeof(attack_flow_t));
-    flow->total_packet_count = 1;
-    flow->attacker_ip = lookup->attacker_ip;
-    flow->attacker_port = lookup->attacker_port;
-    flow->target_port = lookup->target_port;
-    flow->pkt_len = lookup->pkt_len;
-    flow->ts_sec = tv->tv_sec;
-    flow->ts_usec = tv->tv_usec;
-    flow->latest_sec = tv->tv_sec;
-    flow->latest_usec = tv->tv_usec;
-    flow->attimestamp = 0;
-    flow->target_ip = lookup->target_ip;
-
-    khiter = kh_put(ft, vec->interval_flows, flow, &khret);
-
-}
-
 /** Searches the hash table for an attack vector that matches the given
  *  packet. If no match is found, this function will create a new
  *  hash entry, insert it into the hash table and return a pointer to the
@@ -1135,7 +1028,7 @@ static attack_vector_t *match_packet_to_vector(
         struct corsaro_dos_state_t *state, uint8_t srcproto,
         attack_vector_t *findme, struct timeval *tv) {
 
-    int khret;
+    int khret, rem;
     khiter_t khiter;
     attack_vector_t *vector = NULL;
     uint8_t *pkt_buf = NULL;
@@ -1168,11 +1061,18 @@ static attack_vector_t *match_packet_to_vector(
         return NULL;
     }
 
-    vector->initial_packet_len = (uint32_t)trace_get_capture_length(packet);
+    pkt_buf = trace_get_layer2(packet, &linktype, &rem);
+    if (pkt_buf == NULL) {
+        corsaro_log(logger,
+                "dos plugin: error while extracting packet buffer");
+        attack_vector_free(vector);
+        return NULL;
+    }
+
+    vector->initial_packet_len = rem;
     if (vector->initial_packet_len > 10000) {
         corsaro_log(logger,
-                "dos plugin: bogus packet capture length %u\n",
-                vector->initial_packet_len);
+                "dos plugin: bogus packet capture length %u\n", rem);
         attack_vector_free(vector);
         return NULL;
     }
@@ -1185,15 +1085,7 @@ static attack_vector_t *match_packet_to_vector(
         return NULL;
     }
 
-    pkt_buf = trace_get_packet_buffer(packet, &linktype, NULL);
-    if (pkt_buf == NULL) {
-        corsaro_log(logger,
-                "dos plugin: error while extracting packet buffer");
-        attack_vector_free(vector);
-        return NULL;
-    }
-
-    memcpy(vector->initial_packet, pkt_buf, vector->initial_packet_len);
+    memcpy(vector->initial_packet, pkt_buf, rem);
     vector->target_ip = findme->target_ip;
     vector->protocol = srcproto;
     vector->packet_timestamps = libtrace_list_init(sizeof(double));
@@ -1297,6 +1189,8 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
         vector->responder_ip = ntohl(ip_hdr->ip_src.s_addr);
 
         vector->start_time = tv;
+        vector->first_attack_port = attacker_port;
+        vector->first_target_port = target_port;
 
         /* Ensure our windows are aligned to the nearest "slide" interval */
         vector->ppm_window.window_start = state->last_rotation -
@@ -1309,8 +1203,6 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
             vector->mismatches ++;
         }
     }
-
-    update_flow_table(p->logger, vector, &thisflow, &tv);
 
     vector->packet_cnt ++;
     vector->byte_cnt += thisflow.pkt_len;
@@ -1332,59 +1224,6 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
 
 
 /** ------------- MERGING API -------------------- */
-
-static int write_flowtuples(corsaro_logger_t *logger,
-        corsaro_avro_writer_t *writer, uint32_t target_ip, uint32_t ts,
-        uint8_t proto, kh_ft_t *flows) {
-
-    khiter_t i;
-    attack_flow_t *f;
-    avro_value_t *avro;
-
-    for (i = kh_begin(flows); i != kh_end(flows); ++i) {
-        if (!kh_exist(flows, i)) {
-            continue;
-        }
-
-        f = kh_key(flows, i);
-        f->attimestamp = ts;
-        f->target_ip = target_ip;
-        f->protocol = proto;
-
-        avro = corsaro_populate_avro_item(writer, f, flow_list_to_avro);
-        if (avro == NULL) {
-            corsaro_log(logger,
-                    "could not convert attack flow to Avro record");
-            return -1;
-        }
-
-        if (corsaro_append_avro_writer(writer, avro) < 0) {
-            corsaro_log(logger,
-                    "could not write attack flow to Avro output file.");
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static int write_iat_bins(corsaro_logger_t *logger, libtrace_list_t *tslist,
-        uint32_t bints, uint8_t proto, uint32_t targetip) {
-
-    libtrace_list_node_t *n;
-    double lastts = 0.0;
-    double thists = 0.0;
-
-    n = tslist->head;
-    while (n) {
-        thists = *((double *)(n->data));
-        lastts = thists;
-
-        /* This code appears to do nothing useful? */
-        n = n->next;
-    }
-
-    return 0;
-}
 
 static int write_attack_vectors(corsaro_logger_t *logger,
         corsaro_dos_merge_state_t *mstate, kh_av_t *attack_hash,
@@ -1436,15 +1275,6 @@ static int write_attack_vectors(corsaro_logger_t *logger,
             return -1;
         }
 
-        if (write_flowtuples(logger, mstate->ftwriter, vec->target_ip, ts,
-                vec->protocol, vec->interval_flows) < 0) {
-            return -1;
-        }
-
-        if (write_iat_bins(logger, vec->packet_timestamps, ts, vec->protocol,
-                    vec->target_ip)< 0) {
-            return -1;
-        }
     }
     return 0;
 }
@@ -1467,16 +1297,6 @@ void *corsaro_dos_init_merging(corsaro_plugin_t *p, int sources) {
         return NULL;
     }
 
-    m->ftwriter = corsaro_create_avro_writer(p->logger, DOS_FT_SCHEMA);
-
-    if (m->ftwriter == NULL) {
-        corsaro_log(p->logger,
-                "error while creating flowtuple avro writer for dos plugin!");
-        corsaro_destroy_avro_writer(m->mainwriter);
-        free(m);
-        return NULL;
-    }
-
     return m;
 }
 
@@ -1491,9 +1311,6 @@ int corsaro_dos_halt_merging(corsaro_plugin_t *p, void *local) {
 
     if (m->mainwriter) {
         corsaro_destroy_avro_writer(m->mainwriter);
-    }
-    if (m->ftwriter) {
-        corsaro_destroy_avro_writer(m->ftwriter);
     }
 
     free(m);
@@ -1702,6 +1519,8 @@ static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
 
             existing->start_time.tv_sec = toadd->start_time.tv_sec;
             existing->start_time.tv_usec = toadd->start_time.tv_usec;
+            existing->first_attack_port = toadd->first_attack_port;
+            existing->first_target_port = toadd->first_target_port;
 
             /* Replace initial packet too, since the "new" vector started
              * before the one we've already got. */
@@ -1715,8 +1534,6 @@ static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
         combine_32_hash(existing->attack_ip_hash, toadd->attack_ip_hash);
         combine_32_hash(existing->attack_port_hash, toadd->attack_port_hash);
         combine_32_hash(existing->target_port_hash, toadd->target_port_hash);
-
-        combine_ft_set(existing->interval_flows, toadd->interval_flows);
 
         combine_ppm_list(existing->ppm_bucket_list, toadd->ppm_bucket_list);
 
@@ -1813,22 +1630,6 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
         free(outname);
     }
 
-    if (!corsaro_is_avro_writer_active(m->ftwriter)) {
-        outname = corsaro_generate_avro_file_name(config->basic.template,
-                "dosflows", config->basic.monitorid, fin->timestamp, -1);
-        if (outname == NULL) {
-            corsaro_log(p->logger,
-                    "failed to generate suitable filename for dos flow output");
-            return -1;
-        }
-        if (corsaro_start_avro_writer(m->ftwriter, outname, 0) == -1) {
-            free(outname);
-            return -1;
-        }
-        free(outname);
-    }
-
-
     for (i = 1; i < fin->threads_ended; i++) {
         if (update_combined_result(combined,
                 (struct corsaro_dos_state_t *)(tomerge[i]),
@@ -1880,11 +1681,6 @@ int corsaro_dos_rotate_output(corsaro_plugin_t *p, void *local) {
     }
 
     if (m->mainwriter == NULL || corsaro_close_avro_writer(m->mainwriter) < 0)
-    {
-        return -1;
-    }
-
-    if (m->ftwriter == NULL || corsaro_close_avro_writer(m->ftwriter) < 0)
     {
         return -1;
     }
