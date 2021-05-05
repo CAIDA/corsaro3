@@ -57,6 +57,7 @@
 #include <errno.h>
 #include <yaml.h>
 #include <libtrace/linked_list.h>
+#include <Judy.h>
 
 #include "khash.h"
 #include "ksort.h"
@@ -234,7 +235,8 @@ typedef struct attack_vector {
     kh_ft_t *interval_flows;
 
     /** List containing all expired PPM buckets */
-    libtrace_list_t *ppm_bucket_list;
+    Pvoid_t ppm_bucket_list;
+    //libtrace_list_t *ppm_bucket_list;
 
     /** List of timestamps for all packets associated with this attack */
     libtrace_list_t *packet_timestamps;
@@ -286,6 +288,7 @@ struct corsaro_dos_state_t {
 typedef struct corsaro_dos_merge_state {
     corsaro_avro_writer_t *mainwriter;
     corsaro_avro_writer_t *ftwriter;
+    struct corsaro_dos_state_t *combined;
 } corsaro_dos_merge_state_t;
 
 /** Avro schema for the output from this plugin */
@@ -374,52 +377,49 @@ static inline int flow_list_to_avro(corsaro_logger_t *logger,
 }
 
 static uint32_t calculate_maximum_ppm(corsaro_dos_config_t *conf,
-        libtrace_list_t *buckets) {
+        Pvoid_t *buckets, uint32_t ts) {
 
     uint32_t maxppm = 0;
-    uint32_t currentwin = 0;
-    int i, itemsperwin;
-    libtrace_list_node_t *winstart;
-    libtrace_list_node_t *winend;
-    expired_ppm_bucket_t *pwin;
+    uint32_t currentwin = 0, prune;
+    int i, itemsperwin, rcint;
+    PWord_t winstart, pval;
+    Word_t index, indexend, indexiter;
 
     itemsperwin = (conf->ppm_window_size / conf->ppm_window_slide);
     if (itemsperwin <= 0) {
         return 0;
     }
 
-    winstart = buckets->head;
-    if (winstart == NULL) {
-        return 0;
-    }
-    winend = buckets->head;
+    prune = ts - ((itemsperwin - 1) * conf->ppm_window_slide);
 
-    for (i = 0; i < itemsperwin; i++) {
-        pwin = (expired_ppm_bucket_t *)(winend->data);
-        currentwin += pwin->count;
-        if (winend->next == NULL) {
-            break;
+    index = 0;
+    JLF(winstart, (*buckets), index);
+
+    while (winstart) {
+        if (index < prune) {
+            JLD(rcint, (*buckets), index);
+            JLN(winstart, (*buckets), index);
+            continue;
         }
-        winend = winend->next;
-    }
 
-    do {
+        /* Plenty of room to optimise this in future */
+
+        indexend = index + conf->ppm_window_size;
+        indexiter = index;
+        pval = winstart;
+        currentwin = 0;
+
+        while (indexiter < indexend && pval != NULL) {
+            currentwin += (*pval);
+            JLN(pval, (*buckets), indexiter);
+        }
+
         if (currentwin > maxppm) {
             maxppm = currentwin;
         }
 
-        pwin = (expired_ppm_bucket_t *)(winstart->data);
-        if (pwin->count > currentwin) {
-            assert(pwin->count <= currentwin);
-        }
-        currentwin -= pwin->count;
-        winstart = winstart->next;
-
-        pwin = (expired_ppm_bucket_t *)(winend->data);
-        currentwin += pwin->count;
-        winend = winend->next;
-    } while (winend != NULL && winstart != NULL);
-
+        JLN(winstart, (*buckets), index);
+    }
     return maxppm;
 }
 
@@ -501,7 +501,8 @@ static attack_vector_t *attack_vector_init(int ppmbuckets) {
     av->attack_port_hash = kh_init(32xx);
     av->target_port_hash = kh_init(32xx);
     av->interval_flows = kh_init(ft);
-    av->ppm_bucket_list = libtrace_list_init(sizeof(expired_ppm_bucket_t));
+    //av->ppm_bucket_list = libtrace_list_init(sizeof(expired_ppm_bucket_t));
+    av->ppm_bucket_list = NULL;
     av->ppm_window.buckets = (uint64_t *)calloc(ppmbuckets, sizeof(uint64_t));
     av->config = NULL;
 
@@ -516,6 +517,7 @@ static void attack_vector_free(attack_vector_t *av) {
 
     attack_flow_t *f;
     khiter_t i;
+    int rcint;
 
     if (av == NULL) {
         return;
@@ -526,7 +528,7 @@ static void attack_vector_free(attack_vector_t *av) {
     }
 
     if (av->ppm_bucket_list) {
-        libtrace_list_deinit(av->ppm_bucket_list);
+        JLFA(rcint, av->ppm_bucket_list);
     }
 
     if (av->ppm_window.buckets) {
@@ -781,11 +783,11 @@ int corsaro_dos_start_interval(corsaro_plugin_t *p, void *local,
 
 
 static void attack_vector_update_ppm_window(corsaro_dos_config_t *conf,
-        attack_vector_t *av, struct timeval *tv) {
+        attack_vector_t *av, struct timeval *tv, int forcelast) {
 
     ppm_window_t *ppm = &(av->ppm_window);
+    PWord_t pval;
     int buckoff = (tv->tv_sec - ppm->window_start) / conf->ppm_window_slide;
-    expired_ppm_bucket_t exp;
 
     /* Keep this simple for now -- the sliding window truly comes into
      * force later on when we combine our processing thread results.
@@ -799,62 +801,20 @@ static void attack_vector_update_ppm_window(corsaro_dos_config_t *conf,
      */
 
     while (buckoff > 0) {
-        uint64_t topop = ppm->buckets[0];
-
-        exp.ts = ppm->window_start;
-        exp.count = topop;
-
-        libtrace_list_push_back(av->ppm_bucket_list, &exp);
+        JLI(pval, av->ppm_bucket_list, ppm->window_start);
+        *pval = ppm->buckets[0];
 
         buckoff --;
         ppm->window_start += conf->ppm_window_slide;
         ppm->buckets[0] = 0;
     }
 
-    ppm->buckets[0] ++;
-}
-
-static void copy_ppm_buckets(corsaro_dos_config_t *conf,
-        attack_vector_t *origav, attack_vector_t *newav, uint32_t endts,
-        uint32_t lastrot) {
-
-    libtrace_list_node_t *n;
-    expired_ppm_bucket_t *buck, buckcopy;
-    uint32_t lastts = lastrot - conf->ppm_window_slide;
-    int total = 0;
-
-    n = origav->ppm_bucket_list->head;
-
-    while (n) {
-        buck = (expired_ppm_bucket_t *)(n->data);
-        n = n->next;
-
-        buckcopy.ts = buck->ts;
-        buckcopy.count = buck->count;
-        total += buck->count;
-
-        libtrace_list_push_back(newav->ppm_bucket_list, &buckcopy);
-        lastts = buck->ts;
+    if (forcelast && ppm->buckets[0] > 0) {
+        JLI(pval, av->ppm_bucket_list, ppm->window_start);
+        *pval = ppm->buckets[0];
+    } else {
+        ppm->buckets[0] ++;
     }
-
-    /* If this vector hasn't been updated for a while, we're going
-     * to need to pad the list with zeroes for the empty windows
-     * at the end of the interval period.
-     */
-    lastts += conf->ppm_window_slide;
-
-    while (lastts < endts) {
-        buckcopy.ts = lastts;
-        if (lastts == origav->ppm_window.window_start) {
-            buckcopy.count = origav->ppm_window.buckets[0];
-        } else {
-            buckcopy.count = 0;
-        }
-        libtrace_list_push_back(newav->ppm_bucket_list, &buckcopy);
-        lastts += conf->ppm_window_slide;
-    }
-
-
 }
 
 static void copy_32hash(kh_32xx_t *orig, kh_32xx_t *copy) {
@@ -900,6 +860,10 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
     khiter_t i;
     int khret;
     attack_vector_t *origav, *newav;
+    struct timeval endtv;
+
+    endtv.tv_sec = endts;
+    endtv.tv_usec = 0;
 
     newmap = kh_init(av);
 
@@ -936,7 +900,8 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         memcpy(newav->initial_packet, origav->initial_packet,
                 origav->initial_packet_len);
 
-        copy_ppm_buckets(conf, origav, newav, endts, lastrot);
+        attack_vector_update_ppm_window(conf, origav, &endtv, 1);
+        newav->ppm_bucket_list = origav->ppm_bucket_list;
 
         copy_32hash(origav->attack_ip_hash, newav->attack_ip_hash);
         copy_32hash(origav->attack_port_hash, newav->attack_port_hash);
@@ -950,12 +915,16 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         kh_clear(ft, origav->interval_flows);
 
         /* Clear the ppm bucket list */
-        libtrace_list_deinit(origav->ppm_bucket_list);
-        origav->ppm_bucket_list =
-                libtrace_list_init(sizeof(expired_ppm_bucket_t));
+        origav->ppm_bucket_list = NULL;
         origav->packet_timestamps = libtrace_list_init(sizeof(double));
         origav->ppm_window.window_start = endts;
         origav->ppm_window.buckets[0] = 0;
+
+        origav->byte_cnt = 0;
+        origav->packet_cnt = 0;
+        origav->mismatches = 0;
+
+
         kh_put(av, newmap, newav, &khret);
     }
 
@@ -1318,7 +1287,7 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
 
     tssecs = trace_get_seconds(packet);
     libtrace_list_push_back(vector->packet_timestamps, &tssecs);
-    attack_vector_update_ppm_window(conf, vector, &tv);
+    attack_vector_update_ppm_window(conf, vector, &tv, 0);
 
     /* add the attacker ip to the hash */
     kh_put(32xx, vector->attack_ip_hash, thisflow.attacker_ip, &khret);
@@ -1396,6 +1365,7 @@ static int write_attack_vectors(corsaro_logger_t *logger,
     avro_value_t *avro;
     double duration;
     struct timeval tvdiff;
+    uint32_t thismaxppm = 0;
 
     for (i = kh_begin(attack_hash); i != kh_end(attack_hash); ++i) {
         if (!kh_exist(attack_hash, i)) {
@@ -1404,23 +1374,32 @@ static int write_attack_vectors(corsaro_logger_t *logger,
 
         vec = kh_key(attack_hash, i);
 
-        vec->maxppminterval = calculate_maximum_ppm(conf,
-                vec->ppm_bucket_list);
+        if (vec->latest_time.tv_sec < ts) {
+            /* vector was inactive, delete it */
+            kh_del(av, attack_hash, i);
+            attack_vector_free(vec);
+            continue;
+        }
+
+        thismaxppm = calculate_maximum_ppm(conf, &(vec->ppm_bucket_list), ts);
+        if (thismaxppm > vec->maxppminterval) {
+            vec->maxppminterval = thismaxppm;
+        }
         vec->attimestamp = ts;
         vec->config = conf;
 
         if (vec->maxppminterval < conf->attack_min_ppm) {
-            continue;
+            goto resetvec;
         }
 
         if (vec->packet_cnt < conf->attack_min_packets) {
-            continue;
+            goto resetvec;
         }
 
         timersub(&vec->latest_time, &vec->start_time, &tvdiff);
         duration = tvdiff.tv_sec + ((double)(tvdiff.tv_usec) / 1000000);
         if (duration < conf->attack_min_duration) {
-            continue;
+            goto resetvec;
         }
 
         avro = corsaro_populate_avro_item(mstate->mainwriter, vec, dos_to_avro);
@@ -1445,6 +1424,10 @@ static int write_attack_vectors(corsaro_logger_t *logger,
                     vec->target_ip)< 0) {
             return -1;
         }
+
+
+resetvec:
+        vec->thread_cnt = 0;
     }
     return 0;
 }
@@ -1477,6 +1460,11 @@ void *corsaro_dos_init_merging(corsaro_plugin_t *p, int sources) {
         return NULL;
     }
 
+    m->combined = calloc(1, sizeof(struct corsaro_dos_state_t));
+
+    m->combined->attack_hash_tcp = kh_init(av);
+    m->combined->attack_hash_udp = kh_init(av);
+    m->combined->attack_hash_icmp = kh_init(av);
     return m;
 }
 
@@ -1494,6 +1482,16 @@ int corsaro_dos_halt_merging(corsaro_plugin_t *p, void *local) {
     }
     if (m->ftwriter) {
         corsaro_destroy_avro_writer(m->ftwriter);
+    }
+
+    if (m->combined) {
+        kh_free(av, m->combined->attack_hash_tcp, &attack_vector_free);
+        kh_free(av, m->combined->attack_hash_udp, &attack_vector_free);
+        kh_free(av, m->combined->attack_hash_icmp, &attack_vector_free);
+        kh_destroy(av, m->combined->attack_hash_tcp);
+        kh_destroy(av, m->combined->attack_hash_udp);
+        kh_destroy(av, m->combined->attack_hash_icmp);
+        free(m->combined);
     }
 
     free(m);
@@ -1576,37 +1574,19 @@ static int combine_ft_set(kh_ft_t *dest, kh_ft_t *src) {
     return 0;
 }
 
-static int combine_ppm_list(libtrace_list_t *a, libtrace_list_t *b) {
+static int combine_ppm_list(Pvoid_t *a, Pvoid_t *b) {
 
-    libtrace_list_node_t *m, *n;
-    expired_ppm_bucket_t *bucka, *buckb;
+    PWord_t pval, found;
+    Word_t index;
 
-    expired_ppm_bucket_t zero;
-
-    m = a->head;
-    n = b->head;
-
-    while (m != NULL || n != NULL) {
-        if (m) {
-            bucka = (expired_ppm_bucket_t *)(m->data);
-            zero.ts = bucka->ts;
-            zero.count = 0;
-            m = m->next;
-        } else {
-            bucka = &zero;
-        }
-
-        if (n) {
-            buckb = (expired_ppm_bucket_t *)(n->data);
-            zero.ts = buckb->ts;
-            zero.count = 0;
-            n = n->next;
-        } else {
-            buckb = &zero;
-        }
+    index = 0;
+    JLF(pval, *b, index);
+    while (pval) {
+        JLI(found, *a, index);
+        *found += (*pval);
+        JLN(pval, *b, index);
     }
 
-    assert(m == NULL && n == NULL);
     return 0;
 }
 
@@ -1712,16 +1692,32 @@ static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
             free(tmp);
         }
 
-        combine_32_hash(existing->attack_ip_hash, toadd->attack_ip_hash);
-        combine_32_hash(existing->attack_port_hash, toadd->attack_port_hash);
-        combine_32_hash(existing->target_port_hash, toadd->target_port_hash);
+        if (toadd->latest_time.tv_sec > existing->latest_time.tv_sec ||
+                (toadd->latest_time.tv_sec == existing->latest_time.tv_sec &&
+                 toadd->latest_time.tv_usec > existing->latest_time.tv_usec)) {
+            existing->latest_time.tv_sec = toadd->latest_time.tv_sec;
+            existing->latest_time.tv_usec = toadd->latest_time.tv_usec;
+        }
 
-        combine_ft_set(existing->interval_flows, toadd->interval_flows);
+        if (toadd->packet_cnt > 0) {
 
-        combine_ppm_list(existing->ppm_bucket_list, toadd->ppm_bucket_list);
+            combine_32_hash(existing->attack_ip_hash, toadd->attack_ip_hash);
+            combine_32_hash(existing->attack_port_hash, toadd->attack_port_hash);
+            combine_32_hash(existing->target_port_hash, toadd->target_port_hash);
 
-        combine_timestamp_lists(&(existing->packet_timestamps),
-                toadd->packet_timestamps, logger);
+            combine_ft_set(existing->interval_flows, toadd->interval_flows);
+
+            if (existing->ppm_bucket_list == NULL) {
+                existing->ppm_bucket_list = toadd->ppm_bucket_list;
+                toadd->ppm_bucket_list = NULL;
+            } else {
+                combine_ppm_list(&existing->ppm_bucket_list,
+                        &toadd->ppm_bucket_list);
+            }
+
+            combine_timestamp_lists(&(existing->packet_timestamps),
+                    toadd->packet_timestamps, logger);
+        }
 
         kh_del(av, srcmap, i);
         attack_vector_free(toadd);
@@ -1785,7 +1781,6 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
     corsaro_dos_merge_state_t *m;
     corsaro_dos_config_t *config;
     int i;
-    struct corsaro_dos_state_t *combined;
     int ret = 0;
     char *outname;
 
@@ -1795,10 +1790,6 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
     }
 
     config = (corsaro_dos_config_t *)(p->config);
-
-    assert(tomerge[0] != NULL);
-    /* Use tomerge[0] as the "combined" result */
-    combined = (struct corsaro_dos_state_t *)(tomerge[0]);
 
     /* First step, open an output file if we need one */
     if (!corsaro_is_avro_writer_active(m->mainwriter)) {
@@ -1829,8 +1820,8 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
     }
 
 
-    for (i = 1; i < fin->threads_ended; i++) {
-        if (update_combined_result(combined,
+    for (i = 0; i < fin->threads_ended; i++) {
+        if (update_combined_result(m->combined,
                 (struct corsaro_dos_state_t *)(tomerge[i]),
                 p->logger) < 0) {
             corsaro_log(p->logger,
@@ -1841,33 +1832,24 @@ int corsaro_dos_merge_interval_results(corsaro_plugin_t *p, void *local,
 
     /* Dump combined to our avro file */
     if (write_attack_vectors(p->logger, m,
-            combined->attack_hash_tcp, fin->timestamp, config) < 0) {
+            m->combined->attack_hash_tcp, fin->timestamp, config) < 0) {
         ret = -1;
         goto endmerge;
     }
 
     if (write_attack_vectors(p->logger, m,
-            combined->attack_hash_udp, fin->timestamp, config) < 0) {
+            m->combined->attack_hash_udp, fin->timestamp, config) < 0) {
         ret = -1;
         goto endmerge;
     }
 
     if (write_attack_vectors(p->logger, m,
-            combined->attack_hash_icmp, fin->timestamp, config) < 0) {
+            m->combined->attack_hash_icmp, fin->timestamp, config) < 0) {
         ret = -1;
         goto endmerge;
     }
 
 endmerge:
-    /* Free the attack vector maps associated with 'combined' */
-    kh_free(av, combined->attack_hash_tcp, &attack_vector_free);
-    kh_free(av, combined->attack_hash_udp, &attack_vector_free);
-    kh_free(av, combined->attack_hash_icmp, &attack_vector_free);
-    kh_destroy(av, combined->attack_hash_tcp);
-    kh_destroy(av, combined->attack_hash_udp);
-    kh_destroy(av, combined->attack_hash_icmp);
-    free(combined);
-
     return ret;
 }
 
