@@ -58,6 +58,7 @@
 #include <yaml.h>
 #include <libtrace/linked_list.h>
 #include <Judy.h>
+#include <libipmeta.h>
 
 #include "khash.h"
 #include "ksort.h"
@@ -239,10 +240,15 @@ typedef struct attack_vector {
 
     /** List containing all expired PPM buckets */
     Pvoid_t ppm_bucket_list;
-    //libtrace_list_t *ppm_bucket_list;
 
     /** List of timestamps for all packets associated with this attack */
     libtrace_list_t *packet_timestamps;
+
+    /** Geo-located continent for the target IP, according to maxmind */
+    uint16_t maxmind_continent;
+
+    /** Geo-located country for the target IP, according to maxmind */
+    uint16_t maxmind_country;
 
     uint32_t attimestamp;
 
@@ -318,6 +324,8 @@ static const char DOS_RESULT_SCHEMA[] =
         {\"name\":\"latest_time_usec\", \"type\": \"int\"}, \
         {\"name\":\"first_attack_port\", \"type\": \"int\"}, \
         {\"name\":\"first_target_port\", \"type\": \"int\"}, \
+        {\"name\":\"maxmind_continent\", \"type\": \"string\"}, \
+        {\"name\":\"maxmind_country\", \"type\": \"string\"}, \
         {\"name\":\"initial_packet\", \"type\": \"bytes\"} \
         ]}";
 
@@ -381,6 +389,7 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
 
     attack_vector_t *vec = (attack_vector_t *)vector;
     avro_value_t field;
+    char valspace[3];
 
     assert(vec->protocol);
 
@@ -419,10 +428,34 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
     CORSARO_AVRO_SET_FIELD(int, av, field, 16, "first_target_port", "dos",
             vec->first_target_port);
 
+    if (vec->maxmind_continent == 0) {
+        CORSARO_AVRO_SET_FIELD(string, av, field, 17, "maxmind_continent",
+                "dos", "??");
+    } else {
+        valspace[0] = (char)(vec->maxmind_continent & 0xff);
+        valspace[1] = (char)((vec->maxmind_continent >> 8) & 0xff);
+        valspace[2] = '\0';
+
+        CORSARO_AVRO_SET_FIELD(string, av, field, 17, "maxmind_continent",
+                "dos", valspace);
+    }
+
+    if (vec->maxmind_country == 0) {
+        CORSARO_AVRO_SET_FIELD(string, av, field, 18, "maxmind_country",
+                "dos", "??");
+    } else {
+        valspace[0] = (char)(vec->maxmind_country & 0xff);
+        valspace[1] = (char)((vec->maxmind_country >> 8) & 0xff);
+        valspace[2] = '\0';
+
+        CORSARO_AVRO_SET_FIELD(string, av, field, 18, "maxmind_country",
+                "dos", valspace);
+    }
+
     /* Write the saved bytes from the initial packet. */
-    if (avro_value_get_by_index(av, 17, &field, NULL)) {
+    if (avro_value_get_by_index(av, 19, &field, NULL)) {
         corsaro_log(logger,
-                "unable to find 'initial_packet' (id 17) in dos schema: %s",
+                "unable to find 'initial_packet' (id 19) in dos schema: %s",
                 avro_strerror());
         return -1;
     }
@@ -430,7 +463,7 @@ static int dos_to_avro(corsaro_logger_t *logger, avro_value_t *av,
     if (avro_value_set_bytes(&field, vec->initial_packet,
             vec->initial_packet_len)) {
         corsaro_log(logger,
-                "unable to set 'initial_packet' (id 17) in dos schema: %s",
+                "unable to set 'initial_packet' (id 19) in dos schema: %s",
                 avro_strerror());
         return -1;
     }
@@ -838,6 +871,8 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         newav->packet_timestamps = origav->packet_timestamps;
         newav->first_attack_port = origav->first_attack_port;
         newav->first_target_port = origav->first_target_port;
+        newav->maxmind_continent = origav->maxmind_continent;
+        newav->maxmind_country = origav->maxmind_country;
 
         newav->initial_packet = (uint8_t *)malloc(origav->initial_packet_len);
         memcpy(newav->initial_packet, origav->initial_packet,
@@ -994,7 +1029,8 @@ boringicmp:
 static attack_vector_t *match_packet_to_vector(
         corsaro_logger_t *logger, libtrace_packet_t *packet,
         struct corsaro_dos_state_t *state, uint8_t srcproto,
-        attack_vector_t *findme, struct timeval *tv) {
+        attack_vector_t *findme, struct timeval *tv,
+        corsaro_packet_tags_t *tags) {
 
     int khret, rem;
     khiter_t khiter;
@@ -1061,6 +1097,18 @@ static attack_vector_t *match_packet_to_vector(
     /* Will get populated on return */
     vector->attacker_ip = 0;
     vector->responder_ip = 0;
+
+    vector->maxmind_continent = 0;
+    vector->maxmind_country = 0;
+
+    if (tags) {
+        uint64_t providers = ntohl(tags->providers_used);
+
+        if (providers & (1 << IPMETA_PROVIDER_MAXMIND)) {
+            vector->maxmind_continent = tags->maxmind_continent;
+            vector->maxmind_country = tags->maxmind_country;
+        }
+    }
 
     khiter = kh_put(av, attack_hash, vector, &khret);
     assert(khret != 0);
@@ -1145,7 +1193,7 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
     tv = trace_get_timeval(packet);
     state->lastpktts = tv.tv_sec;
     vector = match_packet_to_vector(p->logger, packet, state, srcproto,
-            &findme, &tv);
+            &findme, &tv, tags);
 
     if (!vector) {
         return 0;
