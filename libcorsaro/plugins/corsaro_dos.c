@@ -1167,7 +1167,7 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
 
     if (proto == TRACE_IPPROTO_ICMP) {
         /* Check for mismatches */
-        if (inner_icmp_src != ip_hdr->ip_dst.s_addr) {
+        if (inner_icmp_src != 0 && inner_icmp_src != ip_hdr->ip_dst.s_addr) {
             vector->mismatches ++;
         }
     }
