@@ -243,6 +243,8 @@ typedef struct attack_vector {
 
     /** List of timestamps for all packets associated with this attack */
     libtrace_list_t *packet_timestamps;
+    /* XXX right now, packet_timestamps are unused and expensive to keep
+     * track off so I've removed the code for this */
 
     /** Geo-located continent for the target IP, according to maxmind */
     uint16_t maxmind_continent;
@@ -1225,7 +1227,7 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
     vector->latest_time = tv;
 
     tssecs = trace_get_seconds(packet);
-    libtrace_list_push_back(vector->packet_timestamps, &tssecs);
+    //libtrace_list_push_back(vector->packet_timestamps, &tssecs);
     attack_vector_update_ppm_window(conf, vector, &tv, 0);
 
     /* add the attacker ip to the hash */
@@ -1577,8 +1579,11 @@ static int combine_attack_vectors(kh_av_t *destmap, kh_av_t *srcmap,
                         &toadd->ppm_bucket_list);
             }
 
+            /* expensive and results are not actually used (!) */
+            /*
             combine_timestamp_lists(&(existing->packet_timestamps),
                     toadd->packet_timestamps, logger);
+            */
         }
 
         kh_del(av, srcmap, i);
