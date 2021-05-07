@@ -808,26 +808,6 @@ static void copy_32hash(kh_32xx_t *orig, kh_32xx_t *copy) {
     }
 }
 
-static void copy_flowtuples(kh_ft_t *orig, kh_ft_t *copy) {
-
-    khiter_t i;
-    int khret;
-    attack_flow_t *flow;
-
-    for (i = kh_begin(orig); i != kh_end(orig); ++i) {
-        if (!kh_exist(orig, i)) {
-            continue;
-        }
-
-        /* We aren't going to need flow anymore in the processing path,
-         * so just assign it to the copy table and clear orig when we're
-         * done.
-         */
-        flow = kh_key(orig, i);
-        kh_put(ft, copy, flow, &khret);
-    }
-}
-
 static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         corsaro_logger_t *logger,
         kh_av_t *origmap, uint32_t lastrot, uint32_t endts) {
@@ -897,6 +877,9 @@ static kh_av_t *copy_attack_hash_table(corsaro_dos_config_t *conf,
         origav->packet_cnt = 0;
         origav->mismatches = 0;
 
+        kh_clear(32xx, origav->attack_ip_hash);
+        kh_clear(32xx, origav->attack_port_hash);
+        kh_clear(32xx, origav->target_port_hash);
 
         kh_put(av, newmap, newav, &khret);
     }
@@ -1148,7 +1131,7 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
     }
 
     /* Only care about backscatter traffic in this plugin */
-    if (!corsaro_is_backscatter_packet(packet)) {
+    if (!corsaro_is_backscatter_packet(packet, tags)) {
         return 0;
     }
 
