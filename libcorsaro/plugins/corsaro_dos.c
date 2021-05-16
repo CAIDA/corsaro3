@@ -313,7 +313,7 @@ static const char DOS_RESULT_SCHEMA[] =
         {\"name\":\"initial_packet_len\", \"type\": \"int\"}, \
         {\"name\":\"target_ip\", \"type\": \"long\"}, \
         {\"name\":\"target_protocol\", \"type\": \"int\"}, \
-        {\"name\":\"attacker_ip_cnt\", \"type\": \"long\"}, \
+        {\"name\":\"attacker_slash16_cnt\", \"type\": \"long\"}, \
         {\"name\":\"attack_port_cnt\", \"type\": \"long\"}, \
         {\"name\":\"target_port_cnt\", \"type\": \"long\"}, \
         {\"name\":\"packet_cnt\", \"type\": \"long\"}, \
@@ -1210,11 +1210,14 @@ int corsaro_dos_process_packet(corsaro_plugin_t *p, void *local,
     vector->latest_time = tv;
 
     tssecs = trace_get_seconds(packet);
-    //libtrace_list_push_back(vector->packet_timestamps, &tssecs);
     attack_vector_update_ppm_window(conf, vector, &tv, 0);
 
     /* add the attacker ip to the hash */
-    kh_put(32xx, vector->attack_ip_hash, thisflow.attacker_ip, &khret);
+    /* The range of attacker IPs is now counted as unique /16s to limit the
+     * memory requirements when storing vectors for massive DDOS
+     * attacks that try to spoof the entire telescope address space */
+    kh_put(32xx, vector->attack_ip_hash, thisflow.attacker_ip & 0xffff0000,
+            &khret);
 
     /* add the ports to the hashes */
     kh_put(32xx, vector->attack_port_hash, attacker_port, &khret);
