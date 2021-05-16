@@ -488,13 +488,19 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
 
 }
 
-int corsaro_is_backscatter_packet(libtrace_packet_t *packet) {
+int corsaro_is_backscatter_packet(libtrace_packet_t *packet,
+        corsaro_packet_tags_t *tags) {
     void *temp = NULL;
     uint8_t proto;
     uint32_t remaining;
 
     libtrace_tcp_t *tcp_hdr = NULL;
     libtrace_icmp_t *icmp_hdr = NULL;
+
+    /* don't have a way to recognise UDP backscatter right now */
+    if (tags && tags->protocol == TRACE_IPPROTO_UDP) {
+        return 0;
+    }
 
     /* get the transport header */
     if ((temp = trace_get_transport(packet, &proto, &remaining)) == NULL) {

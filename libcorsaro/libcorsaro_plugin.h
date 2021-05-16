@@ -229,7 +229,8 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
         corsaro_plugin_set_t *pset, corsaro_fin_interval_t *fin,
         void *tagsock);
 
-int corsaro_is_backscatter_packet(libtrace_packet_t *packet);
+int corsaro_is_backscatter_packet(libtrace_packet_t *packet,
+        corsaro_packet_tags_t *tags);
 
 #define CORSARO_INIT_PLUGIN_PROC_OPTS(opts) \
   opts.template = NULL; \
