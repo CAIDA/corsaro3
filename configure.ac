@@ -117,6 +117,9 @@ LIBS="$PTHREAD_LIBS $LIBS"
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
 
+AC_ARG_ENABLE([tagger], AS_HELP_STRING([--disable-tagger],
+        [Disable building the corsarotagger application]))
+
 # Checks for libraries.
 AC_CHECK_LIB([trace], [libtrace_message_queue_put], ,[AC_MSG_ERROR(
 		      [libtrace >= 4.0.6 required])])
@@ -131,7 +134,10 @@ AC_SEARCH_LIBS([ipmeta_lookup_addr], [ipmeta], , [AC_MSG_ERROR([libipmeta 3.0.0 
 AC_SEARCH_LIBS([zmq_socket], [zmq], , [AC_MSG_ERROR([libzmq required])])
 AC_SEARCH_LIBS([rd_kafka_new], [rdkafka], ,[AC_MSG_ERROR([librdkafka required])])
 
-AC_SEARCH_LIBS([ndag_close_multicaster_socket], [ndagserver], ,[AC_MSG_ERROR([libndagserver required])])
+if test "x$enable_tagger" != "xno"; then
+    AC_SEARCH_LIBS([ndag_close_multicaster_socket], [ndagserver], ,[AC_MSG_ERROR([libndagserver required])])
+fi
+
 AC_SEARCH_LIBS([aio_return], [rt], ,[AC_MSG_ERROR([librt required])])
 AC_SEARCH_LIBS([lrint], [m], ,[AC_MSG_ERROR([libm required])])
 
@@ -220,6 +226,8 @@ AC_SUBST([CORSARO_LIBTOOL_AGE])
 AC_SUBST([TCMALLOC_FLAGS])
 
 AC_HEADER_ASSERT
+
+AM_CONDITIONAL([BUILD_TAGGER], [test "x$enable_tagger" != "xno"])
 
 AC_CONFIG_FILES([Makefile
                         libcorsaro/Makefile
