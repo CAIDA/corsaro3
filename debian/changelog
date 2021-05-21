@@ -1,3 +1,15 @@
+corsaro (3.4.0) unstable; urgency=medium
+
+  * Fixed various bugs in the DOS attack vector detection code so it
+    is more in line with previous DOS detection code.
+  * DOS plugin now outputs much less data to conserve storage space.
+  * Added Maxmind geo-tags to DOS attack vectors.
+  * DOS: attacker IP counts are now limited to unique /16s rather than
+    counting individual IP addresses.
+  * Package should no longer conflict with libtrace>=4.0.16.
+
+ -- Shane Alcock <software@caida.org>  Fri, 21 May 2021 14:01:15 +1200
+
 corsaro (3.3.0-1) unstable; urgency=medium
 
   * Fix packaging bug due to missing per-plugin headers.
