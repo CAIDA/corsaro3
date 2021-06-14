@@ -366,7 +366,7 @@ int configure_libts_kafka_backend(corsaro_logger_t *logger,
             back->compresscodec = strdup("snappy");
         }
         if (back->format == NULL) {
-            back->format = strdup("tsk");
+            back->format = strdup("tskkey");
         }
         if (back->topicprefix == NULL) {
             back->topicprefix = strdup("");

@@ -5,8 +5,8 @@ Maintainer: CAIDA Software Maintainer <software@caida.org>
 Build-Depends: debhelper (>= 10), autotools-dev, libc6-dev,
  libpcap-dev, libyaml-dev, libjudy-dev, uthash-dev, libzmq3-dev, libavro-dev,
  libipmeta2-dev (>=3.0.0), libavro-dev, libtrace4-dev (>=4.0.12),
- libtimeseries0-dev, libwandio1-dev (>=4.2.0), librdkafka-dev (>=0.11.3),
- libndagserver-dev, libgoogle-perftools-dev
+ libtimeseries0-dev (>=1.0.3), libwandio1-dev (>=4.2.0),
+ librdkafka-dev (>=0.11.3), libndagserver-dev, libgoogle-perftools-dev
 Standards-Version: 4.1.2
 Homepage: https://github.com/CAIDA/corsaro
 
