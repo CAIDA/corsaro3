@@ -22,13 +22,13 @@
 # along with corsaro.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-AC_INIT([corsaro], [3.4.0], [corsaro-info@caida.org])
+AC_INIT([corsaro], [3.4.1], [corsaro-info@caida.org])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 
 # update before each release according to the rules defined at
 # https://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
 CORSARO_LIBTOOL_CURRENT=4
-CORSARO_LIBTOOL_REVISION=1
+CORSARO_LIBTOOL_REVISION=2
 CORSARO_LIBTOOL_AGE=0
 
 AC_DEFINE_UNQUOTED([CORSARO_LIBTOOL_CURRENT],$CORSARO_LIBTOOL_CURRENT,

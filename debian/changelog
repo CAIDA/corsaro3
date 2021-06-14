@@ -1,3 +1,11 @@
+corsaro (3.4.1) unstable; urgency=medium
+
+  * Report: time series which are written to kafka are now
+    partitioned based on the series key (by default), rather than
+    by timestamp.
+
+ -- Shane Alcock <software@caida.org>  Tue, 15 Jun 2021 10:24:41 +1200
+
 corsaro (3.4.0) unstable; urgency=medium
 
   * Fixed various bugs in the DOS attack vector detection code so it
