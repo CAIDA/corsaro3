@@ -23,7 +23,7 @@ Requirements
  * librdkafka
 
 Debian / Ubuntu users can also find packages for libtrace and libwandio at
-http://bintray.com/wand.
+http://cloudsmith.io/~wand/repos/.
 
 Libyaml, libzmq, libavro, libJudy and tcmalloc should be available through
 your standard OS package repository -- make sure you install the development
