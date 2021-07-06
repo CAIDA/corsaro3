@@ -99,8 +99,6 @@ RUN rm /usr/local/bin/corsaro
 
 RUN mkdir /rsdosconv/output && mkdir /rsdosconv/tmp/
 
-COPY stardust-user-basic-finish.sh /usr/local/sbin/
-
 COPY rsdos2csv.py /usr/local/sbin/
 COPY entrypoint.sh /entrypoint.sh
 COPY convert_ucsd_month.sh /rsdosconv/
