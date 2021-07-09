@@ -6,6 +6,10 @@ This container should be used to convert RSDoS v2 files from their native
 corsaro format into a simple ASCII CSV format that does not require
 the corsaro2 libraries to read and process.
 
+NOTE: the `initial_packet` field from the corsaro format is NOT included
+in the resulting ASCII CSV -- if required, users will need to look this up
+either in the corsaro2 file or in the saved pcap from the same time period.
+
 ## Build Instructions
 
 To build the Docker image for this container, simply run:
@@ -47,3 +51,25 @@ normally have to set to read from the Swift object store, e.g.
 When running the container, use the `-v` option to mount that file at the
 location `/rsdosconv/swiftcreds` -- note that when mounting, you must
 specify the absolute path to your file on the host.
+
+## CSV Format
+Each line represents a single observed attack. Each line contains the
+following fields, in order:
+
+ * Target IP
+ * Total Attacker IPs
+ * Attacker IPs seen in this interval
+ * Attacker Ports
+ * Target Ports
+ * Total Packets
+ * Packets seen in this interval
+ * Total Bytes
+ * Bytes seen in this interval
+ * Maximum Packets per Minute rate
+ * Attack Start Timestamp (seconds)
+ * Attack Start Timestamp (microseconds)
+ * Attack Latest Timestamp (seconds)
+ * Attack Latest Timestamp (microseconds)
+ * Interval Number
+ * Interval Timestamp
+
