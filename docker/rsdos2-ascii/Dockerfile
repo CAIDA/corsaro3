@@ -53,9 +53,11 @@ RUN apt-get -y update && apt-get -y install \
         autoconf \
         automake \
         autotools-dev \
+        bison \
         build-essential \
         default-jdk \
         emacs \
+        flex \
         gdb \
         git \
         grep \
@@ -65,11 +67,9 @@ RUN apt-get -y update && apt-get -y install \
         libgoogle-perftools-dev \
         libjansson-dev \
         libjudy-dev \
+        libpcap-dev \
         librdkafka-dev \
         libtool \
-        libtrace4-tools \
-        libtrace4-dev \
-        libpacketdump4-dev \
         libwandio1-dev \
         libyaml-dev \
         libzmq3-dev \
@@ -87,6 +87,9 @@ RUN apt-get -y update && apt-get -y install \
         valgrind \
         vim \
         wandio1-tools
+
+RUN git clone https://github.com/LibtraceTeam/libtrace && cd libtrace && git checkout develop
+RUN cd libtrace && ./bootstrap.sh && ./configure && make && make install && ldconfig
 
 RUN git clone https://github.com/CAIDA/corsaro3 && cd corsaro3 && git checkout v2 && git submodule init && git submodule update
 RUN cd corsaro3 && autoreconf -vfi && ./configure --with-slash-eight=0 --with-dos --enable-debug && make && make install && ldconfig
