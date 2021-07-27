@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in `swift list data-telescope-meta-dos -p datasource=ucsd-nt/year=$1/month=$2`; do
+for i in `swift list data-telescope-meta-dos -p datasource=ucsd-nt/year=$1/month=$2/`; do
         outf=${i#*/*/*/};
         nextdir=${outf%/*};
         outname=${outf%.*.*};
