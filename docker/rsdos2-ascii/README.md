@@ -66,10 +66,8 @@ following fields, in order:
  * Total Bytes
  * Bytes seen in this interval
  * Maximum Packets per Minute rate
- * Attack Start Timestamp (seconds)
- * Attack Start Timestamp (microseconds)
- * Attack Latest Timestamp (seconds)
- * Attack Latest Timestamp (microseconds)
+ * Attack Start Timestamp (Unix timestamp, floating point)
+ * Attack Latest Timestamp (Unix timestamp, floating point)
  * Interval Number
  * Interval Timestamp
 
