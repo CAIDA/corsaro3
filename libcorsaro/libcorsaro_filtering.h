@@ -186,7 +186,7 @@ typedef enum {
 
     /*Matches on high scanning traffic characterized by ttl < 64, tcp syn packets
     , destination port 1433, window size 8192*/
-    CORSARO_FILTERID_TCP_PORT_1433_SCAN_FILTER,
+    CORSARO_FILTERID_TCP_PORT_1433_SCAN,
 
     /** Matches UDP packets where the payload appears to be a DNS response */
     CORSARO_FILTERID_DNS_RESP_NONSTANDARD,
