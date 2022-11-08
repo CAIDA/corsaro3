@@ -389,7 +389,7 @@ static inline int _apply_tcp_port_1433_scan_filter(corsaro_logger_t *logger,
         return 0;
     }
 
-    if (fparams->tcp->window != 32) {
+    if (ntohs(fparams->tcp->window) != 8192) {
         return 0;
     }
 
