@@ -240,8 +240,8 @@ static inline const char * get_filter_stringname(int fbit) {
             return "non-erratic.tcp-port-80";
         case CORSARO_FILTERID_TCP_PORT_5000:
             return "non-erratic.tcp-port-5000";
-        case CORSARO_FILTERID_TCP_PORT_1433_SCAN:
-            return "non-erratic.tcp-port-1433-scan";
+        case CORSARO_FILTERID_ASN_208843_SCAN:
+            return "non-erratic.asn-208843-scan";
         case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
             return "non-erratic.dns-resp-non-standard-v2";
         case CORSARO_FILTERID_NETBIOS_QUERY_NAME:

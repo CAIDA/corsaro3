@@ -368,10 +368,16 @@ static inline int _apply_port_tcp5000_filter(corsaro_logger_t *logger,
     return 0;
 }
 
-static inline int _apply_tcp_port_1433_scan_filter(corsaro_logger_t *logger,
+static inline int _apply_asn_208843_scan_filter(corsaro_logger_t *logger,
         filter_params_t *fparams) {
-    if (!fparams->ip)
+
+    int32_t srcip;
+
+    if (!fparams->ip) {
         return 0;
+    }
+    
+    srcip = ntohl(fparams->ip->ip_src.s_addr);
 
     if (fparams->tcp == NULL) {
         return 0;
@@ -385,7 +391,7 @@ static inline int _apply_tcp_port_1433_scan_filter(corsaro_logger_t *logger,
         return 0;
     }
 
-    if (fparams->dest_port != 1433) {
+    if ((srcip & 0xffffff00) != 0x2d534000) {
         return 0;
     }
 
@@ -930,7 +936,7 @@ static int _apply_erratic_filter(corsaro_logger_t *logger,
         return 1;
     }
 
-    if (_apply_tcp_port_1433_scan_filter(logger, fparams) > 0) {
+    if (_apply_asn_208843_scan_filter(logger, fparams) > 0) {
         return 1;
     }
 
@@ -1156,11 +1162,11 @@ int corsaro_apply_port_tcp5000_filter(corsaro_logger_t *logger,
     return _apply_port_tcp5000_filter(logger, &fparams);
 }
 
-int corsaro_apply_tcp_port_1433_scan_filter(corsaro_logger_t *logger,
+int corsaro_apply_asn_208843_scan_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet) {
 
     PREPROCESS_PACKET
-    return _apply_tcp_port_1433_scan_filter(logger, &fparams);
+    return _apply_asn_208843_scan_filter(logger, &fparams);
 }
 
 int corsaro_apply_dns_resp_oddport_filter(corsaro_logger_t *logger,
@@ -1237,8 +1243,8 @@ const char *corsaro_get_builtin_filter_name(corsaro_logger_t *logger,
             return "tcp-port-80";
         case CORSARO_FILTERID_TCP_PORT_5000:
             return "tcp-port-5000";
-        case CORSARO_FILTERID_TCP_PORT_1433_SCAN:
-            return "tcp-port-1433-scan";
+        case CORSARO_FILTERID_ASN_208843_SCAN:
+            return "asn-208843-scan";
         case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
             return "dns-resp-non-standard";
         case CORSARO_FILTERID_NETBIOS_QUERY_NAME:
@@ -1390,8 +1396,8 @@ int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
             _apply_port_tcp80_filter(logger, &fparams);
     torun[CORSARO_FILTERID_TCP_PORT_5000].result =
             _apply_port_tcp5000_filter(logger, &fparams);
-    torun[CORSARO_FILTERID_TCP_PORT_1433_SCAN].result = 
-            _apply_tcp_port_1433_scan_filter(logger, &fparams);
+    torun[CORSARO_FILTERID_ASN_208843_SCAN].result = 
+            _apply_asn_208843_scan_filter(logger, &fparams);
     torun[CORSARO_FILTERID_DNS_RESP_NONSTANDARD].result =
             _apply_dns_resp_oddport_filter(logger, &fparams);
     torun[CORSARO_FILTERID_NETBIOS_QUERY_NAME].result =
@@ -1408,7 +1414,7 @@ int corsaro_apply_all_filters(corsaro_logger_t *logger, libtrace_ip_t *ip,
             torun[CORSARO_FILTERID_TCP_PORT_23].result == 1 ||
             torun[CORSARO_FILTERID_TCP_PORT_80].result == 1 ||
             torun[CORSARO_FILTERID_TCP_PORT_5000].result == 1 ||
-            torun[CORSARO_FILTERID_TCP_PORT_1433_SCAN].result == 1 ||
+            torun[CORSARO_FILTERID_ASN_208843_SCAN].result == 1 ||
             torun[CORSARO_FILTERID_TTL_200].result == 1 ||
             torun[CORSARO_FILTERID_DNS_RESP_NONSTANDARD].result == 1 ||
             torun[CORSARO_FILTERID_NETBIOS_QUERY_NAME].result == 1)) {
@@ -1525,8 +1531,8 @@ int corsaro_apply_multiple_filters(corsaro_logger_t *logger,
             case CORSARO_FILTERID_TCP_PORT_5000:
                 torun[i].result =_apply_port_tcp5000_filter(logger, &fparams);
                 break;
-            case CORSARO_FILTERID_TCP_PORT_1433_SCAN:
-                torun[i].result =_apply_tcp_port_1433_scan_filter(logger, &fparams);
+            case CORSARO_FILTERID_ASN_208843_SCAN:
+                torun[i].result =_apply_asn_208843_scan_filter(logger, &fparams);
                 break;
             case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
                 torun[i].result =_apply_dns_resp_oddport_filter(logger, &fparams);
@@ -1605,8 +1611,8 @@ int corsaro_apply_filter_by_id(corsaro_logger_t *logger,
             return _apply_port_tcp80_filter(logger, &fparams);
         case CORSARO_FILTERID_TCP_PORT_5000:
             return _apply_port_tcp5000_filter(logger, &fparams);
-        case CORSARO_FILTERID_TCP_PORT_1433_SCAN:
-            return _apply_tcp_port_1433_scan_filter(logger, &fparams);
+        case CORSARO_FILTERID_ASN_208843_SCAN:
+            return _apply_asn_208843_scan_filter(logger, &fparams);
         case CORSARO_FILTERID_DNS_RESP_NONSTANDARD:
             return _apply_dns_resp_oddport_filter(logger, &fparams);
         case CORSARO_FILTERID_NETBIOS_QUERY_NAME:

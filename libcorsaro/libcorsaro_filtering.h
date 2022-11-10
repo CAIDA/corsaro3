@@ -186,7 +186,7 @@ typedef enum {
 
     /*Matches on high scanning traffic characterized by ttl < 64, tcp syn packets
     , destination port 1433, window size 8192*/
-    CORSARO_FILTERID_TCP_PORT_1433_SCAN,
+    CORSARO_FILTERID_ASN_208843_SCAN,
 
     /** Matches UDP packets where the payload appears to be a DNS response */
     CORSARO_FILTERID_DNS_RESP_NONSTANDARD,
@@ -299,7 +299,7 @@ int corsaro_apply_port_tcp80_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_port_tcp5000_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
-int corsaro_apply_tcp_port_1433_scan_filter(corsaro_logger_t *logger,
+int corsaro_apply_asn_208843_scan_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_dns_resp_oddport_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
