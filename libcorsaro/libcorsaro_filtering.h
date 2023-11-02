@@ -184,6 +184,11 @@ typedef enum {
      */
     CORSARO_FILTERID_TCP_PORT_5000,
 
+    /** Matches TCP packets where the destination port is 37215 and iplen is 40
+     *  (i.e. CVE-2017-17215)
+     */
+    CORSARO_FILTERID_TCP_PORT_37215,
+
     /*Matches on high scanning traffic characterized by ttl < 64, tcp syn packets
     , destination port 1433, window size 8192*/
     CORSARO_FILTERID_ASN_208843_SCAN,
@@ -298,6 +303,8 @@ int corsaro_apply_port_tcp23_filter(corsaro_logger_t *logger,
 int corsaro_apply_port_tcp80_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_port_tcp5000_filter(corsaro_logger_t *logger,
+        libtrace_packet_t *packet);
+nt corsaro_apply_port_tcp37215_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
 int corsaro_apply_asn_208843_scan_filter(corsaro_logger_t *logger,
         libtrace_packet_t *packet);
