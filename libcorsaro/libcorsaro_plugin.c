@@ -459,7 +459,7 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
         }
 
         if ((r = p->merge_interval_results(p, pset->plugin_state[index],
-                plugin_state_ptrs, fin, tagsock)) == -1) {
+                plugin_state_ptrs, fin, tagsock)) < 0) {
 
             if (r == CORSARO_MERGE_CONTROL_FAILURE) {
                 sockreload = 1;
@@ -467,10 +467,18 @@ int corsaro_merge_plugin_outputs(corsaro_logger_t *logger,
                     corsaro_log(logger, "flagged tagger control socket as needing a reconnect");
                     tagsock = NULL;
                 }
+            } else if (r == CORSARO_MERGE_WRITE_FAILED) {
+                corsaro_log(logger,
+                        "plugin %s failed to write merge output for interval %u",
+                        p->name, fin->interval_id);
+            } else if (r == CORSARO_MERGE_BAD_ARGUMENTS) {
+                corsaro_log(logger,
+                        "plugin %s received bad arguments during merge for interval %u",
+                        p->name, fin->interval_id);
             } else {
                 corsaro_log(logger,
-                        "unable to merge interval results for plugin %s",
-                        p->name);
+                        "plugin %s returned unknown error %d during merge for interval %u",
+                        p->name, r, fin->interval_id);
             }
         }
 
