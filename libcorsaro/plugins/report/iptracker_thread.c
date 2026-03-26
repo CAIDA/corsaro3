@@ -58,7 +58,7 @@
  *  scope, as well as a corsaro_report_iptracker_t * instance called 'track'.
  */
 #define ZEROMQ_CHECK_MORE \
-    moresize = sizeof(moresize); \
+    moresize = sizeof(more); \
     if (zmq_getsockopt(track->incoming, ZMQ_RCVMORE, &more, &moresize) < 0) { \
         corsaro_log(track->logger, "error checking if there are more parts to a received ip tracker message: %s", strerror(errno)); \
         goto trackerover; \
@@ -513,6 +513,13 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
     if (track->haltphase == 1) {
         track->haltphase = 2;
     }
+
+    /* Reset IP and metric tally hash maps -- don't forget we may
+     * already have some valid info in the "next" interval maps.
+     */
+    track->curr_maps = track->next_maps;
+    track->next_maps = create_new_map_set();
+
     pthread_mutex_unlock(&(track->mutex));
 
     for (i = 0; i < track->sourcethreads; i++) {
@@ -524,11 +531,6 @@ static void process_interval_reset_message(corsaro_report_iptracker_t *track,
         corsaro_log(track->logger, "IP tracker thread missed %lu messages from incoming queue", totallost);
     }
 
-    /* Reset IP and metric tally hash maps -- don't forget we may
-     * already have some valid info in the "next" interval maps.
-     */
-    track->curr_maps = track->next_maps;
-    track->next_maps = create_new_map_set();
 trackerover:
 	return;
 }

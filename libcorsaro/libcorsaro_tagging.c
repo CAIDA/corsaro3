@@ -914,13 +914,17 @@ void corsaro_free_tagging_provider_config(pfx2asn_opts_t *pfxopts,
         free(netacqopts->region_file);
     }
 
+    if (netacqopts->polygon_map_file) {
+        free(netacqopts->polygon_map_file);
+    }
+
     if (netacqopts->polygon_table_files) {
         libtrace_list_node_t *n;
         char *str;
 
         n = netacqopts->polygon_table_files->head;
         while (n) {
-            str = (char *)(n->data);
+            str = *((char **)(n->data));
             free(str);
             n = n->next;
         }

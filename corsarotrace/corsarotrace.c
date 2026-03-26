@@ -524,6 +524,8 @@ static void halt_corsarotrace_worker(libtrace_t *trace, libtrace_thread_t *t,
     }
 
     zmq_close(tls->zmq_pushsock);
+    corsaro_free_tagged_loss_tracker(tls->tracker);
+    free(tls);
 }
 
 static inline void *reconnect_taggersock(corsaro_trace_global_t *glob,
@@ -950,13 +952,25 @@ int main(int argc, char *argv[]) {
         zmq_close(merger.zmq_pullsock);
     }
 
-    if (fauxcontrol && control_sock) {
-        ctrlreq.request_type = TAGGER_REQUEST_HALT_FAUX;
-        ctrlreq.data.last_version = 0;
-
-        if (zmq_send(control_sock, &ctrlreq, sizeof(ctrlreq), 0) < 0) {
-            corsaro_log(glob->logger, "unable to send halt to corsarotagger via control socket: %s", strerror(errno));
-            goto endcorsarotrace;
+    if (fauxcontrol) {
+        void *haltsock = zmq_socket(glob->zmq_ctxt, ZMQ_REQ);
+        if (haltsock && zmq_connect(haltsock, glob->control_uri) == 0) {
+            int linger = 0;
+            ctrlreq.request_type = TAGGER_REQUEST_HALT_FAUX;
+            ctrlreq.data.last_version = 0;
+            zmq_send(haltsock, &ctrlreq, sizeof(ctrlreq), 0);
+            /* Set linger=0 so close does not block waiting for the
+             * REQ/REP handshake to complete -- we don't need the reply.
+             */
+            zmq_setsockopt(haltsock, ZMQ_LINGER, &linger, sizeof(linger));
+            zmq_close(haltsock);
+        } else {
+            corsaro_log(glob->logger,
+                    "unable to connect halt socket to faux control: %s",
+                    strerror(errno));
+            if (haltsock) {
+                zmq_close(haltsock);
+            }
         }
         corsaro_log(glob->logger, "waiting for faux control thread to join");
         pthread_join(fauxcontrol, NULL);
